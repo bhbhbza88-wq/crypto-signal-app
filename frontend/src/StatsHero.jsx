@@ -7,280 +7,265 @@ const PERIODS = [
   { key: 'all_time', label: 'Всё время' },
 ]
 
-// Иконки монет (emoji-fallback, работает везде)
-const COIN_ICONS = {
-  BTC: '₿', ETH: 'Ξ', BNB: 'B', SOL: '◎', XRP: '✕',
-}
-
-function useTicker() {
-  const [ticker, setTicker] = useState(null)
+function useMarketData() {
+  const [data, setData] = useState(null)
   const [fearGreed, setFearGreed] = useState(null)
 
   useEffect(() => {
-    async function fetchTicker() {
+    async function fetch_all() {
       try {
-        const [btcRes, ethRes] = await Promise.all([
+        const [btcRes, ethRes, globalRes] = await Promise.all([
           fetch('https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT'),
           fetch('https://api.bybit.com/v5/market/tickers?category=spot&symbol=ETHUSDT'),
+          fetch('https://api.coingecko.com/api/v3/global'),
         ])
         const btcData = await btcRes.json()
         const ethData = await ethRes.json()
+        const globalData = await globalRes.json()
+
         const btc = btcData?.result?.list?.[0]
         const eth = ethData?.result?.list?.[0]
-        if (btc && eth) {
-          setTicker({
-            btc: {
-              price: parseFloat(btc.lastPrice).toLocaleString('ru-RU', { maximumFractionDigits: 0 }),
-              change: parseFloat(btc.price24hPcnt * 100).toFixed(2),
-              positive: parseFloat(btc.price24hPcnt) >= 0,
-            },
-            eth: {
-              price: parseFloat(ethData.result.list[0].lastPrice).toLocaleString('ru-RU', { maximumFractionDigits: 0 }),
-              change: parseFloat(ethData.result.list[0].price24hPcnt * 100).toFixed(2),
-              positive: parseFloat(ethData.result.list[0].price24hPcnt) >= 0,
-            },
-          })
-        }
-      } catch {}
-    }
+        const g = globalData?.data
 
-    async function fetchFearGreed() {
+        setData({
+          btc: btc ? {
+            price: parseFloat(btc.lastPrice).toLocaleString('en-US', { maximumFractionDigits: 0 }),
+            change: (parseFloat(btc.price24hPcnt) * 100).toFixed(2),
+            positive: parseFloat(btc.price24hPcnt) >= 0,
+            volume: (parseFloat(btc.volume24h) * parseFloat(btc.lastPrice) / 1e9).toFixed(1),
+          } : null,
+          eth: eth ? {
+            price: parseFloat(eth.lastPrice).toLocaleString('en-US', { maximumFractionDigits: 0 }),
+            change: (parseFloat(eth.price24hPcnt) * 100).toFixed(2),
+            positive: parseFloat(eth.price24hPcnt) >= 0,
+          } : null,
+          dominance: g ? parseFloat(g.market_cap_percentage?.btc).toFixed(1) : null,
+          altseason: g ? Math.round(100 - parseFloat(g.market_cap_percentage?.btc)) : null,
+          totalVolume: g ? (parseFloat(g.total_volume?.usd) / 1e9).toFixed(0) : null,
+          marketCap: g ? (parseFloat(g.total_market_cap?.usd) / 1e12).toFixed(2) : null,
+        })
+      } catch {}
+
       try {
-        const res = await fetch('https://api.alternative.me/fng/?limit=1')
-        const data = await res.json()
-        const val = data?.data?.[0]
-        if (val) setFearGreed({ value: val.value, label: val.value_classification })
+        const fgRes = await fetch('https://api.alternative.me/fng/?limit=1')
+        const fgData = await fgRes.json()
+        const val = fgData?.data?.[0]
+        if (val) setFearGreed({ value: parseInt(val.value), label: val.value_classification })
       } catch {}
     }
 
-    fetchTicker()
-    fetchFearGreed()
-    const id = setInterval(fetchTicker, 30000)
+    fetch_all()
+    const id = setInterval(fetch_all, 60000)
     return () => clearInterval(id)
   }, [])
 
-  return { ticker, fearGreed }
+  return { data, fearGreed }
 }
 
-function FearGreedArc({ value }) {
-  const size = 80
-  const stroke = 7
+function FearGreedGauge({ value }) {
+  const size = 90
+  const stroke = 8
   const radius = (size - stroke) / 2
   const circumference = Math.PI * radius
   const offset = circumference - (value / 100) * circumference
   const color = value >= 75 ? 'var(--long)' : value >= 45 ? 'var(--amber)' : 'var(--short)'
-  const label = value >= 75 ? 'Жадность' : value >= 55 ? 'Умер. жадность' : value >= 45 ? 'Нейтрально' : value >= 25 ? 'Страх' : 'Макс. страх'
+  const label = value >= 75 ? 'Жадность' : value >= 55 ? 'Ум. жадность' : value >= 45 ? 'Нейтрально' : value >= 25 ? 'Страх' : 'Макс. страх'
 
   return (
-    <div className="fg-wrap">
-      <svg width={size} height={size / 2 + 8} viewBox={`0 0 ${size} ${size / 2 + 8}`}>
-        <path
-          d={`M ${stroke / 2} ${size / 2} A ${radius} ${radius} 0 0 1 ${size - stroke / 2} ${size / 2}`}
-          fill="none" stroke="var(--border)" strokeWidth={stroke} strokeLinecap="round"
-        />
-        <path
-          d={`M ${stroke / 2} ${size / 2} A ${radius} ${radius} 0 0 1 ${size - stroke / 2} ${size / 2}`}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+      <svg width={size} height={size / 2 + 10} viewBox={`0 0 ${size} ${size / 2 + 10}`}>
+        <path d={`M ${stroke/2} ${size/2} A ${radius} ${radius} 0 0 1 ${size-stroke/2} ${size/2}`}
+          fill="none" stroke="var(--border)" strokeWidth={stroke} strokeLinecap="round" />
+        <path d={`M ${stroke/2} ${size/2} A ${radius} ${radius} 0 0 1 ${size-stroke/2} ${size/2}`}
           fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          style={{ transition: 'stroke-dashoffset 0.6s ease' }}
-        />
+          strokeDasharray={circumference} strokeDashoffset={offset}
+          style={{ transition: 'stroke-dashoffset 0.8s ease' }} />
       </svg>
-      <div className="fg-center">
-        <span className="fg-value" style={{ color }}>{value}</span>
-        <span className="fg-label">{label}</span>
+      <div style={{ textAlign: 'center', marginTop: -6 }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 700, color, lineHeight: 1 }}>{value}</div>
+        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>{label}</div>
       </div>
-      <style>{`
-        .fg-wrap { position: relative; display: flex; flex-direction: column; align-items: center; }
-        .fg-center { display: flex; flex-direction: column; align-items: center; margin-top: -8px; }
-        .fg-value { font-family: var(--font-mono); font-size: 22px; font-weight: 700; line-height: 1; }
-        .fg-label { font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
-      `}</style>
     </div>
   )
 }
 
-export default function StatsHero({ stats }) {
+function TickerCard({ icon, name, sym, price, change, positive, extra }) {
+  return (
+    <div className="ticker-card animate-in">
+      <div className="ticker-top">
+        <div className="ticker-icon" style={{ background: sym === 'BTC' ? '#f7931a22' : '#627eea22' }}>
+          <span style={{ fontSize: 18, color: sym === 'BTC' ? '#f7931a' : '#627eea' }}>{icon}</span>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{name}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: 'var(--font-mono)' }}>{sym}/USDT</div>
+        </div>
+      </div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>${price}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: positive ? 'var(--long)' : 'var(--short)', display: 'flex', alignItems: 'center', gap: 3 }}>
+          {positive ? '▲' : '▼'} {Math.abs(change)}%
+        </span>
+        {extra && <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{extra}</span>}
+      </div>
+    </div>
+  )
+}
+
+function StatWidget({ label, value, sub, color, icon }) {
+  return (
+    <div className="stat-widget animate-in">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
+        <span style={{ fontSize: 16 }}>{icon}</span>
+      </div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 24, fontWeight: 700, color: color || 'var(--text)', marginTop: 8 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{sub}</div>}
+    </div>
+  )
+}
+
+export default function StatsHero({ stats, loading }) {
   const [period, setPeriod] = useState('today')
-  const { ticker, fearGreed } = useTicker()
+  const { data, fearGreed } = useMarketData()
 
   return (
-    <div className="stats-wrap">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-      {/* ── ТИКЕР BTC / ETH + Fear & Greed ── */}
+      {/* ── ROW 1: BTC + ETH + Fear&Greed ── */}
       <div className="ticker-row">
-        {ticker ? (
-          <>
-            <TickerCard icon="₿" name="Bitcoin" sym="BTC" price={ticker.btc.price} change={ticker.btc.change} positive={ticker.btc.positive} />
-            <TickerCard icon="Ξ" name="Ethereum" sym="ETH" price={ticker.eth.price} change={ticker.eth.change} positive={ticker.eth.positive} />
-          </>
-        ) : (
-          <>
-            <div className="ticker-card skeleton" />
-            <div className="ticker-card skeleton" />
-          </>
-        )}
+        {data?.btc ? (
+          <TickerCard icon="₿" name="Bitcoin" sym="BTC" price={data.btc.price} change={data.btc.change} positive={data.btc.positive} extra={`Vol $${data.btc.volume}B`} />
+        ) : <div className="ticker-card skeleton" style={{ height: 120 }} />}
 
-        {fearGreed ? (
-          <div className="ticker-card fg-card">
-            <span className="ticker-name">Страх и жадность</span>
-            <FearGreedArc value={parseInt(fearGreed.value)} />
-          </div>
-        ) : (
-          <div className="ticker-card skeleton" />
-        )}
+        {data?.eth ? (
+          <TickerCard icon="Ξ" name="Ethereum" sym="ETH" price={data.eth.price} change={data.eth.change} positive={data.eth.positive} />
+        ) : <div className="ticker-card skeleton" style={{ height: 120 }} />}
+
+        <div className="ticker-card animate-in" style={{ alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Страх и жадность</div>
+          {fearGreed ? <FearGreedGauge value={fearGreed.value} /> : <div className="skeleton" style={{ width: 90, height: 60 }} />}
+        </div>
       </div>
 
-      {/* ── СТАТИСТИКА ТОРГОВЛИ ── */}
-      <div className="stats-hero">
+      {/* ── ROW 2: Market stats ── */}
+      <div className="stats-row">
+        {data?.dominance ? (
+          <StatWidget label="BTC Доминация" value={`${data.dominance}%`} sub="Доля рынка" icon="₿" color="var(--amber)" />
+        ) : <div className="stat-widget skeleton" style={{ height: 90 }} />}
+
+        {data?.altseason !== null && data?.altseason !== undefined ? (
+          <StatWidget
+            label="Altcoin Season"
+            value={`${data.altseason}%`}
+            sub={data.altseason > 50 ? '🔥 Сезон альтов' : '😴 Сезон BTC'}
+            icon="🌊"
+            color={data.altseason > 50 ? 'var(--long)' : 'var(--text-secondary)'}
+          />
+        ) : <div className="stat-widget skeleton" style={{ height: 90 }} />}
+
+        {data?.totalVolume ? (
+          <StatWidget label="Объём рынка 24h" value={`$${data.totalVolume}B`} sub="Общий оборот" icon="📊" />
+        ) : <div className="stat-widget skeleton" style={{ height: 90 }} />}
+
+        {data?.marketCap ? (
+          <StatWidget label="Капитализация" value={`$${data.marketCap}T`} sub="Весь крипторынок" icon="🌐" />
+        ) : <div className="stat-widget skeleton" style={{ height: 90 }} />}
+      </div>
+
+      {/* ── TRADING STATS ── */}
+      <div className="stats-hero-card animate-in">
         <div className="period-switch">
           {PERIODS.map((p) => (
-            <button
-              key={p.key}
-              className={`period-btn ${period === p.key ? 'active' : ''}`}
-              onClick={() => setPeriod(p.key)}
-            >
+            <button key={p.key} className={`period-btn ${period === p.key ? 'active' : ''}`} onClick={() => setPeriod(p.key)}>
               {p.label}
             </button>
           ))}
         </div>
 
-        {!stats ? (
-          <div className="hero-skeleton" />
-        ) : (() => {
-          const data = stats[period]
-          const pnlPositive = data.total_pnl > 0
-          const pnlColor = data.total === 0
-            ? 'var(--text-tertiary)'
-            : pnlPositive ? 'var(--long)' : data.total_pnl < 0 ? 'var(--short)' : 'var(--text-secondary)'
-
+        {loading ? (
+          <div style={{ display: 'flex', gap: 28, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+            <div className="skeleton" style={{ width: 132, height: 132, borderRadius: '50%' }} />
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              {[80, 60, 100].map((w, i) => <div key={i} className="skeleton" style={{ width: w, height: 48 }} />)}
+            </div>
+          </div>
+        ) : stats ? (() => {
+          const d = stats[period]
+          const pos = d.total_pnl > 0
+          const pnlColor = d.total === 0 ? 'var(--text-tertiary)' : pos ? 'var(--long)' : 'var(--short)'
           return (
             <>
-              <div className="hero-body">
-                <WinrateRing winrate={data.winrate} total={data.total} />
-                <div className="hero-metrics">
-                  <Metric label="Сделок" value={data.total} />
-                  <Metric label="PnL" value={data.total === 0 ? '—' : `${pnlPositive ? '+' : ''}${data.total_pnl}%`} color={pnlColor} emphasis />
-                  <Metric label="Средний PnL" value={data.total === 0 ? '—' : `${data.avg_pnl > 0 ? '+' : ''}${data.avg_pnl}%`} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap' }}>
+                <WinrateRing winrate={d.winrate} total={d.total} />
+                <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
+                  <Metric label="Сделок" value={d.total} />
+                  <Metric label="PnL" value={d.total === 0 ? '—' : `${pos ? '+' : ''}${d.total_pnl}%`} color={pnlColor} emphasis />
+                  <Metric label="Средний PnL" value={d.total === 0 ? '—' : `${d.avg_pnl > 0 ? '+' : ''}${d.avg_pnl}%`} />
                 </div>
               </div>
-
-              {data.total > 0 && (
-                <div className="hero-breakdown">
-                  <BreakdownChip label="TP1"  value={data.tp1}       tone="long" />
-                  <BreakdownChip label="TP2+" value={data.tp2_plus}  tone="long" />
-                  <BreakdownChip label="Стоп" value={data.stops}     tone="short" />
-                  <BreakdownChip label="Б/У"  value={data.breakeven} tone="neutral" />
+              {d.total > 0 && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+                  <Chip label="TP1"  value={d.tp1}       tone="long" />
+                  <Chip label="TP2+" value={d.tp2_plus}  tone="long" />
+                  <Chip label="Стоп" value={d.stops}     tone="short" />
+                  <Chip label="Б/У"  value={d.breakeven} tone="neutral" />
                 </div>
               )}
             </>
           )
-        })()}
+        })() : null}
       </div>
 
       <style>{`
-        .stats-wrap { display: flex; flex-direction: column; gap: 14px; }
-
-        /* ── TICKER ROW ── */
         .ticker-row {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 12px;
+          display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
         }
         .ticker-card {
-          background: var(--surface);
-          border: 1px solid var(--border);
-          border-radius: var(--radius-lg);
-          box-shadow: var(--shadow-card);
-          padding: 18px 20px;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-          transition: border-color 0.15s;
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+          padding: 18px 20px; display: flex; flex-direction: column; gap: 10px;
+          transition: all 0.2s ease;
         }
-        .ticker-card:hover { border-color: var(--border-strong); }
-        .ticker-card.skeleton {
-          min-height: 90px;
-          background: var(--surface-hover);
-          animation: shimmer 1.5s infinite;
-        }
-        @keyframes shimmer {
-          0%,100% { opacity: 1; } 50% { opacity: 0.5; }
-        }
+        .ticker-card:hover { border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow-lg); }
         .ticker-top { display: flex; align-items: center; gap: 10px; }
-        .ticker-icon {
-          width: 36px; height: 36px;
-          border-radius: 10px;
-          background: var(--accent-soft);
-          display: flex; align-items: center; justify-content: center;
-          font-size: 18px; font-weight: 700;
-          color: var(--accent);
-          flex-shrink: 0;
-        }
-        .ticker-info { display: flex; flex-direction: column; gap: 1px; }
-        .ticker-name { font-size: 11px; color: var(--text-tertiary); }
-        .ticker-sym { font-size: 13px; font-weight: 700; color: var(--text); font-family: var(--font-mono); }
-        .ticker-price { font-family: var(--font-mono); font-size: 22px; font-weight: 700; color: var(--text); }
-        .ticker-change {
-          font-family: var(--font-mono); font-size: 13px; font-weight: 600;
-          display: flex; align-items: center; gap: 4px;
-        }
-        .fg-card { align-items: center; justify-content: center; gap: 4px; }
+        .ticker-icon { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 
-        /* ── STATS HERO ── */
-        .stats-hero {
-          background: var(--surface);
-          border: 1px solid var(--border);
-          border-radius: var(--radius-lg);
-          box-shadow: var(--shadow-card);
-          padding: 24px;
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
+        .stats-row {
+          display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
         }
-        .hero-skeleton { min-height: 160px; }
+        .stat-widget {
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+          padding: 16px 18px;
+          transition: all 0.2s ease;
+        }
+        .stat-widget:hover { border-color: var(--border-strong); transform: translateY(-1px); }
 
+        .stats-hero-card {
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+          padding: 24px; display: flex; flex-direction: column; gap: 20px;
+        }
         .period-switch {
-          display: inline-flex;
-          align-self: flex-start;
-          background: var(--surface-hover);
-          border-radius: 10px;
-          padding: 3px;
-          gap: 2px;
+          display: inline-flex; align-self: flex-start;
+          background: var(--surface-hover); border-radius: 10px; padding: 3px; gap: 2px;
         }
         .period-btn {
-          border: none; background: transparent;
-          color: var(--text-secondary); font-size: 13px; font-weight: 500;
-          padding: 7px 14px; border-radius: 8px;
-          transition: background 0.15s, color 0.15s;
+          border: none; background: transparent; color: var(--text-secondary);
+          font-size: 13px; font-weight: 500; padding: 7px 14px; border-radius: 8px;
+          transition: all 0.2s;
         }
-        .period-btn.active {
-          background: var(--surface); color: var(--text);
-          box-shadow: 0 1px 2px rgba(20,20,15,0.08);
-        }
+        .period-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
         .period-btn:hover:not(.active) { color: var(--text); }
 
-        .hero-body { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
-        .hero-metrics { display: flex; gap: 28px; flex-wrap: wrap; }
-        .metric { display: flex; flex-direction: column; gap: 4px; }
-        .metric-label { font-size: 12px; color: var(--text-tertiary); }
-        .metric-value { font-family: var(--font-mono); font-size: 20px; font-weight: 600; }
-        .metric-value.emphasis { font-size: 26px; }
-
-        .hero-breakdown {
-          display: flex; gap: 8px; flex-wrap: wrap;
-          padding-top: 16px; border-top: 1px solid var(--border);
+        @media (max-width: 900px) {
+          .stats-row { grid-template-columns: repeat(2, 1fr); }
         }
-        .breakdown-chip {
-          display: flex; align-items: baseline; gap: 6px;
-          padding: 7px 12px; border-radius: 9px; font-size: 13px;
-        }
-        .chip-val { font-family: var(--font-mono); font-weight: 600; }
-        .chip-lbl { font-size: 12px; opacity: 0.85; }
-
-        @media (max-width: 680px) {
+        @media (max-width: 600px) {
           .ticker-row { grid-template-columns: 1fr 1fr; }
           .ticker-row > :last-child { grid-column: 1 / -1; }
+          .stats-row { grid-template-columns: 1fr 1fr; }
         }
         @media (max-width: 400px) {
           .ticker-row { grid-template-columns: 1fr; }
@@ -291,42 +276,22 @@ export default function StatsHero({ stats }) {
   )
 }
 
-function TickerCard({ icon, name, sym, price, change, positive }) {
-  return (
-    <div className="ticker-card">
-      <div className="ticker-top">
-        <div className="ticker-icon">{icon}</div>
-        <div className="ticker-info">
-          <span className="ticker-name">{name}</span>
-          <span className="ticker-sym">{sym}</span>
-        </div>
-      </div>
-      <span className="ticker-price">${price}</span>
-      <span className="ticker-change" style={{ color: positive ? 'var(--long)' : 'var(--short)' }}>
-        {positive ? '▲' : '▼'} {Math.abs(change)}%
-      </span>
-    </div>
-  )
-}
-
 function Metric({ label, value, color, emphasis }) {
   return (
-    <div className="metric">
-      <span className="metric-label">{label}</span>
-      <span className={`metric-value ${emphasis ? 'emphasis' : ''}`} style={{ color: color || 'var(--text)' }}>
-        {value}
-      </span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{label}</span>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: emphasis ? 26 : 20, fontWeight: 600, color: color || 'var(--text)' }}>{value}</span>
     </div>
   )
 }
 
-function BreakdownChip({ label, value, tone }) {
+function Chip({ label, value, tone }) {
   const bg    = tone === 'long' ? 'var(--long-soft)'  : tone === 'short' ? 'var(--short-soft)'  : 'var(--surface-hover)'
   const color = tone === 'long' ? 'var(--long)'       : tone === 'short' ? 'var(--short)'       : 'var(--text-secondary)'
   return (
-    <div className="breakdown-chip" style={{ background: bg, color }}>
-      <span className="chip-val">{value}</span>
-      <span className="chip-lbl">{label}</span>
+    <div style={{ background: bg, color, display: 'flex', alignItems: 'baseline', gap: 6, padding: '7px 12px', borderRadius: 9 }}>
+      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{value}</span>
+      <span style={{ fontSize: 12, opacity: 0.85 }}>{label}</span>
     </div>
   )
 }
