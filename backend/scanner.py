@@ -1,5 +1,5 @@
 """
-Scanner — фоновый процесс, сканирующий рынок каждые 5 минут.
+Scanner — фоновый процесс, сканирующий рынок каждые 2 минуты.
 Заменяет send_signal()/scan() из бота: вместо Telegram пишет в БД.
 """
 
@@ -13,7 +13,7 @@ from data_layer import clean_cache
 from signal_engine import scan_for_best_signal, get_mults, calc_levels, calc_position
 import tracker
 
-SCAN_INTERVAL_SECONDS = 5 * 60
+SCAN_INTERVAL_SECONDS = 2 * 60
 
 
 def register_signal(result):
@@ -85,7 +85,7 @@ def safe_scan():
 
 
 def run_scanner_loop():
-    """Запускается в отдельном потоке: сканирует рынок каждые 5 минут."""
+    """Запускается в отдельном потоке: сканирует рынок каждые 2 минуты."""
     safe_scan()
     while True:
         time.sleep(SCAN_INTERVAL_SECONDS)
@@ -96,5 +96,5 @@ def start_background_scanner():
     db.init_db()
     thread = threading.Thread(target=run_scanner_loop, daemon=True)
     thread.start()
-    print("⏰ Сканер запущен в фоне (каждые 5 минут)")
+    print("⏰ Сканер запущен в фоне (каждые 2 минуты)")
     return thread
