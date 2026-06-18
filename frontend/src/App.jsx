@@ -4,6 +4,7 @@ import StatsHero from './StatsHero'
 import SignalCard from './SignalCard'
 import HistoryTable from './HistoryTable'
 import MarketView from './MarketView'
+import AIChat from './AIChat'
 
 const POLL_INTERVAL = 15000
 const MARKET_POLL_INTERVAL = 60000
@@ -12,6 +13,7 @@ const TABS = [
   { key: 'overview', label: 'Обзор',   icon: '◈' },
   { key: 'market',   label: 'Рынок',   icon: '⬡' },
   { key: 'history',  label: 'История', icon: '≡' },
+  { key: 'ai',       label: 'AI Чат',  icon: '✦' },
 ]
 
 export default function App() {
@@ -93,7 +95,8 @@ export default function App() {
             >
               <span className="nav-icon">{t.icon}</span>
               <span className="nav-label">{t.label}</span>
-              {tab === t.key && <span className="nav-pip" />}
+              {t.key === 'ai' && <span className="nav-badge">NEW</span>}
+              {tab === t.key && t.key !== 'ai' && <span className="nav-pip" />}
             </button>
           ))}
         </nav>
@@ -103,11 +106,7 @@ export default function App() {
             <span className="scan-dot" />
             <span className="scan-text">Сканирую рынок</span>
           </div>
-          <button
-            className="theme-toggle"
-            onClick={() => setDark(d => !d)}
-            title={dark ? 'Светлая тема' : 'Тёмная тема'}
-          >
+          <button className="theme-toggle" onClick={() => setDark(d => !d)}>
             {dark ? '☀' : '☾'}
           </button>
         </div>
@@ -166,6 +165,13 @@ export default function App() {
               <HistoryTable history={history} />
             </section>
           )}
+
+          {tab === 'ai' && (
+            <section className="section">
+              <h2 className="section-title">AI Ассистент</h2>
+              <AIChat signals={signals} stats={stats} market={market} />
+            </section>
+          )}
         </main>
       </div>
 
@@ -173,24 +179,17 @@ export default function App() {
         .layout { display: flex; min-height: 100vh; background: var(--bg); }
 
         .sidebar {
-          width: 220px;
-          flex-shrink: 0;
+          width: 220px; flex-shrink: 0;
           background: var(--sidebar-bg);
           border-right: 1px solid var(--sidebar-border);
           box-shadow: var(--shadow-sidebar);
-          display: flex;
-          flex-direction: column;
-          position: sticky;
-          top: 0;
-          height: 100vh;
-          z-index: 100;
-          transition: background 0.2s ease;
+          display: flex; flex-direction: column;
+          position: sticky; top: 0; height: 100vh;
+          z-index: 100; transition: background 0.2s ease;
         }
 
         .sidebar-logo {
-          display: flex;
-          align-items: center;
-          gap: 12px;
+          display: flex; align-items: center; gap: 12px;
           padding: 24px 20px 20px;
           border-bottom: 1px solid var(--border);
         }
@@ -198,80 +197,48 @@ export default function App() {
           width: 38px; height: 38px;
           background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%);
           border-radius: 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          display: flex; align-items: center; justify-content: center;
           flex-shrink: 0;
           box-shadow: 0 4px 12px rgba(75,140,245,0.35);
         }
-        .logo-n {
-          color: #fff;
-          font-size: 20px;
-          font-weight: 800;
-          letter-spacing: -0.03em;
-        }
+        .logo-n { color: #fff; font-size: 20px; font-weight: 800; letter-spacing: -0.03em; }
         .logo-text-wrap { display: flex; flex-direction: column; gap: 1px; }
-        .logo-name {
-          font-size: 17px;
-          font-weight: 800;
-          color: var(--text);
-          letter-spacing: 0.04em;
-          line-height: 1;
-        }
-        .logo-sub {
-          font-size: 10px;
-          color: var(--text-tertiary);
-          letter-spacing: 0.06em;
-          text-transform: uppercase;
-        }
+        .logo-name { font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: 0.04em; line-height: 1; }
+        .logo-sub { font-size: 10px; color: var(--text-tertiary); letter-spacing: 0.06em; text-transform: uppercase; }
 
         .sidebar-nav {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-          padding: 16px 12px;
+          flex: 1; display: flex; flex-direction: column;
+          gap: 4px; padding: 16px 12px;
         }
         .nav-item {
-          display: flex;
-          align-items: center;
-          gap: 11px;
-          padding: 11px 12px;
-          border: none;
-          background: transparent;
-          color: var(--text-tertiary);
-          font-size: 14px;
-          font-weight: 500;
+          display: flex; align-items: center; gap: 11px;
+          padding: 11px 12px; border: none; background: transparent;
+          color: var(--text-tertiary); font-size: 14px; font-weight: 500;
           border-radius: var(--radius-md);
           transition: background 0.15s, color 0.15s;
-          position: relative;
-          text-align: left;
-          width: 100%;
+          position: relative; text-align: left; width: 100%;
         }
         .nav-item:hover { background: var(--surface-hover); color: var(--text-secondary); }
         .nav-item.active { background: var(--sidebar-active); color: var(--sidebar-active-text); font-weight: 600; }
         .nav-icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
-        .nav-pip {
-          position: absolute; right: 12px;
-          width: 6px; height: 6px;
-          border-radius: 50%;
-          background: var(--accent);
+        .nav-pip { position: absolute; right: 12px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+        .nav-badge {
+          margin-left: auto;
+          font-size: 9px; font-weight: 700;
+          padding: 2px 6px; border-radius: 4px;
+          background: linear-gradient(135deg, var(--accent), #7c3aed);
+          color: #fff; letter-spacing: 0.05em;
         }
 
         .sidebar-footer {
           padding: 16px 16px 24px;
           border-top: 1px solid var(--border);
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 8px;
+          display: flex; align-items: center; justify-content: space-between; gap: 8px;
         }
         .scan-badge { display: flex; align-items: center; gap: 7px; }
         .scan-dot {
-          width: 7px; height: 7px;
-          border-radius: 50%;
-          background: var(--long);
-          animation: pulse 2s infinite;
+          width: 7px; height: 7px; border-radius: 50%;
+          background: var(--long); animation: pulse 2s infinite;
         }
         @keyframes pulse {
           0%   { box-shadow: 0 0 0 0 rgba(0,201,150,0.4); }
@@ -280,47 +247,29 @@ export default function App() {
         }
         .scan-text { font-size: 11px; color: var(--text-tertiary); }
         .theme-toggle {
-          border: 1px solid var(--border);
-          background: var(--surface);
-          color: var(--text-secondary);
-          width: 32px; height: 32px;
-          border-radius: 8px;
-          font-size: 15px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: background 0.15s;
-          flex-shrink: 0;
+          border: 1px solid var(--border); background: var(--surface);
+          color: var(--text-secondary); width: 32px; height: 32px;
+          border-radius: 8px; font-size: 15px;
+          display: flex; align-items: center; justify-content: center;
+          transition: background 0.15s; flex-shrink: 0;
         }
         .theme-toggle:hover { background: var(--surface-hover); color: var(--text); }
 
         .topbar {
-          display: none;
-          align-items: center;
-          justify-content: space-between;
-          padding: 14px 18px;
-          background: var(--sidebar-bg);
+          display: none; align-items: center; justify-content: space-between;
+          padding: 14px 18px; background: var(--sidebar-bg);
           border-bottom: 1px solid var(--border);
-          position: sticky;
-          top: 0;
-          z-index: 90;
+          position: sticky; top: 0; z-index: 90;
         }
-        .burger {
-          border: none; background: transparent;
-          display: flex; flex-direction: column; gap: 5px; padding: 4px;
-        }
+        .burger { border: none; background: transparent; display: flex; flex-direction: column; gap: 5px; padding: 4px; }
         .burger span { display: block; width: 22px; height: 2px; background: var(--text); border-radius: 2px; }
         .topbar-title { font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: 0.04em; }
         .theme-toggle-mobile {
           border: 1px solid var(--border); background: var(--surface);
-          color: var(--text-secondary); width: 34px; height: 34px;
-          border-radius: 8px; font-size: 16px;
+          color: var(--text-secondary); width: 34px; height: 34px; border-radius: 8px; font-size: 16px;
         }
 
-        .sidebar-overlay {
-          position: fixed; inset: 0;
-          background: rgba(0,0,0,0.5); z-index: 99;
-        }
+        .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99; }
 
         .main-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
         .content {
@@ -330,30 +279,22 @@ export default function App() {
         }
         .section { display: flex; flex-direction: column; gap: 14px; }
         .section-title {
-          font-size: 11px; font-weight: 700;
-          color: var(--text-tertiary);
+          font-size: 11px; font-weight: 700; color: var(--text-tertiary);
           text-transform: uppercase; letter-spacing: 0.08em;
         }
         .signals-grid { display: grid; gap: 14px; }
         .placeholder {
-          padding: 36px; text-align: center;
-          color: var(--text-tertiary); font-size: 13px;
-          background: var(--surface);
-          border: 1px dashed var(--border-strong);
+          padding: 36px; text-align: center; color: var(--text-tertiary); font-size: 13px;
+          background: var(--surface); border: 1px dashed var(--border-strong);
           border-radius: var(--radius-lg); line-height: 1.6;
         }
         .error-banner {
-          padding: 13px 18px;
-          background: var(--short-soft); color: var(--short);
-          border: 1px solid var(--short-soft);
-          border-radius: var(--radius-md); font-size: 13px;
+          padding: 13px 18px; background: var(--short-soft); color: var(--short);
+          border: 1px solid var(--short-soft); border-radius: var(--radius-md); font-size: 13px;
         }
 
         @media (max-width: 768px) {
-          .sidebar {
-            position: fixed; left: -240px; top: 0;
-            height: 100vh; transition: left 0.25s ease; z-index: 100;
-          }
+          .sidebar { position: fixed; left: -240px; top: 0; height: 100vh; transition: left 0.25s ease; z-index: 100; }
           .layout.sidebar-open .sidebar { left: 0; }
           .topbar { display: flex; }
           .content { padding: 20px 16px 64px; }

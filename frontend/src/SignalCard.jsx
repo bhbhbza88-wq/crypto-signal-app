@@ -1,5 +1,47 @@
 import { ComposedChart, Line, ReferenceLine, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
+function ConfidenceBar({ score, maxScore = 20 }) {
+  const pct = Math.round((score / maxScore) * 100)
+  const color = pct >= 80 ? 'var(--long)' : pct >= 60 ? 'var(--amber)' : 'var(--short)'
+  const label = pct >= 80 ? 'Высокая' : pct >= 60 ? 'Средняя' : 'Низкая'
+
+  return (
+    <div className="confidence-wrap">
+      <div className="confidence-header">
+        <span className="confidence-label">Уверенность</span>
+        <span className="confidence-pct" style={{ color }}>{pct}%</span>
+      </div>
+      <div className="confidence-track">
+        <div
+          className="confidence-fill"
+          style={{ width: `${pct}%`, background: color }}
+        />
+      </div>
+      <div className="confidence-footer">
+        <span className="confidence-score">Score {score}/{maxScore}</span>
+        <span className="confidence-grade" style={{ color }}>{label} уверенность</span>
+      </div>
+      <style>{`
+        .confidence-wrap { display: flex; flex-direction: column; gap: 6px; }
+        .confidence-header { display: flex; justify-content: space-between; align-items: center; }
+        .confidence-label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; }
+        .confidence-pct { font-family: var(--font-mono); font-size: 20px; font-weight: 700; }
+        .confidence-track {
+          height: 6px; background: var(--surface-hover);
+          border-radius: 3px; overflow: hidden;
+        }
+        .confidence-fill {
+          height: 100%; border-radius: 3px;
+          transition: width 0.6s ease;
+        }
+        .confidence-footer { display: flex; justify-content: space-between; }
+        .confidence-score { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+        .confidence-grade { font-size: 11px; font-weight: 600; }
+      `}</style>
+    </div>
+  )
+}
+
 export default function SignalCard({ signal }) {
   const isLong = signal.signal === 'LONG'
   const tone = isLong ? 'var(--long)' : 'var(--short)'
@@ -16,21 +58,40 @@ export default function SignalCard({ signal }) {
   const yMax = Math.max(...allLevels, ...chartData.map((d) => d.close)) * 1.002
 
   const stage = signal.tp2_hit ? 'TP2 достигнут' : signal.tp1_hit ? 'TP1 достигнут' : 'Открыта'
+  const pct = Math.round((signal.score / 20) * 100)
+  const confColor = pct >= 80 ? 'var(--long)' : pct >= 60 ? 'var(--amber)' : 'var(--short)'
 
   return (
     <div className="signal-card">
+      {/* Полоска уверенности сверху */}
+      <div className="signal-confidence-stripe" style={{ background: `linear-gradient(90deg, ${confColor}22, transparent)`, borderTop: `3px solid ${confColor}` }} />
+
       <div className="signal-header">
         <div className="signal-title">
-          <span className="symbol">{sym}</span>
-          <span className="badge" style={{ background: toneSoft, color: tone }}>
-            {signal.signal}
-          </span>
+          <div className="signal-coin-icon" style={{ background: isLong ? 'var(--long-soft)' : 'var(--short-soft)' }}>
+            <span style={{ color: tone, fontWeight: 800, fontSize: 14, fontFamily: 'var(--font-mono)' }}>
+              {sym.charAt(0)}
+            </span>
+          </div>
+          <div>
+            <div className="signal-sym-row">
+              <span className="symbol">{sym}</span>
+              <span className="badge" style={{ background: toneSoft, color: tone }}>
+                {signal.signal}
+              </span>
+            </div>
+            <span className="signal-pair">/ USDT · Bybit</span>
+          </div>
         </div>
         <div className="signal-meta">
-          <MetaTag label="Score" value={`${signal.score}/20`} />
           <MetaTag label="Режим" value={signal.regime} />
           <MetaTag label="Стадия" value={stage} highlight={stage !== 'Открыта'} />
         </div>
+      </div>
+
+      {/* Шкала уверенности */}
+      <div className="confidence-section">
+        <ConfidenceBar score={signal.score} maxScore={20} />
       </div>
 
       <div className="chart-wrap">
@@ -85,71 +146,65 @@ export default function SignalCard({ signal }) {
           border: 1px solid var(--border);
           border-radius: var(--radius-lg);
           box-shadow: var(--shadow-card);
-          padding: 22px;
+          overflow: hidden;
         }
+        .signal-confidence-stripe { height: 3px; width: 100%; }
         .signal-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          flex-wrap: wrap;
-          gap: 12px;
+          display: flex; justify-content: space-between; align-items: flex-start;
+          flex-wrap: wrap; gap: 12px;
+          padding: 20px 22px 0;
           margin-bottom: 14px;
         }
-        .signal-title { display: flex; align-items: center; gap: 10px; }
+        .signal-title { display: flex; align-items: center; gap: 12px; }
+        .signal-coin-icon {
+          width: 42px; height: 42px; border-radius: 12px;
+          display: flex; align-items: center; justify-content: center;
+          flex-shrink: 0;
+        }
+        .signal-sym-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
         .symbol { font-size: 22px; font-weight: 700; color: var(--text); font-family: var(--font-mono); letter-spacing: -0.01em; }
+        .signal-pair { font-size: 11px; color: var(--text-tertiary); }
         .badge {
-          font-size: 12px;
-          font-weight: 600;
-          padding: 4px 10px;
-          border-radius: 7px;
-          letter-spacing: 0.03em;
-          font-family: var(--font-mono);
+          font-size: 12px; font-weight: 600;
+          padding: 4px 10px; border-radius: 7px;
+          letter-spacing: 0.03em; font-family: var(--font-mono);
         }
         .signal-meta { display: flex; gap: 16px; }
-        .chart-wrap { margin: 4px -6px 8px; }
+
+        .confidence-section {
+          padding: 0 22px 16px;
+          border-bottom: 1px solid var(--border);
+          margin-bottom: 4px;
+        }
+
+        .chart-wrap { padding: 0 6px; margin-bottom: 8px; }
         .levels-row {
-          display: flex;
-          gap: 20px;
-          flex-wrap: wrap;
-          padding-top: 16px;
+          display: flex; gap: 20px; flex-wrap: wrap;
+          padding: 16px 22px;
           border-top: 1px solid var(--border);
         }
         .position-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-top: 14px;
+          display: flex; justify-content: space-between; align-items: center;
+          margin: 0 22px 16px;
           padding: 12px 14px;
-          background: var(--accent-soft);
-          border-radius: 10px;
+          background: var(--accent-soft); border-radius: 10px;
         }
         .position-label { font-size: 12px; color: var(--text-secondary); }
         .position-value { font-family: var(--font-mono); font-weight: 700; color: var(--accent); font-size: 14px; }
-
         .reasons-block {
-          margin-top: 14px;
+          margin: 0 22px 20px;
           padding-top: 14px;
           border-top: 1px solid var(--border);
         }
         .reasons-title {
-          font-size: 12px;
-          font-weight: 600;
-          color: var(--text-secondary);
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
+          font-size: 12px; font-weight: 600; color: var(--text-secondary);
+          text-transform: uppercase; letter-spacing: 0.04em;
         }
         .reasons-list {
-          margin: 10px 0 0;
-          padding-left: 18px;
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
+          margin: 10px 0 0; padding-left: 18px;
+          display: flex; flex-direction: column; gap: 6px;
         }
-        .reasons-list li {
-          font-size: 13px;
-          color: var(--text);
-          line-height: 1.4;
-        }
+        .reasons-list li { font-size: 13px; color: var(--text); line-height: 1.4; }
       `}</style>
     </div>
   )
