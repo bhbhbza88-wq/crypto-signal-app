@@ -15,16 +15,15 @@ const TABS = [
 ]
 
 export default function App() {
-  const [tab, setTab]       = useState('overview')
-  const [signals, setSignals]   = useState([])
-  const [history, setHistory]   = useState([])
-  const [stats, setStats]     = useState(null)
-  const [market, setMarket]   = useState(null)
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]     = useState(null)
+  const [tab, setTab]             = useState('overview')
+  const [signals, setSignals]     = useState([])
+  const [history, setHistory]     = useState([])
+  const [stats, setStats]         = useState(null)
+  const [market, setMarket]       = useState(null)
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  // ── theme ──────────────────────────────────────────────────
   const [dark, setDark] = useState(() => {
     const saved = localStorage.getItem('theme')
     if (saved) return saved === 'dark'
@@ -36,7 +35,6 @@ export default function App() {
     localStorage.setItem('theme', dark ? 'dark' : 'light')
   }, [dark])
 
-  // ── data ───────────────────────────────────────────────────
   const fetchCore = useCallback(async () => {
     try {
       const [signalsData, historyData, statsData] = await Promise.all([
@@ -75,11 +73,15 @@ export default function App() {
   return (
     <div className={`layout ${sidebarOpen ? 'sidebar-open' : ''}`}>
 
-      {/* ── SIDEBAR ── */}
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <span className="logo-mark" />
-          <span className="logo-text">Signal Desk</span>
+          <div className="logo-icon">
+            <span className="logo-n">N</span>
+          </div>
+          <div className="logo-text-wrap">
+            <span className="logo-name">NWICKI</span>
+            <span className="logo-sub">Crypto Scanner</span>
+          </div>
         </div>
 
         <nav className="sidebar-nav">
@@ -111,25 +113,17 @@ export default function App() {
         </div>
       </aside>
 
-      {/* ── MOBILE OVERLAY ── */}
       {sidebarOpen && (
         <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* ── MAIN ── */}
       <div className="main-wrap">
-        {/* mobile topbar */}
         <header className="topbar">
           <button className="burger" onClick={() => setSidebarOpen(o => !o)}>
             <span /><span /><span />
           </button>
-          <span className="topbar-title">
-            {TABS.find(t => t.key === tab)?.label}
-          </span>
-          <button
-            className="theme-toggle-mobile"
-            onClick={() => setDark(d => !d)}
-          >
+          <span className="topbar-title">NWICKI</span>
+          <button className="theme-toggle-mobile" onClick={() => setDark(d => !d)}>
             {dark ? '☀' : '☾'}
           </button>
         </header>
@@ -176,14 +170,8 @@ export default function App() {
       </div>
 
       <style>{`
-        /* ── LAYOUT ── */
-        .layout {
-          display: flex;
-          min-height: 100vh;
-          background: var(--bg);
-        }
+        .layout { display: flex; min-height: 100vh; background: var(--bg); }
 
-        /* ── SIDEBAR ── */
         .sidebar {
           width: 220px;
           flex-shrink: 0;
@@ -202,22 +190,39 @@ export default function App() {
         .sidebar-logo {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 28px 22px 24px;
+          gap: 12px;
+          padding: 24px 20px 20px;
           border-bottom: 1px solid var(--border);
         }
-        .logo-mark {
-          width: 10px; height: 10px;
-          background: var(--accent);
-          border-radius: 3px;
-          transform: rotate(45deg);
+        .logo-icon {
+          width: 38px; height: 38px;
+          background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%);
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           flex-shrink: 0;
+          box-shadow: 0 4px 12px rgba(75,140,245,0.35);
         }
-        .logo-text {
-          font-size: 16px;
-          font-weight: 700;
+        .logo-n {
+          color: #fff;
+          font-size: 20px;
+          font-weight: 800;
+          letter-spacing: -0.03em;
+        }
+        .logo-text-wrap { display: flex; flex-direction: column; gap: 1px; }
+        .logo-name {
+          font-size: 17px;
+          font-weight: 800;
           color: var(--text);
-          letter-spacing: -0.02em;
+          letter-spacing: 0.04em;
+          line-height: 1;
+        }
+        .logo-sub {
+          font-size: 10px;
+          color: var(--text-tertiary);
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
         }
 
         .sidebar-nav {
@@ -227,7 +232,6 @@ export default function App() {
           gap: 4px;
           padding: 16px 12px;
         }
-
         .nav-item {
           display: flex;
           align-items: center;
@@ -244,24 +248,11 @@ export default function App() {
           text-align: left;
           width: 100%;
         }
-        .nav-item:hover {
-          background: var(--surface-hover);
-          color: var(--text-secondary);
-        }
-        .nav-item.active {
-          background: var(--sidebar-active);
-          color: var(--sidebar-active-text);
-          font-weight: 600;
-        }
-        .nav-icon {
-          font-size: 16px;
-          width: 20px;
-          text-align: center;
-          flex-shrink: 0;
-        }
+        .nav-item:hover { background: var(--surface-hover); color: var(--text-secondary); }
+        .nav-item.active { background: var(--sidebar-active); color: var(--sidebar-active-text); font-weight: 600; }
+        .nav-icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
         .nav-pip {
-          position: absolute;
-          right: 12px;
+          position: absolute; right: 12px;
           width: 6px; height: 6px;
           border-radius: 50%;
           background: var(--accent);
@@ -275,11 +266,7 @@ export default function App() {
           justify-content: space-between;
           gap: 8px;
         }
-        .scan-badge {
-          display: flex;
-          align-items: center;
-          gap: 7px;
-        }
+        .scan-badge { display: flex; align-items: center; gap: 7px; }
         .scan-dot {
           width: 7px; height: 7px;
           border-radius: 50%;
@@ -291,11 +278,7 @@ export default function App() {
           70%  { box-shadow: 0 0 0 6px rgba(0,201,150,0); }
           100% { box-shadow: 0 0 0 0 rgba(0,201,150,0); }
         }
-        .scan-text {
-          font-size: 11px;
-          color: var(--text-tertiary);
-        }
-
+        .scan-text { font-size: 11px; color: var(--text-tertiary); }
         .theme-toggle {
           border: 1px solid var(--border);
           background: var(--surface);
@@ -306,15 +289,11 @@ export default function App() {
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: background 0.15s, color 0.15s;
+          transition: background 0.15s;
           flex-shrink: 0;
         }
-        .theme-toggle:hover {
-          background: var(--surface-hover);
-          color: var(--text);
-        }
+        .theme-toggle:hover { background: var(--surface-hover); color: var(--text); }
 
-        /* ── TOPBAR (mobile) ── */
         .topbar {
           display: none;
           align-items: center;
@@ -327,109 +306,55 @@ export default function App() {
           z-index: 90;
         }
         .burger {
-          border: none;
-          background: transparent;
-          display: flex;
-          flex-direction: column;
-          gap: 5px;
-          padding: 4px;
+          border: none; background: transparent;
+          display: flex; flex-direction: column; gap: 5px; padding: 4px;
         }
-        .burger span {
-          display: block;
-          width: 22px; height: 2px;
-          background: var(--text);
-          border-radius: 2px;
-          transition: background 0.15s;
-        }
-        .topbar-title {
-          font-size: 16px;
-          font-weight: 700;
-          color: var(--text);
-        }
+        .burger span { display: block; width: 22px; height: 2px; background: var(--text); border-radius: 2px; }
+        .topbar-title { font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: 0.04em; }
         .theme-toggle-mobile {
-          border: 1px solid var(--border);
-          background: var(--surface);
-          color: var(--text-secondary);
-          width: 34px; height: 34px;
-          border-radius: 8px;
-          font-size: 16px;
+          border: 1px solid var(--border); background: var(--surface);
+          color: var(--text-secondary); width: 34px; height: 34px;
+          border-radius: 8px; font-size: 16px;
         }
 
-        /* ── OVERLAY ── */
         .sidebar-overlay {
-          position: fixed;
-          inset: 0;
-          background: rgba(0,0,0,0.5);
-          z-index: 99;
+          position: fixed; inset: 0;
+          background: rgba(0,0,0,0.5); z-index: 99;
         }
 
-        /* ── MAIN WRAP ── */
-        .main-wrap {
-          flex: 1;
-          min-width: 0;
-          display: flex;
-          flex-direction: column;
-        }
-
+        .main-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
         .content {
-          flex: 1;
-          max-width: 900px;
-          width: 100%;
-          margin: 0 auto;
-          padding: 32px 28px 64px;
-          display: flex;
-          flex-direction: column;
-          gap: 28px;
+          flex: 1; max-width: 900px; width: 100%;
+          margin: 0 auto; padding: 32px 28px 64px;
+          display: flex; flex-direction: column; gap: 28px;
         }
-
-        /* ── SECTION ── */
-        .section {
-          display: flex;
-          flex-direction: column;
-          gap: 14px;
-        }
+        .section { display: flex; flex-direction: column; gap: 14px; }
         .section-title {
-          font-size: 11px;
-          font-weight: 700;
+          font-size: 11px; font-weight: 700;
           color: var(--text-tertiary);
-          text-transform: uppercase;
-          letter-spacing: 0.08em;
+          text-transform: uppercase; letter-spacing: 0.08em;
         }
         .signals-grid { display: grid; gap: 14px; }
-
-        /* ── STATES ── */
         .placeholder {
-          padding: 36px;
-          text-align: center;
-          color: var(--text-tertiary);
-          font-size: 13px;
+          padding: 36px; text-align: center;
+          color: var(--text-tertiary); font-size: 13px;
           background: var(--surface);
           border: 1px dashed var(--border-strong);
-          border-radius: var(--radius-lg);
-          line-height: 1.6;
+          border-radius: var(--radius-lg); line-height: 1.6;
         }
         .error-banner {
           padding: 13px 18px;
-          background: var(--short-soft);
-          color: var(--short);
+          background: var(--short-soft); color: var(--short);
           border: 1px solid var(--short-soft);
-          border-radius: var(--radius-md);
-          font-size: 13px;
+          border-radius: var(--radius-md); font-size: 13px;
         }
 
-        /* ── MOBILE ── */
         @media (max-width: 768px) {
           .sidebar {
-            position: fixed;
-            left: -240px;
-            top: 0;
-            height: 100vh;
-            transition: left 0.25s ease;
-            z-index: 100;
+            position: fixed; left: -240px; top: 0;
+            height: 100vh; transition: left 0.25s ease; z-index: 100;
           }
-          .layout.sidebar-open .sidebar {
-            left: 0;
-          }
+          .layout.sidebar-open .sidebar { left: 0; }
           .topbar { display: flex; }
           .content { padding: 20px 16px 64px; }
         }
