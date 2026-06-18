@@ -1,33 +1,73 @@
+/* ─── LIGHT THEME (default) ─────────────────────────────────── */
 :root {
-  --bg: #fafaf8;
-  --surface: #ffffff;
-  --surface-hover: #f5f5f2;
-  --border: #ebebe6;
-  --border-strong: #ddddd6;
+  --bg:              #f0f2f5;
+  --surface:         #ffffff;
+  --surface-hover:   #f5f7fa;
+  --surface-2:       #eef0f4;
+  --border:          #e2e6ed;
+  --border-strong:   #cdd2db;
 
-  --text: #1a1a1a;
-  --text-secondary: #6b6b66;
-  --text-tertiary: #a3a39c;
+  --text:            #0f1117;
+  --text-secondary:  #5a6170;
+  --text-tertiary:   #9aa0ad;
 
-  --long: #1f9d6b;
-  --long-soft: #e9f7f0;
-  --short: #d14b4b;
-  --short-soft: #fbedec;
-  --amber: #b8843a;
-  --amber-soft: #f7eee0;
-  --accent: #2d6ae0;
-  --accent-soft: #eaf0fc;
+  --long:            #00c896;
+  --long-soft:       #e0faf3;
+  --short:           #f04a59;
+  --short-soft:      #fdeaec;
+  --amber:           #f0952a;
+  --amber-soft:      #fef3e2;
+  --accent:          #3b7cf4;
+  --accent-soft:     #eaf0ff;
 
-  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --sidebar-bg:      #ffffff;
+  --sidebar-border:  #e2e6ed;
+  --sidebar-active:  #eaf0ff;
+  --sidebar-active-text: #3b7cf4;
+
+  --font-ui:   'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
 
   --radius-sm: 8px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
-  --shadow-card: 0 1px 2px rgba(20, 20, 15, 0.04), 0 1px 8px rgba(20, 20, 15, 0.03);
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-card: 0 1px 3px rgba(15,17,23,0.06), 0 2px 12px rgba(15,17,23,0.04);
+  --shadow-sidebar: 2px 0 12px rgba(15,17,23,0.06);
 }
 
-* {
+/* ─── DARK THEME ─────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg:              #0d0f14;
+  --surface:         #161a23;
+  --surface-hover:   #1e2330;
+  --surface-2:       #1a1f2b;
+  --border:          #252c3a;
+  --border-strong:   #2e3748;
+
+  --text:            #e8ecf4;
+  --text-secondary:  #8b95a8;
+  --text-tertiary:   #515d72;
+
+  --long:            #00d9a3;
+  --long-soft:       #00d9a314;
+  --short:           #ff4f60;
+  --short-soft:      #ff4f6014;
+  --amber:           #ffb340;
+  --amber-soft:      #ffb34014;
+  --accent:          #4d8cf5;
+  --accent-soft:     #4d8cf514;
+
+  --sidebar-bg:      #111420;
+  --sidebar-border:  #1e2330;
+  --sidebar-active:  #4d8cf518;
+  --sidebar-active-text: #4d8cf5;
+
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.3), 0 2px 12px rgba(0,0,0,0.2);
+  --shadow-sidebar: 2px 0 16px rgba(0,0,0,0.4);
+}
+
+/* ─── RESET ──────────────────────────────────────────────────── */
+*, *::before, *::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -38,18 +78,7 @@ body {
   color: var(--text);
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
-}
-
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 4px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 button {
@@ -57,9 +86,14 @@ button {
   cursor: pointer;
 }
 
-a {
-  color: inherit;
+a { color: inherit; text-decoration: none; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
 }
+::-webkit-scrollbar-track { background: transparent; }
 
 :focus-visible {
   outline: 2px solid var(--accent);
