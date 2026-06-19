@@ -108,8 +108,8 @@ export default function Landing() {
       {/* ── ANNOUNCEMENT BAR ── */}
       <div className="announce-bar">
         <span className="announce-dot" />
-        <span>✦ NWICKI AI — первая платформа где AI сканирует рынок и объясняет каждый сигнал</span>
-        <button className="announce-btn" onClick={() => navigate('/app')}>Попробовать →</button>
+        <span>✦ NWICKI AI — первая платформа где AI сканирует рынок и объясняет каждый сигнал в реальном времени</span>
+        <button className="announce-btn" onClick={() => navigate('/app')}>Попробовать бесплатно →</button>
       </div>
 
       {/* ── NAVBAR ── */}
@@ -139,43 +139,59 @@ export default function Landing() {
 
       {/* ── HERO ── */}
       <section className="hero">
+        <div className="hero-bg-mesh" />
         <div className="hero-inner">
           {prices && (
             <div className="hero-ticker animate-in">
+              <span className="ht-live"><span className="scan-dot-sm" />LIVE</span>
+              <span className="ht-div" />
               <span className="ht-item">
-                <span className="ht-sym">BTC/USD</span>
+                <span className="ht-sym">BTC</span>
                 <span className="ht-val">${prices.btc.price}</span>
                 <span className={`ht-chg ${prices.btc.positive ? 'pos' : 'neg'}`}>{prices.btc.positive ? '▲' : '▼'}{Math.abs(prices.btc.change)}%</span>
               </span>
               <span className="ht-div" />
               <span className="ht-item">
-                <span className="ht-sym">ETH/USD</span>
+                <span className="ht-sym">ETH</span>
                 <span className="ht-val">${prices.eth.price}</span>
                 <span className={`ht-chg ${prices.eth.positive ? 'pos' : 'neg'}`}>{prices.eth.positive ? '▲' : '▼'}{Math.abs(prices.eth.change)}%</span>
               </span>
               <span className="ht-div" />
-              <span className="ht-item">
-                <span className="scan-dot-sm" />
-                <span style={{fontSize:11,color:'var(--long)'}}>Сканер активен</span>
-              </span>
+              <span style={{fontSize:11,color:'var(--text-tertiary)'}}>32 пары · обновление каждые 2 мин</span>
             </div>
           )}
 
+          <div className="hero-badge animate-in">
+            <span className="hb-dot" />
+            <span>Новое: Telegram уведомления о сигналах</span>
+          </div>
+
           <h1 className="hero-title animate-in">
-            Крипто-сигналы &<br/>
-            <span className="gradient-text">AI-платформа автоматизации</span>
+            Торгуй крипто<br/>
+            <span className="gradient-text">умнее с AI</span>
           </h1>
           <p className="hero-sub animate-in">
-            Автоматизируй анализ рынка чтобы избавиться от стресса и эмоциональных ошибок.
+            Сканер анализирует 32 пары на Bybit каждые 2 минуты. AI объясняет каждый сигнал. Ты просто торгуешь.
           </p>
 
           <div className="hero-actions animate-in">
-            <button className="btn-hero-primary" onClick={() => navigate('/app')}>Начать бесплатно</button>
-            <span className="hero-or">или быстрый вход через:</span>
-            <div className="exchange-chips">
-              {['Bybit', 'Binance', 'OKX'].map(e => (
-                <button key={e} className="exchange-chip" onClick={() => navigate('/app')}>{e}</button>
+            <button className="btn-hero-primary" onClick={() => navigate('/app')}>
+              <span>Начать бесплатно</span>
+              <span className="btn-arrow">→</span>
+            </button>
+            <button className="btn-hero-secondary" onClick={() => navigate('/app')}>
+              Смотреть демо
+            </button>
+          </div>
+
+          <div className="hero-social-proof animate-in">
+            <div className="hsp-avatars">
+              {['A','B','C','D','E'].map((l,i) => (
+                <div key={i} className="hsp-av" style={{background:`hsl(${i*55+200},65%,50%)`}}>{l}</div>
               ))}
+            </div>
+            <div className="hsp-text">
+              <span className="hsp-count">118,000+</span> трейдеров уже используют NWICKI
             </div>
           </div>
 
@@ -208,7 +224,7 @@ export default function Landing() {
       {/* ── STATS ── */}
       <section className="stats-section">
         <div className="section-inner">
-          <h2 className="stats-title">Помогаем трейдерам с 2026 года</h2>
+          <p className="stats-eyebrow">Доверяют трейдеры по всему миру</p>
           <div className="stats-grid">
             {STATS.map((s, i) => (
               <div key={i} className="stat-card animate-in">
@@ -224,13 +240,16 @@ export default function Landing() {
       <section className="reasons-section">
         <div className="section-inner reasons-inner">
           <div className="reasons-text">
-            <h2 className="section-heading">Три причины начать<br/>использовать NWICKI сегодня:</h2>
+            <div className="section-label">Почему NWICKI</div>
+            <h2 className="section-heading">Три причины начать<br/>прямо сегодня</h2>
             <ul className="reasons-list">
               <li><span className="check">✓</span> Автоматизируй анализ рынка и избавься от стресса и эмоциональных ошибок.</li>
               <li><span className="check">✓</span> Настрой сканер под свою стратегию — от скальпинга до свинг-трейдинга.</li>
               <li><span className="check">✓</span> Бэктестинг на полных исторических данных перед входом в рынок.</li>
             </ul>
-            <button className="btn-hero-primary" onClick={() => navigate('/app')}>Начать бесплатно</button>
+            <button className="btn-hero-primary" onClick={() => navigate('/app')}>
+              <span>Начать бесплатно</span><span className="btn-arrow">→</span>
+            </button>
           </div>
           <div className="reasons-visual">
             <div className="rv-card">
@@ -275,7 +294,8 @@ export default function Landing() {
       {/* ── 3 STEPS ── */}
       <section className="steps-section">
         <div className="section-inner">
-          <h2 className="section-heading center">Начни автоматический анализ<br/>за 3 простых шага</h2>
+          <div style={{textAlign:'center'}}><div className="section-label">Как начать</div></div>
+          <h2 className="section-heading center">За 3 простых шага</h2>
           <div className="steps-grid">
             <div className="step">
               <div className="step-num">1</div>
@@ -333,6 +353,7 @@ export default function Landing() {
       {/* ── AUDIENCE ── */}
       <section className="audience-section">
         <div className="section-inner">
+          <div style={{textAlign:'center'}}><div className="section-label">Для кого</div></div>
           <h2 className="section-heading center">Для любого уровня трейдера</h2>
           <div className="audience-grid">
             <div className="audience-card">
@@ -357,15 +378,18 @@ export default function Landing() {
       {/* ── TOOLKIT ── */}
       <section className="toolkit-section">
         <div className="section-inner">
-          <h2 className="section-heading center">Инструментарий NWICKI</h2>
-          <p className="section-sub center">Строй своё финансовое будущее с инструментами которые работают на любом рынке</p>
+          <div className="section-label">Инструменты</div>
+          <h2 className="section-heading center">Всё что нужно<br/>для умной торговли</h2>
+          <p className="section-sub center" style={{marginTop:12}}>Строй своё финансовое будущее с инструментами которые работают на любом рынке</p>
           <div className="toolkit-grid">
             {TOOLS.map((t, i) => (
-              <div key={i} className="toolkit-card animate-in">
+              <div key={i} className={`toolkit-card animate-in ${i === 0 ? 'featured' : ''}`}>
+                {i === 1 && <span className="tk-badge">AI</span>}
+                {i === 4 && <span className="tk-badge new">NEW</span>}
                 <div className="tk-icon">{t.icon}</div>
                 <h3 className="tk-title">{t.title}</h3>
                 <p className="tk-desc">{t.desc}</p>
-                <button className="tk-link" onClick={() => navigate('/app')}>Подробнее →</button>
+                <button className="tk-link" onClick={() => navigate('/app')}>Открыть →</button>
               </div>
             ))}
           </div>
@@ -376,7 +400,8 @@ export default function Landing() {
       <section className="benefits-section">
         <div className="section-inner benefits-inner">
           <div className="benefits-text">
-            <h2 className="section-heading">Как NWICKI помогает тебе</h2>
+            <div className="section-label">Преимущества</div>
+            <h2 className="section-heading">Как NWICKI<br/>помогает тебе</h2>
             <div className="benefits-list">
               {BENEFITS.map((b, i) => (
                 <div key={i} className="benefit-item">
@@ -471,13 +496,18 @@ export default function Landing() {
         <div className="section-inner">
           <div className="cta-card">
             <div className="cta-glow" />
-            <h2 className="cta-title">Почему ты ещё не торгуешь?</h2>
-            <p className="cta-sub">Пусть технология занимается рутиной пока ты фокусируешься на стратегии</p>
-            <button className="btn-hero-primary" onClick={() => navigate('/app')}>Начать бесплатно</button>
+            <div className="cta-glow-2" />
+            <div className="cta-eyebrow">🚀 Бесплатно · Без регистрации</div>
+            <h2 className="cta-title">Начни торговать<br/><span className="gradient-text">умнее прямо сейчас</span></h2>
+            <p className="cta-sub">Сканер уже работает. Открой платформу и увидь первый сигнал.</p>
+            <button className="btn-hero-primary" style={{fontSize:16,padding:'16px 36px'}} onClick={() => navigate('/app')}>
+              Открыть платформу →
+            </button>
             <div className="cta-notes">
               <span>✓ Без обязательств</span>
               <span>✓ Без скрытых комиссий</span>
               <span>✓ Без регистрации</span>
+              <span>✓ Работает 24/7</span>
             </div>
           </div>
         </div>
@@ -546,9 +576,23 @@ export default function Landing() {
         .burger-btn span { display: block; width: 22px; height: 2px; background: var(--text); border-radius: 2px; }
 
         /* HERO */
-        .hero { padding: 60px 0 0; overflow: hidden; }
-        .hero-inner { max-width: 1100px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 20px; }
+        .hero { padding: 60px 0 0; overflow: hidden; position: relative; }
+        .hero-bg-mesh {
+          position: absolute; inset: 0; pointer-events: none; z-index: 0;
+          background:
+            radial-gradient(ellipse 80% 50% at 50% -10%, var(--accent-soft) 0%, transparent 60%),
+            radial-gradient(ellipse 40% 30% at 80% 20%, var(--purple-soft) 0%, transparent 50%);
+        }
+        [data-theme="dark"] .hero-bg-mesh {
+          background:
+            radial-gradient(ellipse 80% 50% at 50% -10%, rgba(77,140,245,0.12) 0%, transparent 60%),
+            radial-gradient(ellipse 40% 30% at 80% 20%, rgba(157,110,248,0.08) 0%, transparent 50%);
+        }
+        .hero-inner { max-width: 1100px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 20px; position: relative; z-index: 1; }
+        .hero-badge { display: inline-flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 50px; padding: 6px 14px; font-size: 12px; font-weight: 600; color: var(--text-secondary); box-shadow: var(--shadow-card); }
+        .hb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--long); animation: pulse 2s infinite; flex-shrink: 0; }
         .hero-ticker { display: flex; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 50px; padding: 8px 20px; box-shadow: var(--shadow-card); flex-wrap: wrap; justify-content: center; }
+        .ht-live { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 800; color: var(--long); text-transform: uppercase; letter-spacing: 0.06em; }
         .ht-item { display: flex; align-items: center; gap: 7px; }
         .ht-sym { font-size: 11px; color: var(--text-tertiary); font-weight: 600; }
         .ht-val { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--text); }
@@ -557,15 +601,26 @@ export default function Landing() {
         .ht-div { width: 1px; height: 16px; background: var(--border); }
         .scan-dot-sm { width: 7px; height: 7px; border-radius: 50%; background: var(--long); display: inline-block; animation: pulse 2s infinite; }
 
-        .hero-title { font-size: clamp(32px, 5.5vw, 64px); font-weight: 900; line-height: 1.1; letter-spacing: -0.03em; color: var(--text); max-width: 800px; }
-        .hero-sub { font-size: 18px; color: var(--text-secondary); line-height: 1.6; max-width: 540px; }
-        .hero-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; }
-        .btn-hero-primary { padding: 14px 28px; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; font-size: 15px; font-weight: 700; border: none; border-radius: 12px; box-shadow: 0 8px 24px rgba(77,140,245,0.4); transition: all 0.2s; }
+        .hero-title { font-size: clamp(40px, 6.5vw, 76px); font-weight: 900; line-height: 1.05; letter-spacing: -0.04em; color: var(--text); max-width: 800px; }
+        .hero-sub { font-size: 18px; color: var(--text-secondary); line-height: 1.7; max-width: 500px; }
+        .hero-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; }
+        .btn-hero-primary { padding: 14px 28px; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; font-size: 15px; font-weight: 700; border: none; border-radius: 12px; box-shadow: 0 8px 24px rgba(77,140,245,0.4); transition: all 0.2s; display: flex; align-items: center; gap: 8px; }
         .btn-hero-primary:hover { opacity: 0.88; transform: translateY(-2px); box-shadow: 0 12px 32px rgba(77,140,245,0.5); }
+        .btn-arrow { transition: transform 0.2s; }
+        .btn-hero-primary:hover .btn-arrow { transform: translateX(4px); }
+        .btn-hero-secondary { padding: 14px 24px; background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 15px; font-weight: 600; border-radius: 12px; transition: all 0.2s; }
+        .btn-hero-secondary:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
         .hero-or { font-size: 13px; color: var(--text-tertiary); }
         .exchange-chips { display: flex; gap: 8px; }
         .exchange-chip { padding: 8px 16px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 13px; font-weight: 600; border-radius: 9px; transition: all 0.2s; }
         .exchange-chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+        .hero-social-proof { display: flex; align-items: center; gap: 12px; }
+        .hsp-avatars { display: flex; }
+        .hsp-av { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; font-weight: 700; border: 2px solid var(--bg); margin-left: -10px; }
+        .hsp-av:first-child { margin-left: 0; }
+        .hsp-text { font-size: 13px; color: var(--text-secondary); }
+        .hsp-count { font-weight: 700; color: var(--text); font-family: var(--font-mono); }
 
         /* STRATEGY SCROLL */
         .strategy-scroll { width: 100%; overflow-x: auto; display: flex; gap: 14px; padding: 20px 0 10px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
@@ -588,13 +643,16 @@ export default function Landing() {
         .sc-btn:hover { opacity: 0.85; }
 
         /* STATS */
-        .stats-section { padding: 60px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+        .stats-section { padding: 60px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface); }
+        .stats-eyebrow { font-size: 12px; font-weight: 600; color: var(--text-tertiary); text-align: center; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 28px; }
         .stats-title { font-size: 22px; font-weight: 700; color: var(--text); text-align: center; margin-bottom: 32px; }
         .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 20px; }
-        .stat-card { text-align: center; padding: 28px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-card); transition: all 0.2s; }
-        .stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
-        .stat-val { font-size: 40px; font-weight: 900; font-family: var(--font-mono); line-height: 1; margin-bottom: 8px; }
-        .stat-label { font-size: 14px; color: var(--text-secondary); }
+        .stat-card { text-align: center; padding: 32px 20px; background: var(--bg); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-card); transition: all 0.25s; position: relative; overflow: hidden; }
+        .stat-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, var(--accent-soft), var(--purple-soft)); opacity: 0; transition: opacity 0.25s; }
+        .stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--accent); }
+        .stat-card:hover::before { opacity: 1; }
+        .stat-val { font-size: 44px; font-weight: 900; font-family: var(--font-mono); line-height: 1; margin-bottom: 10px; position: relative; }
+        .stat-label { font-size: 14px; color: var(--text-secondary); position: relative; }
 
         /* REASONS */
         .reasons-section { padding: 80px 0; }
@@ -635,8 +693,9 @@ export default function Landing() {
         /* STEPS */
         .steps-section { padding: 80px 0; background: var(--surface-hover); }
         .steps-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 32px; margin-top: 48px; }
-        .step { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-card); }
-        .step-num { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; font-size: 16px; font-weight: 800; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(77,140,245,0.3); }
+        .step { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-card); transition: all 0.25s; }
+        .step:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--border-strong); }
+        .step-num { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; font-size: 18px; font-weight: 800; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; box-shadow: 0 4px 14px rgba(77,140,245,0.35); }
         .step-title { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
         .step-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px; }
         .step-link { border: none; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 8px; margin-bottom: 16px; display: inline-block; }
@@ -652,21 +711,27 @@ export default function Landing() {
         /* AUDIENCE */
         .audience-section { padding: 80px 0; }
         .audience-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; margin-top: 40px; }
-        .audience-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-card); text-align: center; transition: all 0.2s; }
-        .audience-card:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: var(--shadow-lg); }
-        .audience-icon { font-size: 36px; margin-bottom: 14px; }
+        .audience-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px 28px; box-shadow: var(--shadow-card); text-align: center; transition: all 0.25s; position: relative; overflow: hidden; }
+        .audience-card::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: linear-gradient(135deg, var(--accent), var(--purple)); opacity: 0; transition: opacity 0.25s; }
+        .audience-card:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: 0 20px 40px rgba(77,140,245,0.1); }
+        .audience-card:hover::after { opacity: 1; }
+        .audience-icon { font-size: 40px; margin-bottom: 16px; }
         .audience-card h3 { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
         .audience-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
 
         /* TOOLKIT */
         .toolkit-section { padding: 80px 0; background: var(--surface-hover); }
+        .section-label { display: inline-block; font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; background: var(--accent-soft); padding: 4px 12px; border-radius: 20px; margin-bottom: 14px; }
         .toolkit-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; margin-top: 40px; }
-        .toolkit-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-card); transition: all 0.2s; }
-        .toolkit-card:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+        .toolkit-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-card); transition: all 0.25s; position: relative; overflow: hidden; }
+        .toolkit-card.featured { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft), var(--shadow-card); }
+        .toolkit-card:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: 0 20px 40px rgba(77,140,245,0.12); }
+        .tk-badge { position: absolute; top: 16px; right: 16px; font-size: 9px; font-weight: 800; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; }
+        .tk-badge.new { background: linear-gradient(135deg, var(--long), #00a875); }
         .tk-icon { font-size: 28px; margin-bottom: 14px; }
         .tk-title { font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
-        .tk-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px; }
-        .tk-link { border: none; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; padding: 0; cursor: pointer; }
+        .tk-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 16px; }
+        .tk-link { border: none; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; padding: 0; transition: gap 0.2s; }
 
         /* BENEFITS */
         .benefits-section { padding: 80px 0; }
@@ -710,11 +775,13 @@ export default function Landing() {
 
         /* CTA */
         .cta-section { padding: 80px 0; }
-        .cta-card { background: var(--surface); border: 1px solid var(--border); border-radius: 24px; padding: 72px 48px; text-align: center; box-shadow: var(--shadow-lg); position: relative; overflow: hidden; }
-        .cta-glow { position: absolute; top: -100px; left: 50%; transform: translateX(-50%); width: 500px; height: 400px; background: radial-gradient(circle, var(--accent-soft) 0%, transparent 70%); pointer-events: none; }
-        .cta-title { font-size: clamp(28px, 4vw, 44px); font-weight: 900; line-height: 1.15; letter-spacing: -0.02em; color: var(--text); margin-bottom: 14px; position: relative; }
-        .cta-sub { font-size: 16px; color: var(--text-secondary); margin-bottom: 32px; position: relative; }
-        .cta-notes { display: flex; justify-content: center; gap: 24px; margin-top: 16px; font-size: 13px; color: var(--text-tertiary); flex-wrap: wrap; position: relative; }
+        .cta-card { background: var(--surface); border: 1px solid var(--border); border-radius: 24px; padding: 80px 48px; text-align: center; box-shadow: var(--shadow-lg); position: relative; overflow: hidden; }
+        .cta-glow { position: absolute; top: -120px; left: 50%; transform: translateX(-50%); width: 600px; height: 500px; background: radial-gradient(circle, var(--accent-soft) 0%, transparent 65%); pointer-events: none; }
+        .cta-glow-2 { position: absolute; bottom: -80px; right: -80px; width: 400px; height: 400px; background: radial-gradient(circle, var(--purple-soft) 0%, transparent 65%); pointer-events: none; }
+        .cta-eyebrow { display: inline-block; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 6px 16px; border-radius: 20px; margin-bottom: 20px; position: relative; }
+        .cta-title { font-size: clamp(28px, 4.5vw, 52px); font-weight: 900; line-height: 1.1; letter-spacing: -0.025em; color: var(--text); margin-bottom: 16px; position: relative; }
+        .cta-sub { font-size: 17px; color: var(--text-secondary); margin-bottom: 36px; position: relative; }
+        .cta-notes { display: flex; justify-content: center; gap: 24px; margin-top: 20px; font-size: 13px; color: var(--text-tertiary); flex-wrap: wrap; position: relative; }
 
         /* FOOTER */
         .footer { border-top: 1px solid var(--border); padding: 56px 0 24px; }
