@@ -174,8 +174,8 @@ body {
 }
 
 /* ─── BASE ───────────────────────────────────────────────────── */
-button { font-family: inherit; cursor: none; }
-a { color: inherit; text-decoration: none; cursor: none; }
+button { font-family: inherit; cursor: auto; }
+a { color: inherit; text-decoration: none; cursor: auto; }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
