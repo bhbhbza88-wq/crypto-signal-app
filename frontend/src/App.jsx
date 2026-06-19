@@ -6,6 +6,8 @@ import SignalCard from './SignalCard'
 import HistoryTable from './HistoryTable'
 import MarketView from './MarketView'
 import AIChat from './AIChat'
+import Backtest from './Backtest'
+import SmartTrade from './SmartTrade'
 
 const POLL_INTERVAL = 15000
 const MARKET_POLL_INTERVAL = 60000
@@ -20,6 +22,10 @@ const NAV_SECTIONS = [
     { key: 'signal_bot',   label: 'Signal Bot',     icon: '⚡' },
     { key: 'grid_bot',     label: 'GRID Bot',       icon: '⊞' },
     { key: 'smarttrade',   label: 'SmartTrade',     icon: '⬡', sub: true },
+    { key: 'market',       label: 'Скринер',        icon: '◫' },
+    { key: 'backtest',     label: 'Бэктест',        icon: '📊' },
+    { key: 'smarttrade_calc', label: 'Smart Trade', icon: '⚡', badge: 'NEW' },
+    { key: 'history',      label: 'История',        icon: '📋' },
     { key: 'terminal',     label: 'Терминал',       icon: '▣' },
     { key: 'invite',       label: 'Пригласить',     icon: '👥' },
     { key: 'subscriptions',label: 'Подписки',       icon: '🎫' },
@@ -719,6 +725,8 @@ export default function App() {
           {tab === 'terminal' && <TerminalPage />}
           {tab === 'market' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Скринер рынка</h1></div><MarketView market={market} /></section>}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} /></section>}
+          {tab === 'backtest' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Бэктест <span className="beta-tag">BETA</span></h1></div><Backtest /></section>}
+          {tab === 'smarttrade_calc' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Smart Trade <span className="hot-tag">NEW</span></h1></div><SmartTrade /></section>}
           {tab === 'scanner' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Сканер <span className="hot-tag">AI</span></h1></div><MarketView market={market} /></section>}
           {tab === 'ai' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat signals={signals} stats={stats} market={market} /></section>}
           {(tab === 'invite' || tab === 'subscriptions' || tab === 'smarttrade') && <ComingSoonPage tab={tab} />}
