@@ -131,15 +131,336 @@ class BacktestRequest(BaseModel):
     symbol: str = "BTC/USDT"
     timeframe: str = "1h"
     deposit: float = 1000.0
-    limit: int = 500  # количество свечей истории
+    limit: int = 500
+    period_days: int = 30        # период в днях (30/90/180/365/730)
+    commission: float = 0.055    # комиссия в % (Bybit taker = 0.055%)
+    slippage: float = 0.05       # проскальзывание в % (0.05% по умолчанию)
+
+
+def fetch_ohlcv_paginated(symbol: str, tf: str, days: int) -> list:
+    """Скачивает свечи за нужный период постранично (по 1000 штук)."""
+    tf_minutes = {"15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440}
+    mins = tf_minutes.get(tf, 60)
+    total_candles = int(days * 24 * 60 / mins)
+    total_candles = min(total_candles, 5000)  # защита от слишком большого запроса
+
+    all_candles = []
+    since = None
+    batch = 1000
+
+    # Вычисляем стартовое время
+    import time as time_mod
+    since = int((time_mod.time() - days * 86400) * 1000)
+
+    while len(all_candles) < total_candles:
+        need = min(batch, total_candles - len(all_candles))
+        raw = api_call(
+            exchange.fetch_ohlcv, symbol, tf,
+            since=since, limit=need
+        )
+        if not raw:
+            break
+        all_candles.extend(raw)
+        if len(raw) < need:
+            break
+        since = raw[-1][0] + 1  # следующая свеча после последней
+        if len(all_candles) >= total_candles:
+            break
+
+    # Убираем дубликаты по timestamp
+    seen = set()
+    unique = []
+    for c in all_candles:
+        if c[0] not in seen:
+            seen.add(c[0])
+            unique.append(c)
+    return sorted(unique, key=lambda x: x[0])
 
 
 @app.post("/api/backtest")
 def run_backtest(req: BacktestRequest):
     """
-    Реальный бэктест: скачивает исторические свечи с Bybit,
-    прогоняет стратегию сканера, симулирует TP/SL на следующих барах.
+    Реальный бэктест с комиссиями, проскальзыванием и пагинацией истории.
     """
+    tf_map = {"15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d"}
+    tf = tf_map.get(req.timeframe, "1h")
+
+    tf_higher = {"15m": "1h", "30m": "1h", "1h": "4h", "4h": "1d", "1d": "1d"}
+    tf_top    = {"15m": "4h", "30m": "4h", "1h": "4h", "4h": "1d", "1d": "1d"}
+
+    cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+
+    # Загружаем основной таймфрейм постранично за нужный период
+    raw_main = fetch_ohlcv_paginated(req.symbol, tf, req.period_days)
+
+    # Вспомогательные таймфреймы — берём с запасом
+    higher_days = max(req.period_days, 30)
+    raw_1h = fetch_ohlcv_paginated(req.symbol, tf_higher[tf], higher_days)
+    raw_4h = fetch_ohlcv_paginated(req.symbol, tf_top[tf], higher_days)
+
+    if not raw_main or not raw_1h or not raw_4h:
+        raise HTTPException(status_code=502, detail="Не удалось загрузить данные с Bybit")
+
+    df_main = build_features(pd.DataFrame(raw_main, columns=cols))
+    df_1h   = build_features(pd.DataFrame(raw_1h,   columns=cols))
+    df_4h   = build_features(pd.DataFrame(raw_4h,   columns=cols))
+
+    if len(df_main) < 80:
+        raise HTTPException(status_code=400, detail="Недостаточно исторических данных")
+
+    # Комиссия и проскальзывание
+    COMMISSION = req.commission / 100   # % → доля
+    SLIPPAGE   = req.slippage / 100     # % → доля
+    ROUND_TRIP = COMMISSION * 2         # вход + выход
+
+    equity = req.deposit
+    max_equity = req.deposit
+    max_drawdown = 0.0
+    wins = losses = bes = 0
+    total_commission_paid = 0.0
+    trades_list = []
+    equity_curve = [{"ts": int(df_main.iloc[0]['timestamp']), "equity": round(equity, 2)}]
+
+    WARMUP = 60
+    in_trade = False
+    trade_signal = None
+    trade_entry = None
+    trade_stop = None
+    trade_tp1 = None
+    trade_tp2 = None
+    trade_pos_usdt = None
+    trade_open_i = None
+    trade_tp1_hit = False
+
+    for i in range(WARMUP, len(df_main) - 1):
+        candle = df_main.iloc[i]
+        next_c = df_main.iloc[i + 1]
+
+        if in_trade:
+            hi = next_c['high']
+            lo = next_c['low']
+            close_next = next_c['close']
+            result = None
+            pnl_pct = 0.0
+
+            if trade_signal == 'LONG':
+                if lo <= trade_stop:
+                    exit_price = trade_stop * (1 - SLIPPAGE)  # проскальзывание при стопе хуже
+                    pnl_pct = (exit_price - trade_entry) / trade_entry * 100
+                    result = 'sl'
+                elif not trade_tp1_hit and hi >= trade_tp1:
+                    trade_tp1_hit = True
+                    exit_price = trade_tp1 * (1 - SLIPPAGE)
+                    pnl_pct_partial = (exit_price - trade_entry) / trade_entry * 100
+                    comm = trade_pos_usdt * 0.5 * ROUND_TRIP
+                    equity += trade_pos_usdt * 0.5 * (pnl_pct_partial / 100) - comm
+                    total_commission_paid += comm
+                    trade_stop = trade_entry
+                    continue
+                elif trade_tp1_hit and hi >= trade_tp2:
+                    exit_price = trade_tp2 * (1 - SLIPPAGE)
+                    pnl_pct = (exit_price - trade_entry) / trade_entry * 100
+                    result = 'tp2'
+                elif i - trade_open_i > 48:
+                    exit_price = close_next * (1 - SLIPPAGE)
+                    pnl_pct = (exit_price - trade_entry) / trade_entry * 100
+                    result = 'timeout'
+            else:  # SHORT
+                if hi >= trade_stop:
+                    exit_price = trade_stop * (1 + SLIPPAGE)
+                    pnl_pct = (trade_entry - exit_price) / trade_entry * 100
+                    result = 'sl'
+                elif not trade_tp1_hit and lo <= trade_tp1:
+                    trade_tp1_hit = True
+                    exit_price = trade_tp1 * (1 + SLIPPAGE)
+                    pnl_pct_partial = (trade_entry - exit_price) / trade_entry * 100
+                    comm = trade_pos_usdt * 0.5 * ROUND_TRIP
+                    equity += trade_pos_usdt * 0.5 * (pnl_pct_partial / 100) - comm
+                    total_commission_paid += comm
+                    trade_stop = trade_entry
+                    continue
+                elif trade_tp1_hit and lo <= trade_tp2:
+                    exit_price = trade_tp2 * (1 + SLIPPAGE)
+                    pnl_pct = (trade_entry - exit_price) / trade_entry * 100
+                    result = 'tp2'
+                elif i - trade_open_i > 48:
+                    exit_price = close_next * (1 + SLIPPAGE)
+                    pnl_pct = (trade_entry - exit_price) / trade_entry * 100
+                    result = 'timeout'
+
+            if result:
+                pnl_usdt = trade_pos_usdt * (pnl_pct / 100)
+                comm = trade_pos_usdt * ROUND_TRIP
+                pnl_usdt -= comm
+                total_commission_paid += comm
+                equity += pnl_usdt
+
+                if equity > max_equity:
+                    max_equity = equity
+                dd = (max_equity - equity) / max_equity * 100
+                if dd > max_drawdown:
+                    max_drawdown = dd
+
+                if result in ('tp1', 'tp2', 'tp3') or (result == 'timeout' and pnl_usdt > 0):
+                    wins += 1
+                elif result == 'sl':
+                    losses += 1
+                else:
+                    bes += 1
+
+                trades_list.append({
+                    "i": i,
+                    "ts": int(candle['timestamp']),
+                    "symbol": req.symbol,
+                    "signal": trade_signal,
+                    "entry": round(trade_entry, 6),
+                    "exit": round(close_next, 6),
+                    "result": result,
+                    "pnl_pct": round(pnl_pct, 3),
+                    "pnl_usdt": round(pnl_usdt, 2),
+                    "commission": round(comm, 3),
+                    "equity": round(equity, 2),
+                })
+                equity_curve.append({"ts": int(next_c['timestamp']), "equity": round(equity, 2)})
+
+                in_trade = False
+                trade_tp1_hit = False
+            continue
+
+        # ── Нет позиции — ищем вход ──
+        df_slice = df_main.iloc[:i + 1].copy()
+        ts_now = candle['timestamp']
+        df_1h_slice = df_1h[df_1h['timestamp'] <= ts_now].copy()
+        df_4h_slice = df_4h[df_4h['timestamp'] <= ts_now].copy()
+
+        if len(df_1h_slice) < 20 or len(df_4h_slice) < 20:
+            continue
+
+        regime, adx_1h = detect_regime(df_1h_slice)
+        if regime in ('FLAT', 'CHOP'):
+            continue
+
+        last = df_slice.iloc[-1]
+        adx_30m = last['adx'] if not pd.isna(last['adx']) else 0
+        if adx_30m < 23 or pd.isna(last['atr']) or last['atr'] <= 0:
+            continue
+
+        signal = None
+        if entry_conditions(df_slice, 'LONG') and regime == 'UPTREND':
+            signal = 'LONG'
+        elif entry_conditions(df_slice, 'SHORT') and regime == 'DOWNTREND':
+            signal = 'SHORT'
+        if not signal:
+            continue
+
+        l4 = df_4h_slice.iloc[-1]
+        l1 = df_1h_slice.iloc[-1]
+        if signal == 'LONG':
+            if not (l4['ema9'] > l4['ema21'] and l1['ema9'] > l1['ema21']):
+                continue
+        else:
+            if not (l4['ema9'] < l4['ema21'] and l1['ema9'] < l1['ema21']):
+                continue
+
+        # Вход с проскальзыванием
+        raw_entry = last['close']
+        entry = raw_entry * (1 + SLIPPAGE) if signal == 'LONG' else raw_entry * (1 - SLIPPAGE)
+
+        atr = last['atr']
+        atr_pct = atr / entry if entry > 0 else 0
+        sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx_30m, atr_pct)
+
+        d = atr * sl_m
+        if signal == 'LONG':
+            stop = entry - d
+            tp1  = entry + atr * tp1_m
+            tp2  = entry + atr * tp2_m
+        else:
+            stop = entry + d
+            tp1  = entry - atr * tp1_m
+            tp2  = entry - atr * tp2_m
+
+        risk_usdt = req.deposit * 1.5 / 100
+        sl_dist = abs(entry - stop)
+        pos_usdt = (risk_usdt / sl_dist * entry) if sl_dist > 0 else 0
+        pos_usdt = min(pos_usdt, equity * 0.3)
+
+        if pos_usdt <= 0:
+            continue
+
+        # Комиссия за вход
+        entry_comm = pos_usdt * COMMISSION
+        equity -= entry_comm
+        total_commission_paid += entry_comm
+
+        in_trade = True
+        trade_signal = signal
+        trade_entry = entry
+        trade_stop = stop
+        trade_tp1 = tp1
+        trade_tp2 = tp2
+        trade_pos_usdt = pos_usdt
+        trade_open_i = i
+        trade_tp1_hit = False
+
+    # Итоги
+    total = wins + losses + bes
+    winrate = round(wins / total * 100, 1) if total > 0 else 0
+    total_pnl = round((equity - req.deposit) / req.deposit * 100, 2)
+    avg_pnl = round(sum(t['pnl_pct'] for t in trades_list) / total, 2) if total > 0 else 0
+
+    wins_pnl = [t['pnl_usdt'] for t in trades_list if t['pnl_usdt'] > 0]
+    loss_pnl = [t['pnl_usdt'] for t in trades_list if t['pnl_usdt'] < 0]
+    avg_win  = round(sum(wins_pnl) / len(wins_pnl), 2) if wins_pnl else 0
+    avg_loss = round(sum(loss_pnl) / len(loss_pnl), 2) if loss_pnl else 0
+    profit_factor = round(
+        abs(sum(wins_pnl) / sum(loss_pnl)), 2
+    ) if loss_pnl and sum(loss_pnl) != 0 else 0
+
+    equity_curve_out = [
+        {"day": idx, "equity": p["equity"], "ts": p["ts"]}
+        for idx, p in enumerate(equity_curve)
+    ]
+
+    trades_out = []
+    for t in trades_list[-50:]:
+        dt = datetime.fromtimestamp(t['ts'] / 1000)
+        trades_out.append({
+            "id": t["i"],
+            "date": dt.strftime('%Y-%m-%d'),
+            "time": dt.strftime('%H:%M'),
+            "signal": t["signal"],
+            "entry": t["entry"],
+            "result": t["result"],
+            "pnl_pct": t["pnl_pct"],
+            "pnl_usdt": t["pnl_usdt"],
+            "commission": t["commission"],
+        })
+
+    return {
+        "symbol": req.symbol,
+        "timeframe": tf,
+        "period_days": req.period_days,
+        "candles_used": len(df_main),
+        "deposit": req.deposit,
+        "final_equity": round(equity, 2),
+        "total_pnl": total_pnl,
+        "max_drawdown": round(max_drawdown, 2),
+        "winrate": winrate,
+        "total": total,
+        "wins": wins,
+        "losses": losses,
+        "breakeven": bes,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "profit_factor": profit_factor,
+        "avg_pnl": avg_pnl,
+        "total_commission": round(total_commission_paid, 2),
+        "commission_pct": req.commission,
+        "slippage_pct": req.slippage,
+        "equity_curve": equity_curve_out,
+        "trades": trades_out,
+    }
     # Маппинг таймфреймов для запроса 4h и 1h данных
     tf_map = {"15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d"}
     tf = tf_map.get(req.timeframe, "1h")
