@@ -1,99 +1,71 @@
 import { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid } from 'recharts'
 
-const PAIRS = ['BTC/USDT','ETH/USDT','SOL/USDT','BNB/USDT','XRP/USDT','ADA/USDT','DOGE/USDT','AVAX/USDT','DOT/USDT','LINK/USDT','MATIC/USDT','UNI/USDT','ATOM/USDT','LTC/USDT','ETC/USDT']
-const PERIODS = ['1 неделя','1 месяц','3 месяца','6 месяцев','1 год']
-const TIMEFRAMES = ['15m','1h','4h','1d']
+const PAIRS = [
+  'BTC/USDT','ETH/USDT','SOL/USDT','BNB/USDT','XRP/USDT',
+  'ADA/USDT','AVAX/USDT','DOT/USDT','ATOM/USDT','LINK/USDT',
+  'ARB/USDT','SUI/USDT','INJ/USDT','LTC/USDT','ETC/USDT',
+]
+const TIMEFRAMES = [
+  { label: '15m', value: '15m', candles: 500 },
+  { label: '30m', value: '30m', candles: 500 },
+  { label: '1h',  value: '1h',  candles: 500 },
+  { label: '4h',  value: '4h',  candles: 300 },
+]
 
-function generateBacktestData(pair, period, deposit) {
-  const days = { '1 неделя': 7, '1 месяц': 30, '3 месяца': 90, '6 месяцев': 180, '1 год': 365 }[period] || 30
-  const seed = pair.charCodeAt(0) + period.length
-  const rng = (n) => ((Math.sin(seed * n + 1) + 1) / 2)
-  
-  let equity = deposit
-  let maxEquity = deposit
-  let maxDrawdown = 0
-  let wins = 0, losses = 0, bes = 0
-  const trades = []
-  const equityCurve = [{ day: 0, equity: deposit, label: '' }]
-  
-  const numTrades = Math.floor(days * 0.8 + rng(1) * days * 0.4)
-  
-  for (let i = 0; i < numTrades; i++) {
-    const r = rng(i * 7 + 1)
-    const isWin = r > 0.38
-    const isBe = !isWin && r > 0.25
-    
-    let pnlPct
-    if (isWin) { pnlPct = 1.5 + rng(i * 3) * 6; wins++ }
-    else if (isBe) { pnlPct = 0; bes++ }
-    else { pnlPct = -(1 + rng(i * 5) * 2.5); losses++ }
-    
-    const pnlUsd = equity * (pnlPct / 100)
-    equity += pnlUsd
-    if (equity > maxEquity) maxEquity = equity
-    const dd = ((maxEquity - equity) / maxEquity) * 100
-    if (dd > maxDrawdown) maxDrawdown = dd
-    
-    trades.push({
-      id: i + 1,
-      day: Math.floor((i / numTrades) * days),
-      pnlPct: parseFloat(pnlPct.toFixed(2)),
-      pnlUsd: parseFloat(pnlUsd.toFixed(2)),
-      result: isWin ? (pnlPct > 4 ? 'tp2' : 'tp1') : isBe ? 'be' : 'sl'
-    })
-    
-    if (i % 3 === 0) {
-      equityCurve.push({ day: Math.floor((i / numTrades) * days), equity: parseFloat(equity.toFixed(2)), label: '' })
-    }
-  }
-  
-  equityCurve.push({ day: days, equity: parseFloat(equity.toFixed(2)), label: '' })
-  
-  const totalPnl = ((equity - deposit) / deposit) * 100
-  const winrate = numTrades > 0 ? Math.round((wins / numTrades) * 100) : 0
-  const avgWin = wins > 0 ? trades.filter(t => t.pnlPct > 0).reduce((s, t) => s + t.pnlPct, 0) / wins : 0
-  const avgLoss = losses > 0 ? trades.filter(t => t.pnlPct < 0).reduce((s, t) => s + t.pnlPct, 0) / losses : 0
-  const profitFactor = losses > 0 && avgLoss !== 0 ? Math.abs((avgWin * wins) / (avgLoss * losses)) : 0
-  
-  return {
-    totalPnl: parseFloat(totalPnl.toFixed(2)),
-    finalEquity: parseFloat(equity.toFixed(2)),
-    maxDrawdown: parseFloat(maxDrawdown.toFixed(2)),
-    winrate, trades: numTrades, wins, losses, bes,
-    avgWin: parseFloat(avgWin.toFixed(2)),
-    avgLoss: parseFloat(avgLoss.toFixed(2)),
-    profitFactor: parseFloat(profitFactor.toFixed(2)),
-    equityCurve, tradesList: trades.slice(-20)
-  }
+const RESULT_LABELS = { tp1: 'TP1', tp2: 'TP2+', sl: 'Стоп', be: 'Б/У', timeout: 'Таймаут' }
+const RESULT_COLORS = { tp1: 'var(--long)', tp2: 'var(--long)', sl: 'var(--short)', be: 'var(--text-secondary)', timeout: 'var(--amber)' }
+
+function resolveBase() {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL
+  return 'http://localhost:8000'
 }
-
-const RESULT_LABELS = { tp1: 'TP1', tp2: 'TP2+', sl: 'Стоп', be: 'Б/У' }
 
 export default function Backtest() {
   const [pair, setPair] = useState('BTC/USDT')
-  const [period, setPeriod] = useState('1 месяц')
-  const [timeframe, setTimeframe] = useState('1h')
+  const [timeframe, setTimeframe] = useState(TIMEFRAMES[2])
   const [deposit, setDeposit] = useState(1000)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
 
-  function runBacktest() {
+  async function runBacktest() {
     setRunning(true)
     setResult(null)
-    setTimeout(() => {
-      setResult(generateBacktestData(pair, period, Number(deposit)))
+    setError(null)
+    try {
+      const res = await fetch(`${resolveBase()}/api/backtest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: pair,
+          timeframe: timeframe.value,
+          deposit: Number(deposit),
+          limit: timeframe.candles,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || `Ошибка ${res.status}`)
+      }
+      const data = await res.json()
+      setResult(data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
       setRunning(false)
-    }, 1800)
+    }
   }
 
-  const pos = result?.totalPnl > 0
+  const pos = result?.total_pnl > 0
 
   return (
     <div className="bt-page animate-in">
       <div className="page-header" style={{marginBottom:20}}>
         <h1 className="page-title">Бэктестинг</h1>
-        <p style={{fontSize:13,color:'var(--text-secondary)',marginTop:4}}>Проверь стратегию сканера на исторических данных</p>
+        <p style={{fontSize:13,color:'var(--text-secondary)',marginTop:4}}>
+          Реальная проверка стратегии сканера на исторических данных Bybit
+        </p>
       </div>
 
       {/* Settings */}
@@ -105,16 +77,14 @@ export default function Backtest() {
           </select>
         </div>
         <div className="bf-group">
-          <label className="bf-label">Период</label>
-          <select className="bf-input" value={period} onChange={e => setPeriod(e.target.value)}>
-            {PERIODS.map(p => <option key={p}>{p}</option>)}
-          </select>
-        </div>
-        <div className="bf-group">
           <label className="bf-label">Таймфрейм</label>
           <div className="bf-toggle">
             {TIMEFRAMES.map(tf => (
-              <button key={tf} className={`bft ${timeframe === tf ? 'active' : ''}`} onClick={() => setTimeframe(tf)}>{tf}</button>
+              <button
+                key={tf.value}
+                className={`bft ${timeframe.value === tf.value ? 'active' : ''}`}
+                onClick={() => setTimeframe(tf)}
+              >{tf.label}</button>
             ))}
           </div>
         </div>
@@ -126,17 +96,34 @@ export default function Backtest() {
           </div>
         </div>
         <button className="bt-run-btn" onClick={runBacktest} disabled={running}>
-          {running ? '⟳ Считаю...' : '▶ Запустить бэктест'}
+          {running ? '⟳ Загружаю данные...' : '▶ Запустить бэктест'}
         </button>
       </div>
+
+      {/* Info */}
+      <div className="bt-info">
+        <span>📡 Данные: реальные свечи Bybit</span>
+        <span>⚙ Стратегия: EMA9/21/50 · RSI · ADX · ATR</span>
+        <span>📊 Свечей: ~{timeframe.candles}</span>
+        <span>💰 Риск на сделку: 1.5% депозита</span>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div className="bt-error animate-in">
+          ❌ {error}
+        </div>
+      )}
 
       {/* Loading */}
       {running && (
         <div className="bt-loading animate-in">
           <div className="bt-spinner" />
           <div>
-            <div style={{fontWeight:700,color:'var(--text)'}}>Анализирую историю...</div>
-            <div style={{fontSize:12,color:'var(--text-tertiary)',marginTop:4}}>Применяю стратегию сканера к историческим данным {pair}</div>
+            <div style={{fontWeight:700,color:'var(--text)'}}>Загружаю реальные данные с Bybit...</div>
+            <div style={{fontSize:12,color:'var(--text-tertiary)',marginTop:4}}>
+              Прогоняю стратегию сканера по {timeframe.candles}+ свечам {pair} · это займёт 10–30 сек
+            </div>
           </div>
         </div>
       )}
@@ -144,73 +131,135 @@ export default function Backtest() {
       {/* Results */}
       {result && !running && (
         <div className="bt-results animate-in">
+
+          {/* Real data badge */}
+          <div className="bt-real-badge">
+            <span className="bt-real-dot" />
+            Реальные данные Bybit · {result.candles_used} свечей {result.timeframe} · {result.symbol}
+          </div>
+
           {/* Summary cards */}
           <div className="bt-summary-grid">
             <div className="bt-stat-card main">
               <div className="bt-stat-label">Итоговый ROI</div>
-              <div className={`bt-stat-val big ${pos ? 'pos' : 'neg'}`}>{pos ? '+' : ''}{result.totalPnl}%</div>
-              <div style={{fontSize:12,color:'var(--text-tertiary)'}}>за {period}</div>
-            </div>
-            <div className="bt-stat-card">
-              <div className="bt-stat-label">Финальный баланс</div>
-              <div className="bt-stat-val">${result.finalEquity.toLocaleString()}</div>
-              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>начало: ${Number(deposit).toLocaleString()}</div>
+              <div className={`bt-stat-val big ${pos ? 'pos' : 'neg'}`}>
+                {pos ? '+' : ''}{result.total_pnl}%
+              </div>
+              <div style={{fontSize:12,color:'var(--text-tertiary)'}}>
+                ${Number(deposit).toLocaleString()} → ${result.final_equity.toLocaleString()}
+              </div>
             </div>
             <div className="bt-stat-card">
               <div className="bt-stat-label">Винрейт</div>
               <div className={`bt-stat-val ${result.winrate >= 50 ? 'pos' : 'neg'}`}>{result.winrate}%</div>
-              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>{result.wins}W / {result.losses}L / {result.bes}BE</div>
+              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>{result.wins}W / {result.losses}L / {result.breakeven}BE</div>
             </div>
             <div className="bt-stat-card">
               <div className="bt-stat-label">Макс. просадка</div>
-              <div className="bt-stat-val neg">-{result.maxDrawdown}%</div>
+              <div className="bt-stat-val neg">-{result.max_drawdown}%</div>
               <div style={{fontSize:11,color:'var(--text-tertiary)'}}>от пика</div>
             </div>
             <div className="bt-stat-card">
               <div className="bt-stat-label">Профит-фактор</div>
-              <div className={`bt-stat-val ${result.profitFactor >= 1.5 ? 'pos' : result.profitFactor >= 1 ? '' : 'neg'}`}>{result.profitFactor}</div>
+              <div className={`bt-stat-val ${result.profit_factor >= 1.5 ? 'pos' : result.profit_factor >= 1 ? '' : 'neg'}`}>
+                {result.profit_factor}
+              </div>
               <div style={{fontSize:11,color:'var(--text-tertiary)'}}>{'>'} 1.5 — отлично</div>
             </div>
             <div className="bt-stat-card">
               <div className="bt-stat-label">Сделок</div>
-              <div className="bt-stat-val">{result.trades}</div>
-              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>Ср. выигрыш: +{result.avgWin}%</div>
+              <div className="bt-stat-val">{result.total}</div>
+              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>Ср. выигрыш: +{result.avg_win}%</div>
+            </div>
+            <div className="bt-stat-card">
+              <div className="bt-stat-label">Ср. проигрыш</div>
+              <div className="bt-stat-val neg">{result.avg_loss}%</div>
+              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>Ср. PnL: {result.avg_pnl}%</div>
             </div>
           </div>
 
           {/* Equity curve */}
-          <div className="bt-chart-card">
-            <h3 style={{fontSize:14,fontWeight:700,color:'var(--text)',marginBottom:16}}>Кривая доходности</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={result.equityCurve}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="day" tick={{fill:'var(--text-tertiary)',fontSize:10}} tickFormatter={v => `день ${v}`} axisLine={false} tickLine={false} />
-                <YAxis tick={{fill:'var(--text-tertiary)',fontSize:10,fontFamily:'var(--font-mono)'}} axisLine={false} tickLine={false} tickFormatter={v => `$${v.toLocaleString()}`} width={70} />
-                <Tooltip contentStyle={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,fontFamily:'var(--font-mono)',fontSize:12}} formatter={(v) => [`$${v.toLocaleString()}`, 'Баланс']} labelFormatter={v => `День ${v}`} />
-                <ReferenceLine y={Number(deposit)} stroke="var(--text-tertiary)" strokeDasharray="4 4" />
-                <Line type="monotone" dataKey="equity" stroke={pos ? 'var(--long)' : 'var(--short)'} strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          {result.equity_curve.length > 1 && (
+            <div className="bt-chart-card">
+              <h3 style={{fontSize:14,fontWeight:700,color:'var(--text)',marginBottom:16}}>
+                Кривая доходности (реальная)
+              </h3>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={result.equity_curve}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis
+                    dataKey="day"
+                    tick={{fill:'var(--text-tertiary)',fontSize:10}}
+                    tickFormatter={v => `#${v}`}
+                    axisLine={false} tickLine={false}
+                  />
+                  <YAxis
+                    tick={{fill:'var(--text-tertiary)',fontSize:10,fontFamily:'var(--font-mono)'}}
+                    axisLine={false} tickLine={false}
+                    tickFormatter={v => `$${v.toLocaleString()}`}
+                    width={72}
+                  />
+                  <Tooltip
+                    contentStyle={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,fontFamily:'var(--font-mono)',fontSize:12}}
+                    formatter={(v) => [`$${v.toLocaleString()}`, 'Баланс']}
+                    labelFormatter={v => `Сделка #${v}`}
+                  />
+                  <ReferenceLine y={Number(deposit)} stroke="var(--text-tertiary)" strokeDasharray="4 4" />
+                  <Line
+                    type="monotone" dataKey="equity"
+                    stroke={pos ? 'var(--long)' : 'var(--short)'}
+                    strokeWidth={2.5} dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* No trades message */}
+          {result.total === 0 && (
+            <div className="bt-no-trades">
+              <div style={{fontSize:32,marginBottom:12}}>🔍</div>
+              <div style={{fontWeight:700,color:'var(--text)',marginBottom:8}}>Сделок не найдено</div>
+              <div style={{fontSize:13,color:'var(--text-secondary)'}}>
+                Стратегия не нашла входов на этом периоде. Попробуй другой таймфрейм или пару.
+              </div>
+            </div>
+          )}
 
           {/* Last trades */}
-          <div className="bt-trades-card">
-            <h3 style={{fontSize:14,fontWeight:700,color:'var(--text)',marginBottom:14}}>Последние сделки</h3>
-            <div className="bt-trades-list">
-              {result.tradesList.reverse().map((t, i) => (
-                <div key={i} className="bt-trade-row">
-                  <span style={{color:'var(--text-tertiary)',fontSize:11,fontFamily:'var(--font-mono)'}}>#{t.id}</span>
-                  <span style={{fontSize:12,color:'var(--text-secondary)'}}>{RESULT_LABELS[t.result] || t.result}</span>
-                  <span style={{fontFamily:'var(--font-mono)',fontSize:12,fontWeight:600,color:t.pnlPct > 0 ? 'var(--long)' : t.pnlPct < 0 ? 'var(--short)' : 'var(--text-secondary)',marginLeft:'auto'}}>
-                    {t.pnlPct > 0 ? '+' : ''}{t.pnlPct}%
-                  </span>
-                  <span style={{fontFamily:'var(--font-mono)',fontSize:11,color:'var(--text-tertiary)',width:80,textAlign:'right'}}>
-                    {t.pnlUsd > 0 ? '+' : ''}${t.pnlUsd}
-                  </span>
-                </div>
-              ))}
+          {result.trades.length > 0 && (
+            <div className="bt-trades-card">
+              <h3 style={{fontSize:14,fontWeight:700,color:'var(--text)',marginBottom:14}}>
+                Последние сделки (реальные)
+              </h3>
+              <div className="bt-trades-list">
+                {[...result.trades].reverse().map((t, i) => (
+                  <div key={i} className="bt-trade-row">
+                    <span style={{color:'var(--text-tertiary)',fontSize:11,fontFamily:'var(--font-mono)',width:32}}>#{i+1}</span>
+                    <span style={{
+                      fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:4,fontFamily:'var(--font-mono)',
+                      background: t.signal==='LONG' ? 'var(--long-soft)' : 'var(--short-soft)',
+                      color: t.signal==='LONG' ? 'var(--long)' : 'var(--short)',
+                    }}>{t.signal}</span>
+                    <span style={{fontSize:11,color:'var(--text-tertiary)',flex:1}}>{t.date} {t.time}</span>
+                    <span style={{fontSize:12,color: RESULT_COLORS[t.result] || 'var(--text-secondary)'}}>
+                      {RESULT_LABELS[t.result] || t.result}
+                    </span>
+                    <span style={{
+                      fontFamily:'var(--font-mono)',fontSize:13,fontWeight:700,
+                      color: t.pnl_pct > 0 ? 'var(--long)' : t.pnl_pct < 0 ? 'var(--short)' : 'var(--text-secondary)',
+                      width:72,textAlign:'right'
+                    }}>
+                      {t.pnl_pct > 0 ? '+' : ''}{t.pnl_pct}%
+                    </span>
+                    <span style={{fontFamily:'var(--font-mono)',fontSize:11,color:'var(--text-tertiary)',width:70,textAlign:'right'}}>
+                      {t.pnl_usdt > 0 ? '+' : ''}${t.pnl_usdt}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -219,10 +268,16 @@ export default function Backtest() {
         .bt-settings {
           display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
           background: var(--surface); border: 1px solid var(--border);
-          border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px;
+          border-radius: var(--radius-lg); padding: 20px; margin-bottom: 12px;
           box-shadow: var(--shadow-card);
         }
         .bt-settings .bf-group { flex: 1; min-width: 140px; }
+        .bt-info {
+          display: flex; gap: 16px; flex-wrap: wrap;
+          padding: 10px 16px; background: var(--surface-hover);
+          border: 1px solid var(--border); border-radius: var(--radius-md);
+          margin-bottom: 20px; font-size: 12px; color: var(--text-tertiary);
+        }
         .bt-run-btn {
           padding: 10px 24px; background: linear-gradient(135deg, var(--accent), var(--purple));
           color: #fff; border: none; border-radius: 9px; font-size: 14px; font-weight: 700;
@@ -230,6 +285,11 @@ export default function Backtest() {
         }
         .bt-run-btn:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
         .bt-run-btn:disabled { opacity: 0.6; }
+        .bt-error {
+          background: var(--short-soft); border: 1px solid var(--short);
+          border-radius: var(--radius-md); padding: 14px 16px;
+          color: var(--short); font-size: 13px; margin-bottom: 16px;
+        }
         .bt-loading {
           background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
           padding: 32px; display: flex; align-items: center; gap: 20px; margin-bottom: 20px;
@@ -240,6 +300,15 @@ export default function Backtest() {
           animation: spin 0.8s linear infinite; flex-shrink: 0;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .bt-real-badge {
+          display: flex; align-items: center; gap: 8px;
+          font-size: 12px; color: var(--long); font-weight: 600;
+          padding: 8px 14px; background: var(--long-soft);
+          border: 1px solid rgba(0,229,168,0.2); border-radius: 8px;
+          margin-bottom: 16px;
+        }
+        .bt-real-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--long); animation: pulse 2s infinite; flex-shrink: 0; }
+        @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(0,229,168,0.4)} 70%{box-shadow:0 0 0 6px rgba(0,229,168,0)} 100%{box-shadow:0 0 0 0 rgba(0,229,168,0)} }
         .bt-results { display: flex; flex-direction: column; gap: 16px; }
         .bt-summary-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 12px; }
         .bt-stat-card {
@@ -255,13 +324,17 @@ export default function Backtest() {
           background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
           padding: 20px; box-shadow: var(--shadow-card);
         }
+        .bt-no-trades {
+          background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+          padding: 48px; text-align: center; box-shadow: var(--shadow-card);
+        }
         .bt-trades-card {
           background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
           padding: 20px; box-shadow: var(--shadow-card);
         }
-        .bt-trades-list { display: flex; flex-direction: column; gap: 0; }
+        .bt-trades-list { display: flex; flex-direction: column; }
         .bt-trade-row {
-          display: flex; align-items: center; gap: 12px; padding: 9px 0;
+          display: flex; align-items: center; gap: 10px; padding: 9px 0;
           border-bottom: 1px solid var(--border);
         }
         .bt-trade-row:last-child { border-bottom: none; }
@@ -271,12 +344,12 @@ export default function Backtest() {
         .bf-input:focus { border-color: var(--accent); }
         .bf-input-row { display: flex; }
         .bf-input-row .bf-input { border-radius: 7px 0 0 7px; flex: 1; }
-        .bf-unit { padding: 8px 10px; background: var(--surface-hover); border: 1px solid var(--border); border-left: none; border-radius: 0 7px 7px 0; font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+        .bf-unit { padding: 8px 10px; background: var(--surface-hover); border: 1px solid var(--border); border-left: none; border-radius: 0 7px 7px 0; font-size: 12px; color: var(--text-secondary); white-space: nowrap; display: flex; align-items: center; }
         .bf-toggle { display: flex; background: var(--surface-hover); border-radius: 7px; padding: 2px; gap: 2px; }
         .bft { flex: 1; padding: 5px 8px; border: none; background: transparent; color: var(--text-secondary); font-size: 12px; border-radius: 5px; transition: all 0.15s; }
         .bft.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.1); font-weight: 600; }
         @media (max-width: 900px) { .bt-summary-grid { grid-template-columns: repeat(2,1fr); } .bt-stat-card.main { grid-column: span 2; } }
-        @media (max-width: 600px) { .bt-settings { flex-direction: column; } .bt-settings .bf-group { width: 100%; } }
+        @media (max-width: 600px) { .bt-settings { flex-direction: column; } .bt-settings .bf-group { width: 100%; } .bt-info { flex-direction: column; gap: 6px; } }
       `}</style>
     </div>
   )
