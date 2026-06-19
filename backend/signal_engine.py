@@ -12,7 +12,7 @@ from data_layer import (
 )
 
 SL_BASE = 1.8
-TP1_BASE = 2.5
+TP1_BASE = 2.0  # было 2.5 — сдвинули ближе для повышения винрейта
 TP2_BASE = 4.0
 TP3_BASE = 6.0
 
