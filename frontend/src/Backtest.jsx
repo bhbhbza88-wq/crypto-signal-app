@@ -7,10 +7,16 @@ const PAIRS = [
   'ARB/USDT','SUI/USDT','INJ/USDT','LTC/USDT','ETC/USDT',
 ]
 const TIMEFRAMES = [
-  { label: '15m', value: '15m', candles: 500 },
-  { label: '30m', value: '30m', candles: 500 },
-  { label: '1h',  value: '1h',  candles: 500 },
-  { label: '4h',  value: '4h',  candles: 300 },
+  { label: '15m', value: '15m' },
+  { label: '30m', value: '30m' },
+  { label: '1h',  value: '1h'  },
+  { label: '4h',  value: '4h'  },
+]
+const PERIODS = [
+  { label: '1 месяц',   days: 30  },
+  { label: '3 месяца',  days: 90  },
+  { label: '6 месяцев', days: 180 },
+  { label: '1 год',     days: 365 },
 ]
 
 const RESULT_LABELS = { tp1: 'TP1', tp2: 'TP2+', sl: 'Стоп', be: 'Б/У', timeout: 'Таймаут' }
@@ -24,7 +30,11 @@ function resolveBase() {
 export default function Backtest() {
   const [pair, setPair] = useState('BTC/USDT')
   const [timeframe, setTimeframe] = useState(TIMEFRAMES[2])
+  const [period, setPeriod] = useState(PERIODS[0])
   const [deposit, setDeposit] = useState(1000)
+  const [commission, setCommission] = useState(0.055)
+  const [slippage, setSlippage] = useState(0.05)
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -41,7 +51,9 @@ export default function Backtest() {
           symbol: pair,
           timeframe: timeframe.value,
           deposit: Number(deposit),
-          limit: timeframe.candles,
+          period_days: period.days,
+          commission: Number(commission),
+          slippage: Number(slippage),
         }),
       })
       if (!res.ok) {
@@ -80,31 +92,73 @@ export default function Backtest() {
           <label className="bf-label">Таймфрейм</label>
           <div className="bf-toggle">
             {TIMEFRAMES.map(tf => (
-              <button
-                key={tf.value}
-                className={`bft ${timeframe.value === tf.value ? 'active' : ''}`}
-                onClick={() => setTimeframe(tf)}
-              >{tf.label}</button>
+              <button key={tf.value} className={`bft ${timeframe.value === tf.value ? 'active' : ''}`}
+                onClick={() => setTimeframe(tf)}>{tf.label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="bf-group">
+          <label className="bf-label">Период</label>
+          <div className="bf-toggle">
+            {PERIODS.map(p => (
+              <button key={p.days} className={`bft ${period.days === p.days ? 'active' : ''}`}
+                onClick={() => setPeriod(p)}>{p.label}</button>
             ))}
           </div>
         </div>
         <div className="bf-group">
           <label className="bf-label">Начальный депозит</label>
           <div className="bf-input-row">
-            <input className="bf-input" type="number" value={deposit} onChange={e => setDeposit(e.target.value)} style={{borderRadius:'7px 0 0 7px'}} />
+            <input className="bf-input" type="number" value={deposit}
+              onChange={e => setDeposit(e.target.value)} style={{borderRadius:'7px 0 0 7px'}} />
             <span className="bf-unit">USDT</span>
           </div>
         </div>
         <button className="bt-run-btn" onClick={runBacktest} disabled={running}>
-          {running ? '⟳ Загружаю данные...' : '▶ Запустить бэктест'}
+          {running ? '⟳ Загружаю...' : '▶ Запустить'}
         </button>
+      </div>
+
+      {/* Advanced settings */}
+      <div className="bt-advanced-wrap">
+        <button className="bt-advanced-toggle" onClick={() => setShowAdvanced(v => !v)}>
+          ⚙ Расширенные настройки {showAdvanced ? '▲' : '▼'}
+        </button>
+        {showAdvanced && (
+          <div className="bt-advanced animate-in">
+            <div className="bf-group">
+              <label className="bf-label">Комиссия Bybit (% за сделку)</label>
+              <div className="bf-input-row">
+                <input className="bf-input" type="number" step="0.001" value={commission}
+                  onChange={e => setCommission(e.target.value)} style={{borderRadius:'7px 0 0 7px'}} />
+                <span className="bf-unit">%</span>
+              </div>
+              <span style={{fontSize:10,color:'var(--text-tertiary)',marginTop:3}}>
+                Bybit taker = 0.055% · Учитывается дважды (вход + выход)
+              </span>
+            </div>
+            <div className="bf-group">
+              <label className="bf-label">Проскальзывание (% от цены)</label>
+              <div className="bf-input-row">
+                <input className="bf-input" type="number" step="0.01" value={slippage}
+                  onChange={e => setSlippage(e.target.value)} style={{borderRadius:'7px 0 0 7px'}} />
+                <span className="bf-unit">%</span>
+              </div>
+              <span style={{fontSize:10,color:'var(--text-tertiary)',marginTop:3}}>
+                Реальная цена исполнения хуже на этот % · Обычно 0.03–0.1%
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Info */}
       <div className="bt-info">
         <span>📡 Данные: реальные свечи Bybit</span>
         <span>⚙ Стратегия: EMA9/21/50 · RSI · ADX · ATR</span>
-        <span>📊 Свечей: ~{timeframe.candles}</span>
+        <span>📅 Период: {period.label}</span>
+        <span>💸 Комиссия: {commission}% × 2</span>
+        <span>📉 Проскальзывание: {slippage}%</span>
         <span>💰 Риск на сделку: 1.5% депозита</span>
       </div>
 
@@ -120,9 +174,9 @@ export default function Backtest() {
         <div className="bt-loading animate-in">
           <div className="bt-spinner" />
           <div>
-            <div style={{fontWeight:700,color:'var(--text)'}}>Загружаю реальные данные с Bybit...</div>
+            <div style={{fontWeight:700,color:'var(--text)'}}>Загружаю данные с Bybit за {period.label}...</div>
             <div style={{fontSize:12,color:'var(--text-tertiary)',marginTop:4}}>
-              Прогоняю стратегию сканера по {timeframe.candles}+ свечам {pair} · это займёт 10–30 сек
+              Прогоняю стратегию · учитываю комиссии {commission}% и проскальзывание {slippage}% · подожди 15–60 сек
             </div>
           </div>
         </div>
@@ -135,7 +189,10 @@ export default function Backtest() {
           {/* Real data badge */}
           <div className="bt-real-badge">
             <span className="bt-real-dot" />
-            Реальные данные Bybit · {result.candles_used} свечей {result.timeframe} · {result.symbol}
+            Реальные данные Bybit · {result.candles_used} свечей {result.timeframe} · {result.symbol} · {result.period_days} дней
+            <span style={{marginLeft:'auto',color:'var(--text-tertiary)',fontSize:11}}>
+              Комиссии: ${result.total_commission} · Проскальзывание: {result.slippage_pct}%
+            </span>
           </div>
 
           {/* Summary cards */}
@@ -169,12 +226,12 @@ export default function Backtest() {
             <div className="bt-stat-card">
               <div className="bt-stat-label">Сделок</div>
               <div className="bt-stat-val">{result.total}</div>
-              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>Ср. выигрыш: +{result.avg_win}%</div>
+              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>Ср. выигрыш: +${result.avg_win}</div>
             </div>
             <div className="bt-stat-card">
-              <div className="bt-stat-label">Ср. проигрыш</div>
-              <div className="bt-stat-val neg">{result.avg_loss}%</div>
-              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>Ср. PnL: {result.avg_pnl}%</div>
+              <div className="bt-stat-label">Уплачено комиссий</div>
+              <div className="bt-stat-val neg">${result.total_commission}</div>
+              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>{result.commission_pct}% × 2 за сделку</div>
             </div>
           </div>
 
@@ -264,6 +321,11 @@ export default function Backtest() {
       )}
 
       <style>{`
+        .bt-advanced-wrap { margin-bottom: 16px; }
+        .bt-advanced-toggle { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 600; padding: 8px 16px; border-radius: 8px; transition: all 0.2s; }
+        .bt-advanced-toggle:hover { border-color: var(--accent); color: var(--accent); }
+        .bt-advanced { display: flex; gap: 20px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px; margin-top: 8px; box-shadow: var(--shadow-card); }
+        .bt-advanced .bf-group { flex: 1; min-width: 200px; }
         .bt-page { max-width: 100%; }
         .bt-settings {
           display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
