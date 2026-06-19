@@ -158,6 +158,32 @@ def check_trades():
                     db.remove_trade(symbol)
                     continue
 
+            # ── Трейлинг стоп на 50% пути до TP1 ────────
+            # Когда цена прошла половину пути entry→TP1,
+            # подтягиваем стоп в небольшой плюс (+0.3% от входа)
+            # чтобы не закрываться в б/у или минус
+            if not tp1_hit and not trade.get('be_hit'):
+                if signal == 'LONG':
+                    progress = (price - entry) / (tp1 - entry) if (tp1 - entry) > 0 else 0
+                    if progress >= 0.5:
+                        new_stop = entry * 1.003  # стоп +0.3% от входа
+                        if new_stop > trade['stop']:
+                            trade['stop'] = new_stop
+                            trade['be_hit'] = True
+                            db.upsert_trade(symbol, trade)
+                            db.add_event(symbol, 'trail',
+                                         f"Стоп подтянут в плюс (+0.3%) — цена прошла 50% до TP1 ({pnl:+.1f}%)")
+                else:  # SHORT
+                    progress = (entry - price) / (entry - tp1) if (entry - tp1) > 0 else 0
+                    if progress >= 0.5:
+                        new_stop = entry * 0.997  # стоп -0.3% от входа
+                        if new_stop < trade['stop']:
+                            trade['stop'] = new_stop
+                            trade['be_hit'] = True
+                            db.upsert_trade(symbol, trade)
+                            db.add_event(symbol, 'trail',
+                                         f"Стоп подтянут в плюс (+0.3%) — цена прошла 50% до TP1 ({pnl:+.1f}%)")
+
             # ── Стоп ─────────────────────────────────────
             if _hit(signal, price, stop, 'sl'):
                 result = 'be' if trade.get('be_hit') else 'sl'
