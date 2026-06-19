@@ -1,418 +1,235 @@
 """
-Signal Engine — детекторы, скоринг 0-20, генерация торговых сигналов.
-Перенесено из Telegram-бота V8 без изменений в логике.
+Trade Tracker — мониторинг открытых сделок: TP1/TP2/TP3, стоп, трейлинг.
+Перенесено из check_trades() бота. send_message() заменён на запись событий в БД.
 """
 
-import os
 import pandas as pd
 
-from data_layer import (
-    fetch_data_cached, build_features, detect_regime,
-    get_active_symbols, api_call, exchange,
-)
-
-SL_BASE = 1.8
-TP1_BASE = 2.5  # было 2.5 — сдвинули ближе для повышения винрейта
-TP2_BASE = 4.0
-TP3_BASE = 6.0
-
-DEPOSIT = float(os.environ.get("DEPOSIT", "1000"))
-RISK_PCT = float(os.environ.get("RISK_PCT", "1.5"))
-
-SCORE_MIN = int(os.environ.get("SCORE_MIN", "15"))
-SCORE_MAX = 20
-
-ADX_MIN = 23
+import database as db
+from data_layer import fetch_data_cached, build_features, fetch_ticker
 
 
-def detect_pullback(df, signal):
-    if len(df) < 10:
-        return False, 0
-    recent = df.tail(10)
-    last = df.iloc[-1]
-
-    if signal == 'LONG':
-        touched_ema21 = (recent['low'] <= recent['ema21'] * 1.005).any()
-        touched_ema50 = (recent['low'] <= recent['ema50'] * 1.008).any()
-        resumed = last['close'] > last['ema21']
-        if (touched_ema21 or touched_ema50) and resumed:
-            bonus = 3 if touched_ema50 else 2
-            return True, bonus
-    else:
-        touched_ema21 = (recent['high'] >= recent['ema21'] * 0.995).any()
-        touched_ema50 = (recent['high'] >= recent['ema50'] * 0.992).any()
-        resumed = last['close'] < last['ema21']
-        if (touched_ema21 or touched_ema50) and resumed:
-            bonus = 3 if touched_ema50 else 2
-            return True, bonus
-
-    return False, 0
-
-
-def detect_structure(df, signal):
-    if len(df) < 20:
-        return False, 0
-
-    recent = df.tail(20)
-    highs = []
-    lows = []
-
-    for i in range(1, len(recent) - 1):
-        if recent['high'].iloc[i] > recent['high'].iloc[i - 1] and recent['high'].iloc[i] > recent['high'].iloc[i + 1]:
-            highs.append(recent['high'].iloc[i])
-        if recent['low'].iloc[i] < recent['low'].iloc[i - 1] and recent['low'].iloc[i] < recent['low'].iloc[i + 1]:
-            lows.append(recent['low'].iloc[i])
-
-    if len(highs) < 2 or len(lows) < 2:
-        return False, 0
-
-    if signal == 'LONG':
-        hh = all(highs[i] > highs[i - 1] for i in range(1, len(highs)))
-        hl = all(lows[i] > lows[i - 1] for i in range(1, len(lows)))
-        if hh and hl:
-            return True, 3
-        if hh or hl:
-            return True, 1
-    else:
-        lh = all(highs[i] < highs[i - 1] for i in range(1, len(highs)))
-        ll = all(lows[i] < lows[i - 1] for i in range(1, len(lows)))
-        if lh and ll:
-            return True, 3
-        if lh or ll:
-            return True, 1
-
-    return False, 0
-
-
-def detect_trend_strength(df):
-    last = df.iloc[-1]
-    if last['close'] == 0:
-        return 0
-    spread = abs(last['ema9'] - last['ema50']) / last['close']
-    if spread > 0.04:
-        return 3
-    elif spread > 0.02:
-        return 2
-    elif spread > 0.01:
-        return 1
-    return 0
-
-
-def detect_volume_climax(df):
-    if len(df) < 20:
-        return False
-    last = df.iloc[-1]
-    vol_avg = last['vol_avg']
-    if pd.isna(vol_avg) or vol_avg == 0:
-        return False
-    vol_ratio = last['volume'] / vol_avg
-    return vol_ratio > 4.0
-
-
-def detect_ema_cross_fresh(df, signal, max_bars=5):
-    if len(df) < max_bars + 2:
-        return False
-    recent = df.tail(max_bars + 1)
-    for i in range(1, len(recent)):
-        prev = recent.iloc[i - 1]
-        curr = recent.iloc[i]
-        if signal == 'LONG':
-            if prev['ema9'] <= prev['ema21'] and curr['ema9'] > curr['ema21']:
-                return True
-        else:
-            if prev['ema9'] >= prev['ema21'] and curr['ema9'] < curr['ema21']:
-                return True
-    return False
-
-
-def detect_trend_stable(df, signal, lookback=5):
-    if len(df) < lookback + 1:
-        return False
-    recent = df.tail(lookback)
-    if signal == 'LONG':
-        return ((recent['ema9'] > recent['ema21']).all() and
-                (recent['close'] > recent['ema50']).sum() >= lookback - 1)
-    return ((recent['ema9'] < recent['ema21']).all() and
-            (recent['close'] < recent['ema50']).sum() >= lookback - 1)
-
-
-def volume_healthy(df):
-    last = df.iloc[-1]
-    return last['volume'] > last['vol_avg'] and last['vol_trend'] > 0.85
-
-
-def mtf_confirms(df_4h, df_1h, signal):
-    l4 = df_4h.iloc[-1]
-    l1 = df_1h.iloc[-1]
-    if signal == 'LONG':
-        return (l4['ema9'] > l4['ema21'] and l4['close'] > l4['ema50'] and
-                l1['ema9'] > l1['ema21'] and l1['close'] > l1['ema50'])
-    return (l4['ema9'] < l4['ema21'] and l4['close'] < l4['ema50'] and
-            l1['ema9'] < l1['ema21'] and l1['close'] < l1['ema50'])
-
-
-def is_overextended(df, signal):
-    last = df.iloc[-1]
-    atr = last['atr']
-    if pd.isna(atr) or atr == 0:
-        return False
-    if abs(last['close'] - last['open']) > atr * 2.5:
-        return True
-    if signal == 'LONG' and last['rsi'] > 76:
-        return True
-    if signal == 'SHORT' and last['rsi'] < 24:
-        return True
-    if df.tail(4)['high'].max() - df.tail(4)['low'].min() > atr * 4.0:
-        return True
-    return False
-
-
-def entry_conditions(df, signal):
-    last = df.iloc[-1]
-    if signal == 'LONG':
-        return (last['ema9'] > last['ema21'] and last['close'] > last['ema50'] and
-                40 < last['rsi'] < 70 and last['plus_di'] > last['minus_di'])
-    return (last['ema9'] < last['ema21'] and last['close'] < last['ema50'] and
-            30 < last['rsi'] < 60 and last['minus_di'] > last['plus_di'])
-
-
-_btc_cache = {'ts': 0.0, 'regime': 'CHOP'}
-
-
-def get_btc_regime():
-    import time
-    now = time.time()
-    if now - _btc_cache['ts'] < 300:
-        return _btc_cache['regime']
-    d = api_call(exchange.fetch_ohlcv, 'BTC/USDT', '1h', limit=60)
-    if not d:
-        return _btc_cache['regime']
-    df = build_features(pd.DataFrame(d, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']))
-    regime, _ = detect_regime(df)
-    _btc_cache.update({'ts': now, 'regime': regime})
-    return regime
-
-
-def btc_allows(symbol, signal):
-    if symbol == 'BTC/USDT':
-        return True
-    btc = get_btc_regime()
-    if signal == 'LONG' and btc == 'DOWNTREND':
-        return False
-    if signal == 'SHORT' and btc == 'UPTREND':
-        return False
-    return True
-
-
-def calc_score(df_30m, df_1h, regime, adx_1h, signal):
-    last = df_30m.iloc[-1]
-    adx_30m = last['adx'] if not pd.isna(last['adx']) else 0
-    atr_pct = last['atr'] / last['close'] if last['close'] > 0 else 0
-    vol_ratio = last['volume'] / (last['vol_avg'] + 1e-10)
-    score = 0
-
-    if vol_ratio > 2.0:
-        score += 3
-    elif vol_ratio > 1.5:
-        score += 2
-    elif vol_ratio > 1.2:
-        score += 1
-
-    if adx_30m > 35:
-        score += 3
-    elif adx_30m > 28:
-        score += 2
-    elif adx_30m > ADX_MIN:
-        score += 1
-
-    if regime in ('UPTREND', 'DOWNTREND'):
-        score += 2
-        if adx_1h > 20:
-            score += 1
-
-    if atr_pct > 0.006:
-        score += 2
-    elif atr_pct > 0.003:
-        score += 1
-
-    _, pb_bonus = detect_pullback(df_30m, signal)
-    score += pb_bonus
-
-    _, st_bonus = detect_structure(df_30m, signal)
-    score += st_bonus
-
-    score += detect_trend_strength(df_30m)
-
-    return min(score, SCORE_MAX)
-
-
-def get_mults(adx, atr_pct):
-    sl, tp1, tp2, tp3 = SL_BASE, TP1_BASE, TP2_BASE, TP3_BASE
-    if adx > 40:
-        tp1 *= 1.25; tp2 *= 1.35; tp3 *= 1.50; sl *= 1.15
-    elif adx > 28:
-        tp1 *= 1.10; tp2 *= 1.15; tp3 *= 1.20; sl *= 1.08
-    if atr_pct > 0.008:
-        sl *= 1.15
-    elif atr_pct > 0.005:
-        sl *= 1.08
-    return round(sl, 3), round(tp1, 3), round(tp2, 3), round(tp3, 3)
-
-
-def calc_levels(signal, entry, atr_30m, atr_1h, sl_m, tp1_m, tp2_m, tp3_m):
-    atr = atr_30m * 0.35 + atr_1h * 0.65
-    d = atr * sl_m
-    if signal == 'LONG':
-        return entry - d, entry + atr * tp1_m, entry + atr * tp2_m, entry + atr * tp3_m
-    return entry + d, entry - atr * tp1_m, entry - atr * tp2_m, entry - atr * tp3_m
-
-
-def calc_position(entry, stop):
-    risk_usdt = DEPOSIT * RISK_PCT / 100
-    sl_dist = abs(entry - stop)
-    if sl_dist == 0:
+def pnl_pct(signal, entry, price):
+    if not entry:
         return 0.0
-    return round(risk_usdt / sl_dist * entry, 2)
+    return ((price - entry) / entry * 100) if signal == 'LONG' else ((entry - price) / entry * 100)
 
 
-def build_entry_reasons(df_30m, df_1h, df_4h, regime, adx_30m, adx_1h, signal, last):
-    """Собирает человекочитаемые причины входа из уже посчитанных детекторов."""
-    reasons = []
-
-    fresh_cross = detect_ema_cross_fresh(df_30m, signal, max_bars=5)
-    if fresh_cross:
-        reasons.append('Свежее пересечение EMA9/EMA21')
-
-    has_pullback, pb_bonus = detect_pullback(df_30m, signal)
-    if has_pullback:
-        level = 'EMA50' if pb_bonus == 3 else 'EMA21'
-        reasons.append(f'Откат к {level} и возобновление движения')
-
-    has_structure, st_bonus = detect_structure(df_30m, signal)
-    if has_structure:
-        if signal == 'LONG':
-            reasons.append('Структура HH/HL (растущие максимумы и минимумы)' if st_bonus == 3 else 'Частичная бычья структура')
-        else:
-            reasons.append('Структура LH/LL (падающие максимумы и минимумы)' if st_bonus == 3 else 'Частичная медвежья структура')
-
-    vol_ratio = last['volume'] / (last['vol_avg'] + 1e-10)
-    if vol_ratio > 1.2:
-        reasons.append(f'Объём выше среднего на {round((vol_ratio - 1) * 100)}%')
-
-    if adx_30m > 28:
-        reasons.append(f'ADX {adx_30m:.0f} — сильный тренд на 30м')
-    elif adx_30m > ADX_MIN:
-        reasons.append(f'ADX {adx_30m:.0f} — тренд подтверждён')
-
-    reasons.append(f'Подтверждение на 1ч и 4ч (мультитаймфрейм)')
-
-    trend_strength = detect_trend_strength(df_30m)
-    if trend_strength >= 2:
-        reasons.append('Широкий спред EMA9/EMA50 — устойчивый тренд')
-
-    btc = get_btc_regime()
-    if btc in ('UPTREND', 'DOWNTREND'):
-        reasons.append(f'BTC в режиме {btc}, не противоречит сигналу')
-
-    return reasons
+def _hit(signal, price, level, kind):
+    if signal == 'LONG':
+        return price >= level if kind == 'tp' else price <= level
+    return price <= level if kind == 'tp' else price >= level
 
 
-def get_market_overview():
-    """Состояние рынка: режим BTC + режим по каждой отслеживаемой монете."""
-    btc_regime = get_btc_regime()
-    symbols_status = []
-    for symbol in get_active_symbols():
-        data = fetch_data_cached(symbol)
-        if not data:
-            symbols_status.append({'symbol': symbol, 'regime': 'НЕТ ДАННЫХ', 'adx': 0})
-            continue
-        df_1h = build_features(data['1h'])
-        regime, adx_1h = detect_regime(df_1h)
-        symbols_status.append({'symbol': symbol, 'regime': regime, 'adx': round(adx_1h, 1)})
-
-    uptrend = sum(1 for s in symbols_status if s['regime'] == 'UPTREND')
-    downtrend = sum(1 for s in symbols_status if s['regime'] == 'DOWNTREND')
-    total = len(symbols_status)
-
-    return {
-        'btc_regime': btc_regime,
-        'symbols': symbols_status,
-        'uptrend_count': uptrend,
-        'downtrend_count': downtrend,
-        'chop_count': total - uptrend - downtrend,
-        'total': total,
-    }
+def calc_trailing_stop(signal, price, atr, current_stop):
+    if signal == 'LONG':
+        new_stop = price - atr * 0.8
+        return max(new_stop, current_stop)
+    else:
+        new_stop = price + atr * 0.8
+        return min(new_stop, current_stop)
 
 
-def generate_signal(symbol):
+def check_potential_loss(symbol, signal, entry, price):
+    pnl = pnl_pct(signal, entry, price)
+    if pnl > 0.3 or abs(price - entry) / entry >= 0.015:
+        return False, [], 0
     data = fetch_data_cached(symbol)
     if not data:
-        return None
-
-    df_4h = build_features(data['4h'])
-    df_1h = build_features(data['1h'])
-    df_30m = build_features(data['30m'])
-
-    regime, adx_1h = detect_regime(df_1h)
-    if regime in ('FLAT', 'CHOP'):
-        return None
-
-    last = df_30m.iloc[-1]
-    adx_30m = last['adx'] if not pd.isna(last['adx']) else 0
-    if adx_30m < ADX_MIN:
-        return None
-    if pd.isna(last['atr']) or last['atr'] <= 0:
-        return None
-
-    signal = None
-    if entry_conditions(df_30m, 'LONG') and regime == 'UPTREND':
-        signal = 'LONG'
-    elif entry_conditions(df_30m, 'SHORT') and regime == 'DOWNTREND':
-        signal = 'SHORT'
-    if not signal:
-        return None
-
-    if not detect_trend_stable(df_30m, signal):
-        return None
-    if not mtf_confirms(df_4h, df_1h, signal):
-        return None
-    if not volume_healthy(df_30m):
-        return None
-    if not btc_allows(symbol, signal):
-        return None
-    if is_overextended(df_30m, signal):
-        return None
-    if detect_volume_climax(df_30m):
-        return None
-
-    fresh_cross = detect_ema_cross_fresh(df_30m, signal, max_bars=5)
-    has_pullback, _ = detect_pullback(df_30m, signal)
-    if not fresh_cross and not has_pullback:
-        return None
-
-    score = calc_score(df_30m, df_1h, regime, adx_1h, signal)
-    if score < SCORE_MIN:
-        return None
-
-    entry_reasons = build_entry_reasons(df_30m, df_1h, df_4h, regime, adx_30m, adx_1h, signal, last)
-
-    print(
-        f"💎 {symbol}: {signal} | режим={regime} | "
-        f"ADX={adx_30m:.0f}/{adx_1h:.0f} | score={score}/{SCORE_MAX} | RSI={last['rsi']:.1f}"
-    )
-
-    return {
-        'symbol': symbol, 'signal': signal,
-        'score': score, 'regime': regime,
-        'adx_30m': adx_30m, 'adx_1h': adx_1h,
-        'last': last, 'last_1h': df_1h.iloc[-1],
-        'df': df_30m, 'entry_reasons': entry_reasons,
-    }
+        return False, [], 0
+    df = build_features(data['30m'])
+    last = df.iloc[-1]
+    weak, lines = 0, []
+    if last['volume'] < last['vol_avg']:
+        weak += 1; lines.append("Объём упал")
+    if last['vol_trend'] < 0.70:
+        weak += 1; lines.append("Объём угасает")
+    if signal == 'LONG':
+        if last['ema9'] < last['ema21']:
+            weak += 1; lines.append("EMA разворачиваются вниз")
+        if last['rsi'] < 45:
+            weak += 1; lines.append(f"RSI {last['rsi']:.0f}")
+        if last['close'] < last['ema50']:
+            weak += 1; lines.append("Цена ниже EMA50")
+    else:
+        if last['ema9'] > last['ema21']:
+            weak += 1; lines.append("EMA разворачиваются вверх")
+        if last['rsi'] > 55:
+            weak += 1; lines.append(f"RSI {last['rsi']:.0f}")
+        if last['close'] > last['ema50']:
+            weak += 1; lines.append("Цена выше EMA50")
+    return (weak >= 3), lines, weak
 
 
-def scan_for_best_signal():
-    """Сканирует все символы и возвращает лучший сигнал по score, либо None."""
-    signals = [r for s in get_active_symbols() if (r := generate_signal(s))]
-    if not signals:
-        return None
-    return max(signals, key=lambda x: x['score'])
+def analyze_tp1(symbol, signal):
+    data = fetch_data_cached(symbol)
+    if not data:
+        return "Анализ недоступен", "Тянем дальше"
+    df = build_features(data['30m'])
+    last = df.iloc[-1]
+    rsi = last['rsi']
+    adx = last['adx'] if not pd.isna(last['adx']) else 0
+    pts, lines = 0, []
+    if signal == 'LONG':
+        if rsi < 60:
+            pts += 2; lines.append(f"RSI {rsi:.0f} — потенциал есть")
+        elif rsi < 70:
+            pts += 1; lines.append(f"RSI {rsi:.0f} — умеренно")
+        else:
+            pts -= 1; lines.append(f"RSI {rsi:.0f} — перекуплен")
+    else:
+        if rsi > 40:
+            pts += 2; lines.append(f"RSI {rsi:.0f} — потенциал есть")
+        elif rsi > 30:
+            pts += 1; lines.append(f"RSI {rsi:.0f} — умеренно")
+        else:
+            pts -= 1; lines.append(f"RSI {rsi:.0f} — перепродан")
+    if last['volume'] > last['vol_avg'] and last['vol_trend'] > 0.9:
+        pts += 2; lines.append("Объём держится")
+    elif last['volume'] > last['vol_avg']:
+        pts += 1; lines.append("Объём умеренный")
+    else:
+        pts -= 1; lines.append("Объём слабеет")
+    ema_ok = last['ema9'] > last['ema21'] if signal == 'LONG' else last['ema9'] < last['ema21']
+    if ema_ok:
+        pts += 1; lines.append("EMA импульс сохраняется")
+    else:
+        pts -= 1; lines.append("EMA пересеклись")
+    if adx > 25:
+        pts += 1; lines.append(f"ADX {adx:.0f} — тренд силён")
+    elif adx < 15:
+        pts -= 1; lines.append(f"ADX {adx:.0f} — тренд слабеет")
+    rec = ("Тянем до TP2 — потенциал есть" if pts >= 5 else
+           "Можно тянуть до TP2, но осторожно" if pts >= 3 else
+           "Лучше закрыть остаток здесь")
+    return '\n'.join(lines), rec
+
+
+def analyze_tp2(symbol, signal):
+    data = fetch_data_cached(symbol)
+    if not data:
+        return "Фиксируем на TP2"
+    df = build_features(data['30m'])
+    last = df.iloc[-1]
+    rsi = last['rsi']
+    adx = last['adx'] if not pd.isna(last['adx']) else 0
+    pts = 0
+    if signal == 'LONG':
+        pts += 2 if rsi < 65 else (1 if rsi < 75 else 0)
+    else:
+        pts += 2 if rsi > 35 else (1 if rsi > 25 else 0)
+    if last['volume'] > last['vol_avg']:
+        pts += 2
+    ema_ok = last['ema9'] > last['ema21'] if signal == 'LONG' else last['ema9'] < last['ema21']
+    if ema_ok:
+        pts += 1
+    if adx > 30:
+        pts += 2
+    return "Держим до TP3 — потенциал есть!" if pts >= 5 else "Закрываем на TP2 — отличная сделка!"
+
+
+def check_trades():
+    open_trades = db.load_trades()
+    if not open_trades:
+        return
+
+    for symbol, trade in open_trades.items():
+        try:
+            ticker = fetch_ticker(symbol)
+            if not ticker or ticker.get('last') is None:
+                continue
+            price = ticker['last']
+            signal = trade['signal']
+            entry = trade['entry']
+            stop = trade['stop']
+            tp1, tp2, tp3 = trade['tp1'], trade['tp2'], trade['tp3']
+            pnl = pnl_pct(signal, entry, price)
+            tp1_hit = bool(trade.get('tp1_hit'))
+
+            # ── Потеря потенциала (только до TP1) ──────
+            if not tp1_hit and not trade.get('potential_warned'):
+                lost, lines, _ = check_potential_loss(symbol, signal, entry, price)
+                if lost:
+                    trade['potential_warned'] = True
+                    db.upsert_trade(symbol, trade)
+                    db.add_event(symbol, 'potential',
+                                 f"Закрыто по потере потенциала ({pnl:+.1f}%): " + ", ".join(lines))
+                    db.add_to_history(symbol, signal, entry, 'potential', pnl)
+                    db.remove_trade(symbol)
+                    continue
+
+            # ── Трейлинг стоп на 50% пути до TP1 ────────
+            # Когда цена прошла половину пути entry→TP1,
+            # подтягиваем стоп в небольшой плюс (+0.3% от входа)
+            # чтобы не закрываться в б/у или минус
+            if not tp1_hit and not trade.get('be_hit'):
+                if signal == 'LONG':
+                    progress = (price - entry) / (tp1 - entry) if (tp1 - entry) > 0 else 0
+                    if progress >= 0.5:
+                        new_stop = entry * 1.003  # стоп +0.3% от входа
+                        if new_stop > trade['stop']:
+                            trade['stop'] = new_stop
+                            trade['be_hit'] = True
+                            db.upsert_trade(symbol, trade)
+                            db.add_event(symbol, 'trail',
+                                         f"Стоп подтянут в плюс (+0.3%) — цена прошла 50% до TP1 ({pnl:+.1f}%)")
+                else:  # SHORT
+                    progress = (entry - price) / (entry - tp1) if (entry - tp1) > 0 else 0
+                    if progress >= 0.5:
+                        new_stop = entry * 0.997  # стоп -0.3% от входа
+                        if new_stop < trade['stop']:
+                            trade['stop'] = new_stop
+                            trade['be_hit'] = True
+                            db.upsert_trade(symbol, trade)
+                            db.add_event(symbol, 'trail',
+                                         f"Стоп подтянут в плюс (+0.3%) — цена прошла 50% до TP1 ({pnl:+.1f}%)")
+
+            # ── Стоп ─────────────────────────────────────
+            if _hit(signal, price, stop, 'sl'):
+                result = 'be' if trade.get('be_hit') else 'sl'
+                db.add_event(symbol, result, f"{'Безубыток' if result=='be' else 'Стоп'} ({pnl:+.1f}%)")
+                db.add_to_history(symbol, signal, entry, result, pnl)
+                db.remove_trade(symbol)
+                continue
+
+            # ── TP1 — фиксируем 50%, стоп в б/у ─────────
+            if not tp1_hit and _hit(signal, price, tp1, 'tp'):
+                trade['tp1_hit'] = True
+                trade['be_hit'] = True
+                trade['stop'] = entry
+                pnl_tp1 = pnl_pct(signal, entry, tp1)
+                analysis, rec = analyze_tp1(symbol, signal)
+                db.add_event(symbol, 'tp1', f"TP1 достигнут (+{pnl_tp1:.1f}%). {rec}")
+                db.add_to_history(symbol, signal, entry, 'tp1', pnl_tp1)
+                db.upsert_trade(symbol, trade)
+
+            # ── Trailing stop после TP1 ──────────────────
+            if trade.get('tp1_hit'):
+                data = fetch_data_cached(symbol)
+                if data:
+                    df_trail = build_features(data['30m'])
+                    atr_now = df_trail.iloc[-1]['atr']
+                    if not pd.isna(atr_now) and atr_now > 0:
+                        new_stop = calc_trailing_stop(signal, price, atr_now, trade['stop'])
+                        if abs(new_stop - trade['stop']) / (trade['stop'] + 1e-10) > 0.003:
+                            trade['stop'] = new_stop
+                            db.upsert_trade(symbol, trade)
+
+            # ── TP2 ───────────────────────────────────────
+            if not trade.get('tp2_hit') and _hit(signal, price, tp2, 'tp'):
+                trade['tp2_hit'] = True
+                pnl_tp2 = pnl_pct(signal, entry, tp2)
+                rec2 = analyze_tp2(symbol, signal)
+                db.add_event(symbol, 'tp2', f"TP2 достигнут (+{pnl_tp2:.1f}%). {rec2}")
+                db.upsert_trade(symbol, trade)
+
+            # ── TP3 — закрываем всё ──────────────────────
+            if _hit(signal, price, tp3, 'tp'):
+                pnl_tp3 = pnl_pct(signal, entry, tp3)
+                db.add_event(symbol, 'tp3', f"TP3 достигнут, сделка завершена (+{pnl_tp3:.1f}%)")
+                db.add_to_history(symbol, signal, entry, 'tp3', pnl_tp3)
+                db.remove_trade(symbol)
+                continue
+
+        except Exception as e:
+            print(f"Ошибка трекинга {symbol}: {e}")
