@@ -19,10 +19,10 @@ TP3_BASE = 7.0
 DEPOSIT = float(os.environ.get("DEPOSIT", "1000"))
 RISK_PCT = float(os.environ.get("RISK_PCT", "1.5"))
 
-SCORE_MIN = int(os.environ.get("SCORE_MIN", "15"))
+SCORE_MIN = int(os.environ.get("SCORE_MIN", "12"))
 SCORE_MAX = 20
 
-ADX_MIN = 23
+ADX_MIN = 18
 
 
 def detect_pullback(df, signal):
@@ -372,17 +372,9 @@ def generate_signal(symbol):
     if not signal:
         return None
 
-    if not detect_trend_stable(df_30m, signal):
-        return None
-    if not mtf_confirms(df_4h, df_1h, signal):
-        return None
-    if not volume_healthy(df_30m):
-        return None
     if not btc_allows(symbol, signal):
         return None
     if is_overextended(df_30m, signal):
-        return None
-    if detect_volume_climax(df_30m):
         return None
 
     fresh_cross = detect_ema_cross_fresh(df_30m, signal, max_bars=5)
