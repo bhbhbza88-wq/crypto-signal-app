@@ -129,14 +129,35 @@ def detect_regime(df):
 
 
 CANDIDATES = [
+    # Top 10 by volume
     'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT',
-    'ADA/USDT', 'AVAX/USDT', 'DOT/USDT', 'ATOM/USDT',
-    'SUI/USDT', 'APT/USDT', 'INJ/USDT', 'TIA/USDT', 'SEI/USDT',
+    'ADA/USDT', 'AVAX/USDT', 'DOT/USDT', 'ATOM/USDT', 'DOGE/USDT',
+    
+    # Layer 2 & DeFi
     'LINK/USDT', 'UNI/USDT', 'AAVE/USDT', 'ARB/USDT', 'OP/USDT',
-    'SHIB/USDT', 'PEPE/USDT',
+    'LIDO/USDT', 'CURVE/USDT', 'MKR/USDT', 'SNX/USDT', 'SUSHI/USDT',
+    
+    # AI & ML (trending)
+    'FET/USDT', 'THETA/USDT', 'WLD/USDT', 'RENDER/USDT', 'TAO/USDT',
+    
+    # Memes & community
+    'SHIB/USDT', 'PEPE/USDT', 'FLOKI/USDT',
+    
+    # Layer 1 alternatives
+    'NEAR/USDT', 'ALGO/USDT', 'FANTOM/USDT',
+    
+    # Storage & Infrastructure
+    'FIL/USDT', 'AR/USDT',
+    
+    # Gaming
+    'GALA/USDT', 'ENJ/USDT', 'SAND/USDT',
+    
+    # Classic alts
     'LTC/USDT', 'BCH/USDT', 'ETC/USDT', 'TRX/USDT',
-    'FIL/USDT', 'ICP/USDT', 'HBAR/USDT',
-    'STX/USDT', 'FET/USDT', 'WLD/USDT', 'THETA/USDT', 'VET/USDT',
+    
+    # Emerging
+    'SUI/USDT', 'APT/USDT', 'INJ/USDT', 'TIA/USDT', 'SEI/USDT',
+    'HBAR/USDT', 'STX/USDT', 'VET/USDT', 'ICP/USDT',
 ]
 
 
