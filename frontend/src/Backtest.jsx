@@ -144,10 +144,7 @@ export default function Backtest() {
       {/* Info */}
       <div className="bt-info">
         <span>📡 Данные: реальные свечи Bybit</span>
-        {scannerMode
-          ? <span style={{color:'var(--long)',fontWeight:600}}>🟢 1h + 4h — режим сканера</span>
-          : <span>⚙ Таймфрейм: {timeframe.label}</span>
-        }
+        <span>⚙ Таймфрейм: 30m</span>
         <span>📅 Период: {period.label}</span>
         <span>💸 Комиссия: {commission}% × 2</span>
         <span>📉 Проскальзывание: {slippage}%</span>
