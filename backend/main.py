@@ -226,11 +226,11 @@ def run_backtest(req: BacktestRequest):
     - Комиссии Bybit + проскальзывание
     """
     tf_map = {"15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h"}
-    tf = "1h" if req.scanner_mode else tf_map.get(req.timeframe, "1h")
+    tf = "30m" if req.scanner_mode else tf_map.get(req.timeframe, "1h")
     tf_1h  = {"15m": "1h",  "30m": "1h",  "1h": "4h", "4h": "1d"}
     tf_4h  = {"15m": "4h",  "30m": "4h",  "1h": "4h", "4h": "1d"}
-    # В режиме сканера: основной 1h, подтверждение 4h (второй уровень — тоже 4h)
-    tf_higher = "4h" if req.scanner_mode else tf_1h[tf]
+    # В режиме сканера всегда: основной 30m, подтверждение 1h и 4h
+    tf_higher = "1h" if req.scanner_mode else tf_1h[tf]
     tf_top    = "4h" if req.scanner_mode else tf_4h[tf]
 
     cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
@@ -305,7 +305,7 @@ def run_backtest(req: BacktestRequest):
             if not result and not t_tp1_hit and not t_pre_trail:
                 dist_total = abs(t_tp1 - t_entry)
                 dist_done  = abs(price - t_entry)
-                if dist_total > 0 and dist_done / dist_total >= 0.70:
+                if dist_total > 0 and dist_done / dist_total >= 0.60:
                     if t_signal == 'LONG':
                         new_stop = t_entry * 1.003
                         if new_stop > t_stop:

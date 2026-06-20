@@ -11,8 +11,8 @@ from data_layer import (
     get_active_symbols, api_call, exchange,
 )
 
-SL_BASE = 1.8
-TP1_BASE = 2.5
+SL_BASE = 2.2
+TP1_BASE = 1.5
 TP2_BASE = 4.0
 TP3_BASE = 6.0
 
@@ -22,7 +22,7 @@ RISK_PCT = float(os.environ.get("RISK_PCT", "1.5"))
 SCORE_MIN = int(os.environ.get("SCORE_MIN", "14"))
 SCORE_MAX = 20
 
-ADX_MIN = 23
+ADX_MIN = 18
 
 
 def detect_pullback(df, signal):
