@@ -67,57 +67,6 @@ def get_active_signals():
     return out
 
 
-@app.get("/api/history")
-def get_history(limit: int = 100):
-    """История закрытых сделок."""
-    return db.load_history(limit=limit)
-
-
-@app.get("/api/events")
-def get_events(limit: int = 50):
-    """Лента событий (TP1/TP2/стопы/DCA и т.д.)."""
-    return db.load_events(limit=limit)
-
-
-# ─── MARKET OVERVIEW ─────────────────────────────────────────────────────────
-
-@app.get("/api/market")
-def get_market():
-    """Режим рынка по BTC + heatmap по всем активным символам (тренд/ADX)."""
-    from data_layer import fetch_data_cached
-
-    def regime_for(symbol):
-        data = fetch_data_cached(symbol)
-        if not data:
-            return "НЕТ ДАННЫХ", 0
-        df = build_features(data["1h"])
-        regime, adx = detect_regime(df)
-        adx_val = 0 if pd.isna(adx) else round(float(adx), 1)
-        return regime, adx_val
-
-    btc_regime, _ = regime_for("BTC/USDT")
-
-    symbols_out = []
-    uptrend = downtrend = chop = 0
-    for sym in get_active_symbols():
-        regime, adx = regime_for(sym)
-        if regime == "UPTREND":
-            uptrend += 1
-        elif regime == "DOWNTREND":
-            downtrend += 1
-        else:
-            chop += 1
-        symbols_out.append({"symbol": sym, "regime": regime, "adx": adx})
-
-    return {
-        "btc_regime": btc_regime,
-        "uptrend_count": uptrend,
-        "downtrend_count": downtrend,
-        "chop_count": chop,
-        "symbols": symbols_out,
-    }
-
-
 @app.get("/api/stats")
 def get_stats():
     """Статистика за три периода: сегодня, неделя, всё время."""
@@ -385,7 +334,7 @@ def run_backtest(req: BacktestRequest):
         
         sl_m, tp1_m, tp2_m = get_mults(atr_pct)
         stop, tp1, tp2 = calc_levels(signal, entry, atr, sl_m, tp1_m, tp2_m)
-        tp3 = tp2 * 1.5  # Дополнительный уровень
+        tp3 = entry + (tp2 - entry) * 1.5  # Экстраполяция расстояния, не цены
         
         pos_usdt = calc_position_size(entry, stop)
         if pos_usdt <= 0:

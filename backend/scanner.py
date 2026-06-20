@@ -43,7 +43,7 @@ def register_signal(nfi_result):
 
     trade = {
         'signal': signal, 'entry': entry, 'stop': stop,
-        'tp1': tp1, 'tp2': tp2, 'tp3': tp2 * 1.5,  # tp3 пропорциональный
+        'tp1': tp1, 'tp2': tp2, 'tp3': entry + (tp2 - entry) * 1.5,  # экстраполяция расстояния
         'score': score, 'regime': 'NFI',
         'tp1_hit': False, 'tp2_hit': False,
         'be_hit': False, 'potential_warned': False,
