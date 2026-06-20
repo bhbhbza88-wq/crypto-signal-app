@@ -35,7 +35,7 @@ function SingleResult({ result, deposit }) {
     <div className="bt-results animate-in">
       <div className="bt-real-badge">
         <span className="bt-real-dot" />
-        NFI (EWO + BB) · 30m · {result.candles_used} свечей · {result.symbol} · {result.period_days} дней
+        V8 (MTF+Pullback+Structure) · 30m · {result.candles_used} свечей · {result.symbol} · {result.period_days} дней
         <span style={{ marginLeft: 'auto', color: 'var(--text-tertiary)', fontSize: 11 }}>
           Комиссии: ${result.total_commission}
         </span>
@@ -313,7 +313,7 @@ export default function Backtest() {
       <div className="page-header" style={{ marginBottom: 20 }}>
         <h1 className="page-title">Бэктестинг</h1>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
-          NFI стратегия (EWO + Bollinger Bands) на 30m таймфрейме
+          V8 стратегия (MTF 4h+1h+30m, Pullback, Structure, ADX≥23)
         </p>
       </div>
 
@@ -395,7 +395,7 @@ export default function Backtest() {
         <span>⚙ Таймфрейм: 30m</span>
         <span>📅 {period.label}</span>
         <span>💸 Комиссия: {commission}% × 2</span>
-        <span>💰 Риск: 1.5% депозита</span>
+        <span>⚙ ADX≥23 | Score≥13/20 | 💰 Риск 1.5%</span>
         {mode === 'multi' && <span>🌐 Пар: {ALL_PAIRS.length}</span>}
       </div>
 
