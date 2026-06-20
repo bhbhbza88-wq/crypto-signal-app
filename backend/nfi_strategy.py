@@ -92,20 +92,30 @@ def should_enter(df, signal):
     if len(df) < 50:
         return False
     
-    # Режим рынка — должен быть тренд
-    last = df.iloc[-1]
-    ema_slope = last['ema50'] - df.iloc[-5]['ema50']
+    # Торгуем ТОЛЬКО LONG — против тренда не входим
+    if signal == 'SHORT':
+        return False
     
-    if signal == 'LONG':
-        # Тренд вверх: цена выше EMA50, наклон EMA50 положительный
-        trend_ok = last['close'] > last['ema50'] and ema_slope > 0
-        trend_ok = trend_ok and last['ema9'] > last['ema21']
-        return trend_ok and is_dip_buy_signal(df, 'LONG')
-    else:
-        # Тренд вниз
-        trend_ok = last['close'] < last['ema50'] and ema_slope < 0
-        trend_ok = trend_ok and last['ema9'] < last['ema21']
-        return trend_ok and is_dip_buy_signal(df, 'SHORT')
+    last = df.iloc[-1]
+    
+    # Глобальный тренд: EMA50 должна расти последние 10 свечей
+    ema50_now = last['ema50']
+    ema50_10 = df.iloc[-10]['ema50']
+    ema50_slope = (ema50_now - ema50_10) / ema50_10 * 100
+    
+    # Тренд вверх: EMA50 растёт хотя бы на 0.1% за 10 свечей
+    if ema50_slope < 0.05:
+        return False
+    
+    # Цена выше EMA50 (бычий рынок)
+    if last['close'] < last['ema50'] * 0.995:
+        return False
+    
+    # Краткосрочный тренд: EMA9 > EMA21
+    if last['ema9'] < last['ema21']:
+        return False
+    
+    return is_dip_buy_signal(df, 'LONG')
 
 
 def build_nfi_features(df):
@@ -186,12 +196,10 @@ def generate_nfi_signal(symbol):
     if pd.isna(last.get('ewo', 0)):
         return None
     
-    # Определяем сигнал
+    # Определяем сигнал — только LONG по тренду
     signal = None
     if should_enter(df_30m, 'LONG'):
         signal = 'LONG'
-    elif should_enter(df_30m, 'SHORT'):
-        signal = 'SHORT'
     
     if not signal:
         return None
