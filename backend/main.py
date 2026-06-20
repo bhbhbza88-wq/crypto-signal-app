@@ -147,6 +147,7 @@ class BacktestRequest(BaseModel):
     period_days: int = 30
     commission: float = 0.055
     slippage: float = 0.05
+    scanner_mode: bool = False  # True = режим сканера: 30m основной, 1h+4h подтверждение
 
 
 def fetch_ohlcv_paginated(symbol: str, tf: str, days: int) -> list:
@@ -225,16 +226,19 @@ def run_backtest(req: BacktestRequest):
     - Комиссии Bybit + проскальзывание
     """
     tf_map = {"15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h"}
-    tf = tf_map.get(req.timeframe, "1h")
+    tf = "30m" if req.scanner_mode else tf_map.get(req.timeframe, "1h")
     tf_1h  = {"15m": "1h",  "30m": "1h",  "1h": "4h", "4h": "1d"}
     tf_4h  = {"15m": "4h",  "30m": "4h",  "1h": "4h", "4h": "1d"}
+    # В режиме сканера всегда: основной 30m, подтверждение 1h и 4h
+    tf_higher = "1h" if req.scanner_mode else tf_1h[tf]
+    tf_top    = "4h" if req.scanner_mode else tf_4h[tf]
 
     cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
     higher_days = max(req.period_days + 10, 40)
 
     raw_main = fetch_ohlcv_paginated(req.symbol, tf, req.period_days)
-    raw_1h   = fetch_ohlcv_paginated(req.symbol, tf_1h[tf], higher_days)
-    raw_4h   = fetch_ohlcv_paginated(req.symbol, tf_4h[tf], higher_days)
+    raw_1h   = fetch_ohlcv_paginated(req.symbol, tf_higher, higher_days)
+    raw_4h   = fetch_ohlcv_paginated(req.symbol, tf_top, higher_days)
 
     if not raw_main or not raw_1h or not raw_4h:
         raise HTTPException(status_code=502, detail="Не удалось загрузить данные с Bybit")
@@ -523,6 +527,7 @@ def run_backtest(req: BacktestRequest):
 
     return {
         "symbol": req.symbol, "timeframe": tf,
+        "scanner_mode": req.scanner_mode,
         "period_days": req.period_days, "candles_used": len(df_main),
         "deposit": req.deposit, "final_equity": round(equity, 2),
         "total_pnl": total_pnl, "max_drawdown": round(max_drawdown, 2),
