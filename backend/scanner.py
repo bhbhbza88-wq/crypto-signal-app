@@ -1,6 +1,6 @@
 """
 Scanner — фоновый процесс, сканирующий рынок каждые 2 минуты.
-Заменяет send_signal()/scan() из бота: вместо Telegram пишет в БД.
+V8 стратегия: сканирует все пары, открывает до MAX_OPEN_TRADES позиций.
 """
 
 import time
@@ -22,29 +22,29 @@ except ImportError:
     print("⚠️ telegram_bot не найден, уведомления отключены")
 
 SCAN_INTERVAL_SECONDS = 2 * 60
+MAX_OPEN_TRADES = 5   # увеличено с 3 до 5 — больше пар, больше возможностей
 
 
-def register_signal(nfi_result):
-    """NFI сигнал -> БД."""
-    signal = nfi_result['signal']
-    symbol = nfi_result['symbol']
-    entry = nfi_result['entry']
-    stop = nfi_result['stop']
-    tp1 = nfi_result['tp1']
-    tp2 = nfi_result['tp2']
-    pos_usdt = nfi_result['position_size']
-    score = nfi_result['score']
-    last = nfi_result['last']
-    
-    # Сохраняем свечи для графика
-    candles = nfi_result['df'].tail(60)[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-    candles_json = candles.to_json(orient='records')
-    entry_reasons_json = json.dumps(nfi_result.get('entry_reasons', []), ensure_ascii=False)
+def register_signal(sig):
+    """V8 сигнал -> БД."""
+    symbol   = sig['symbol']
+    signal   = sig['signal']
+    entry    = sig['entry']
+    stop     = sig['stop']
+    tp1      = sig['tp1']
+    tp2      = sig['tp2']
+    tp3      = sig['tp3']   # V8 возвращает реальный tp3
+    score    = sig['score']
+    regime   = sig.get('regime', 'V8')
+    pos_usdt = sig['position_size']
+
+    candles_json      = sig['df'].tail(60)[['timestamp','open','high','low','close','volume']].to_json(orient='records')
+    entry_reasons_json = json.dumps(sig.get('entry_reasons', []), ensure_ascii=False)
 
     trade = {
         'signal': signal, 'entry': entry, 'stop': stop,
-        'tp1': tp1, 'tp2': tp2, 'tp3': entry + (tp2 - entry) * 1.5,  # экстраполяция расстояния
-        'score': score, 'regime': 'NFI',
+        'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
+        'score': score, 'regime': regime,
         'tp1_hit': False, 'tp2_hit': False,
         'be_hit': False, 'potential_warned': False,
         'opened_at': datetime.now().isoformat(),
@@ -54,20 +54,15 @@ def register_signal(nfi_result):
     }
     db.upsert_trade(symbol, trade)
     db.add_event(symbol, 'new_signal',
-                 f"NFI {signal} | score={score}/20 | вход={entry:.4f} | позиция~{pos_usdt:.0f} USDT")
-    print(f"✅ {symbol} {signal} | score={score}/20 | EWO entry")
+                 f"V8 {signal} | score={score}/20 | вход={entry:.4f} | позиция~{pos_usdt:.0f} USDT")
+    print(f"✅ {symbol} {signal} | score={score}/20 | режим={regime}")
 
-    # Telegram
     if TELEGRAM_ENABLED:
         tg_data = {
-            'symbol': symbol,
-            'signal': signal,
-            'entry': entry,
-            'stop': stop,
-            'tp1': tp1,
-            'tp2': tp2,
-            'score': score,
-            'regime': 'NFI',
+            'symbol': symbol, 'signal': signal,
+            'entry': entry, 'stop': stop,
+            'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
+            'score': score, 'regime': regime,
             'position_size': pos_usdt,
         }
         try:
@@ -78,76 +73,37 @@ def register_signal(nfi_result):
             print(f"⚠️ Telegram ошибка: {e}")
 
 
-MAX_OPEN_TRADES = 3
-DCA_THRESHOLD = -1.5
-DCA_MULT = 0.5
-
-
-def pnl_pct(signal, entry, price):
-    return ((price - entry) / entry * 100) if signal == 'LONG' else ((entry - price) / entry * 100)
-
-
-def try_dca(symbol, trade):
-    """DCA при просадке."""
-    if trade.get('dca_done'):
-        return
-    try:
-        from data_layer import fetch_ticker
-        ticker = fetch_ticker(symbol)
-        if not ticker:
-            return
-        price = ticker['last']
-        pnl = pnl_pct(trade['signal'], trade['entry'], price)
-        if pnl <= DCA_THRESHOLD:
-            orig_pos = trade.get('position_size', 0)
-            dca_pos = orig_pos * DCA_MULT
-            orig_entry = trade['entry']
-            new_entry = (orig_entry * orig_pos + price * dca_pos) / (orig_pos + dca_pos)
-            trade['entry'] = new_entry
-            trade['position_size'] = orig_pos + dca_pos
-            trade['dca_done'] = True
-            db.upsert_trade(symbol, trade)
-            db.add_event(symbol, 'dca', f"DCA: добавлено {dca_pos:.0f} USDT по {price:.4f}")
-            print(f"📊 DCA {symbol}: новая средняя {new_entry:.4f}")
-    except Exception as e:
-        print(f"⚠️ DCA ошибка {symbol}: {e}")
-
-
 def scan_once():
-    print(f"\n🔍 {datetime.now().strftime('%H:%M:%S')}")
+    print(f"\n🔍 {datetime.now().strftime('%H:%M:%S')} — сканирую все пары...")
     clean_cache()
     tracker.check_trades()
 
     open_trades = db.load_trades()
+    slots = MAX_OPEN_TRADES - len(open_trades)
 
-    # DCA для открытых позиций
-    for symbol, trade in open_trades.items():
-        try_dca(symbol, trade)
-
-    if len(open_trades) >= MAX_OPEN_TRADES:
+    if slots <= 0:
         print(f"⏳ Активно {len(open_trades)}/{MAX_OPEN_TRADES}: {', '.join(open_trades.keys())}")
         return
 
-    # Сканируем на NFI сигналы
+    # Сканируем все пары — V8 сам фильтрует по score
     signals = scan_for_nfi_signals()
-    
+
     if not signals:
-        print("⏳ Нет NFI сигналов...")
+        print("⏳ Нет сигналов...")
         return
 
-    # Открываем топ сигналы
-    slots = MAX_OPEN_TRADES - len(open_trades)
-    opened_count = 0
-    
-    for nfi_sig in signals[:slots]:
-        if nfi_sig['symbol'] in open_trades:
+    print(f"📊 Найдено сигналов: {len(signals)}, открываем до {slots}")
+
+    opened = 0
+    for sig in signals[:slots]:
+        if sig['symbol'] in open_trades:
             continue
-        print(f"💎 NFI: {nfi_sig['symbol']} {nfi_sig['signal']} score={nfi_sig['score']}/20")
-        register_signal(nfi_sig)
-        opened_count += 1
-    
-    if opened_count == 0:
-        print("⏳ Нет новых сигналов...")
+        register_signal(sig)
+        open_trades[sig['symbol']] = True  # чтобы не открыть дважды в одном цикле
+        opened += 1
+
+    if opened == 0:
+        print("⏳ Все сигналы уже в открытых позициях")
 
 
 def safe_scan():
@@ -159,7 +115,6 @@ def safe_scan():
 
 
 def run_scanner_loop():
-    """Запускается в отдельном потоке: сканирует рынок каждые 2 минуты."""
     safe_scan()
     while True:
         time.sleep(SCAN_INTERVAL_SECONDS)
@@ -170,5 +125,5 @@ def start_background_scanner():
     db.init_db()
     thread = threading.Thread(target=run_scanner_loop, daemon=True)
     thread.start()
-    print("⏰ Сканер запущен в фоне (каждые 2 минуты)")
+    print("⏰ Сканер запущен (все пары, каждые 2 минуты, до 5 позиций)")
     return thread
