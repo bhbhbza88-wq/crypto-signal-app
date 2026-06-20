@@ -41,6 +41,7 @@ def init_db():
                 tp2_hit INTEGER DEFAULT 0,
                 be_hit INTEGER DEFAULT 0,
                 potential_warned INTEGER DEFAULT 0,
+                pre_tp1_trail INTEGER DEFAULT 0,
                 opened_at TEXT,
                 candles_json TEXT,
                 entry_reasons_json TEXT,
@@ -82,15 +83,16 @@ def upsert_trade(symbol, trade: dict):
         conn.execute("""
             INSERT INTO open_trades
                 (symbol, signal, entry, stop, tp1, tp2, tp3, score, regime,
-                 tp1_hit, tp2_hit, be_hit, potential_warned, opened_at, candles_json,
-                 entry_reasons_json, position_size)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 tp1_hit, tp2_hit, be_hit, potential_warned, pre_tp1_trail,
+                 opened_at, candles_json, entry_reasons_json, position_size)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(symbol) DO UPDATE SET
                 signal=excluded.signal, entry=excluded.entry, stop=excluded.stop,
                 tp1=excluded.tp1, tp2=excluded.tp2, tp3=excluded.tp3,
                 score=excluded.score, regime=excluded.regime,
                 tp1_hit=excluded.tp1_hit, tp2_hit=excluded.tp2_hit,
                 be_hit=excluded.be_hit, potential_warned=excluded.potential_warned,
+                pre_tp1_trail=excluded.pre_tp1_trail,
                 candles_json=excluded.candles_json,
                 entry_reasons_json=excluded.entry_reasons_json,
                 position_size=excluded.position_size
@@ -100,6 +102,7 @@ def upsert_trade(symbol, trade: dict):
             trade.get('score'), trade.get('regime'),
             int(trade.get('tp1_hit', False)), int(trade.get('tp2_hit', False)),
             int(trade.get('be_hit', False)), int(trade.get('potential_warned', False)),
+            int(trade.get('pre_tp1_trail', False)),
             trade.get('opened_at', datetime.now().isoformat()),
             trade.get('candles_json'),
             trade.get('entry_reasons_json'),
