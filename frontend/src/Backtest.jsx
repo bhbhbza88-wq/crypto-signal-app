@@ -19,8 +19,8 @@ const PERIODS = [
   { label: '1 год',     days: 365 },
 ]
 
-const RESULT_LABELS = { tp1: 'TP1', tp2: 'TP2+', sl: 'Стоп', be: 'Б/У', timeout: 'Таймаут' }
-const RESULT_COLORS = { tp1: 'var(--long)', tp2: 'var(--long)', sl: 'var(--short)', be: 'var(--text-secondary)', timeout: 'var(--amber)' }
+const RESULT_LABELS = { tp2: 'TP2 ✓', tp3: 'TP3 ✓', sl: 'Стоп', be: 'Б/У', timeout: 'Таймаут' }
+const RESULT_COLORS = { tp2: 'var(--long)', tp3: 'var(--long)', sl: 'var(--short)', be: 'var(--text-secondary)', timeout: 'var(--amber)' }
 
 function resolveBase() {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL
@@ -214,7 +214,7 @@ export default function Backtest() {
             <span className="bt-real-dot" />
             Реальные данные Bybit · {result.candles_used} свечей {result.timeframe} · {result.symbol} · {result.period_days} дней
             <span style={{marginLeft:'auto',color:'var(--text-tertiary)',fontSize:11}}>
-              Комиссии: ${result.total_commission} · Проскальзывание: {result.slippage_pct}%
+              TP1→стоп в б/у → вся позиция до TP2 · Комиссии: ${result.total_commission}
             </span>
           </div>
 
@@ -232,7 +232,7 @@ export default function Backtest() {
             <div className="bt-stat-card">
               <div className="bt-stat-label">Винрейт</div>
               <div className={`bt-stat-val ${result.winrate >= 50 ? 'pos' : 'neg'}`}>{result.winrate}%</div>
-              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>{result.wins}W / {result.losses}L / {result.breakeven}BE</div>
+              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>{result.wins}W / {result.losses}L / {result.breakeven}БУ</div>
             </div>
             <div className="bt-stat-card">
               <div className="bt-stat-label">Макс. просадка</div>
@@ -249,12 +249,12 @@ export default function Backtest() {
             <div className="bt-stat-card">
               <div className="bt-stat-label">Сделок</div>
               <div className="bt-stat-val">{result.total}</div>
-              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>Ср. выигрыш: +${result.avg_win}</div>
+              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>Выход: TP2 или трейлинг</div>
             </div>
             <div className="bt-stat-card">
-              <div className="bt-stat-label">Уплачено комиссий</div>
-              <div className="bt-stat-val neg">${result.total_commission}</div>
-              <div style={{fontSize:11,color:'var(--text-tertiary)'}}>{result.commission_pct}% × 2 за сделку</div>
+              <div className="bt-stat-label">Ср. выигрыш / проигрыш</div>
+              <div className="bt-stat-val pos">+${result.avg_win}</div>
+              <div style={{fontSize:11,color:'var(--short)'}}>−${Math.abs(result.avg_loss)}</div>
             </div>
           </div>
 
