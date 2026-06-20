@@ -147,6 +147,13 @@ class BacktestRequest(BaseModel):
     commission: float = 0.055
     slippage: float = 0.05
 
+class MultiBacktestRequest(BaseModel):
+    symbols: list[str] = []   # пусто = все из CANDIDATES
+    deposit: float = 1000.0
+    period_days: int = 30
+    commission: float = 0.055
+    slippage: float = 0.05
+
 
 def fetch_ohlcv_paginated(symbol: str, tf: str, days: int) -> list:
     """Загружает OHLCV данные с Bybit."""
@@ -415,4 +422,264 @@ def run_backtest(req: BacktestRequest):
         "total_commission": round(total_comm, 2),
         "commission_pct": req.commission, "slippage_pct": req.slippage,
         "equity_curve": eq_curve, "trades": trades_out,
+    }
+
+
+def _run_backtest_for_symbol(symbol: str, period_days: int, deposit: float, commission: float, slippage: float) -> dict:
+    """Бэктест одной пары — возвращает словарь результатов."""
+    tf = "30m"
+    COMM = commission / 100
+    SLIP = slippage / 100
+
+    try:
+        raw = fetch_ohlcv_paginated(symbol, tf, period_days)
+        if not raw or len(raw) < 50:
+            return None
+    except Exception:
+        return None
+
+    cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    df_raw = pd.DataFrame(raw, columns=cols)
+    df_main = build_features(df_raw)
+    df_main = build_nfi_features(df_main)
+
+    in_trade = False
+    t_signal = t_entry = t_stop = t_tp1 = t_tp2 = t_tp3 = t_pos = 0
+    t_open_i = 0
+    t_tp1_hit = t_be_hit = False
+
+    equity = deposit
+    max_equity = deposit
+    max_drawdown = 0
+    wins = losses = bes = 0
+    trades_list = []
+    total_comm = 0
+
+    for i in range(1, len(df_main)):
+        candle = df_main.iloc[i]
+        ts_now = candle['timestamp']
+        price = candle['close']
+        hi = candle['high']
+        lo = candle['low']
+
+        if in_trade:
+            if t_signal == 'LONG' and lo <= t_stop:
+                exit_p = t_stop * (1 - SLIP)
+                pnl_p = _pnl(t_signal, t_entry, exit_p)
+                result = 'be' if t_be_hit else 'sl'
+            elif t_signal == 'SHORT' and hi >= t_stop:
+                exit_p = t_stop * (1 + SLIP)
+                pnl_p = _pnl(t_signal, t_entry, exit_p)
+                result = 'be' if t_be_hit else 'sl'
+            else:
+                result = None
+
+            if not result and not t_tp1_hit:
+                if (t_signal == 'LONG' and hi >= t_tp1) or (t_signal == 'SHORT' and lo <= t_tp1):
+                    t_tp1_hit = True
+                    t_be_hit = True
+                    ep = t_tp1 * (1 - SLIP) if t_signal == 'LONG' else t_tp1 * (1 + SLIP)
+                    p = _pnl(t_signal, t_entry, ep)
+                    c = t_pos * 0.7 * COMM * 2
+                    equity += t_pos * 0.7 * (p / 100) - c
+                    total_comm += c
+                    t_stop = t_entry
+                    continue
+
+            if not result and t_tp1_hit:
+                atr_now = candle['atr']
+                if not pd.isna(atr_now) and atr_now > 0:
+                    new_stop = _calc_trailing_stop(t_signal, price, atr_now, t_stop)
+                    if abs(new_stop - t_stop) / (t_stop + 1e-10) > 0.003:
+                        t_stop = new_stop
+
+            if not result and t_tp1_hit:
+                if (t_signal == 'LONG' and hi >= t_tp2) or (t_signal == 'SHORT' and lo <= t_tp2):
+                    exit_p = t_tp2 * (1 - SLIP) if t_signal == 'LONG' else t_tp2 * (1 + SLIP)
+                    pnl_p = _pnl(t_signal, t_entry, exit_p)
+                    result = 'tp2'
+
+            if not result:
+                if (t_signal == 'LONG' and hi >= t_tp3) or (t_signal == 'SHORT' and lo <= t_tp3):
+                    exit_p = t_tp3 * (1 - SLIP) if t_signal == 'LONG' else t_tp3 * (1 + SLIP)
+                    pnl_p = _pnl(t_signal, t_entry, exit_p)
+                    result = 'tp3'
+
+            if not result and i - t_open_i > 48:
+                exit_p = price * (1 - SLIP if t_signal == 'LONG' else 1 + SLIP)
+                pnl_p = _pnl(t_signal, t_entry, exit_p)
+                result = 'timeout'
+
+            if result:
+                remaining = 0.3 if t_tp1_hit else 1.0
+                pnl_usdt = t_pos * remaining * (pnl_p / 100)
+                comm = t_pos * remaining * COMM * 2
+                pnl_usdt -= comm
+                total_comm += comm
+                equity += pnl_usdt
+
+                if equity > max_equity:
+                    max_equity = equity
+                dd = (max_equity - equity) / max_equity * 100
+                if dd > max_drawdown:
+                    max_drawdown = dd
+
+                if result in ('tp1', 'tp2', 'tp3') or (result == 'timeout' and pnl_usdt > 0):
+                    wins += 1
+                elif result == 'be' and pnl_usdt > 0:
+                    result = 'tp1'
+                    wins += 1
+                elif result == 'sl':
+                    losses += 1
+                else:
+                    bes += 1
+
+                dt = datetime.fromtimestamp(ts_now / 1000)
+                trades_list.append({
+                    "symbol": symbol,
+                    "date": dt.strftime('%Y-%m-%d'),
+                    "time": dt.strftime('%H:%M'),
+                    "signal": t_signal,
+                    "entry": round(t_entry, 6),
+                    "exit": round(exit_p, 6),
+                    "result": result,
+                    "pnl_pct": round(pnl_p, 3),
+                    "pnl_usdt": round(pnl_usdt, 2),
+                })
+                in_trade = False
+                t_tp1_hit = t_be_hit = False
+            continue
+
+        df_slice = df_main.iloc[:i + 1].copy()
+        if len(df_slice) < 50:
+            continue
+
+        last = df_slice.iloc[-1]
+        signal = None
+        if should_enter(df_slice, 'LONG'):
+            signal = 'LONG'
+
+        if not signal:
+            continue
+        if pd.isna(last['atr']) or last['atr'] <= 0:
+            continue
+
+        entry = last['close']
+        atr = last['atr']
+        atr_pct = atr / entry if entry > 0 else 0
+        sl_m, tp1_m, tp2_m = get_mults(atr_pct)
+        stop, tp1, tp2 = calc_levels(signal, entry, atr, sl_m, tp1_m, tp2_m)
+        tp3 = entry + (tp2 - entry) * 1.5
+        pos_usdt = calc_position_size(entry, stop)
+        if pos_usdt <= 0:
+            continue
+
+        ec = pos_usdt * COMM
+        equity -= ec
+        total_comm += ec
+
+        in_trade = True
+        t_signal = signal
+        t_entry = entry
+        t_stop = stop
+        t_tp1 = tp1
+        t_tp2 = tp2
+        t_tp3 = tp3
+        t_pos = pos_usdt
+        t_open_i = i
+        t_tp1_hit = t_be_hit = False
+
+    total = wins + losses + bes
+    if total == 0:
+        return None
+
+    total_pnl_pct = round(sum(t['pnl_pct'] for t in trades_list), 2)
+    wins_usdt = [t['pnl_usdt'] for t in trades_list if t['pnl_usdt'] > 0]
+    loss_usdt = [t['pnl_usdt'] for t in trades_list if t['pnl_usdt'] < 0]
+
+    return {
+        "symbol": symbol,
+        "total": total,
+        "wins": wins,
+        "losses": losses,
+        "breakeven": bes,
+        "winrate": round(wins / total * 100, 1) if total > 0 else 0,
+        "total_pnl_pct": total_pnl_pct,
+        "avg_pnl_pct": round(total_pnl_pct / total, 2) if total > 0 else 0,
+        "max_drawdown": round(max_drawdown, 2),
+        "profit_factor": round(abs(sum(wins_usdt) / sum(loss_usdt)), 2) if loss_usdt and sum(loss_usdt) != 0 else 0,
+        "trades": trades_list,
+    }
+
+
+@app.post("/api/backtest/multi")
+def run_multi_backtest(req: MultiBacktestRequest):
+    """
+    Мульти-символьный бэктест по всем парам из CANDIDATES (или по списку symbols).
+    Возвращает результаты по каждой паре + сводную статистику.
+    """
+    from data_layer import CANDIDATES
+    symbols = req.symbols if req.symbols else CANDIDATES
+
+    results = []
+    errors = []
+
+    for symbol in symbols:
+        try:
+            res = _run_backtest_for_symbol(
+                symbol=symbol,
+                period_days=req.period_days,
+                deposit=req.deposit,
+                commission=req.commission,
+                slippage=req.slippage,
+            )
+            if res:
+                results.append(res)
+            else:
+                errors.append({"symbol": symbol, "reason": "нет данных или сделок"})
+        except Exception as e:
+            errors.append({"symbol": symbol, "reason": str(e)})
+
+    if not results:
+        return {"error": "Ни одна пара не дала сделок", "errors": errors}
+
+    # Сводная статистика по всем парам
+    all_trades = []
+    for r in results:
+        all_trades.extend(r["trades"])
+
+    all_trades.sort(key=lambda x: x["date"] + x["time"])
+
+    total_trades = sum(r["total"] for r in results)
+    total_wins   = sum(r["wins"] for r in results)
+    total_losses = sum(r["losses"] for r in results)
+    total_bes    = sum(r["breakeven"] for r in results)
+    total_pnl    = round(sum(r["total_pnl_pct"] for r in results), 2)
+    avg_dd       = round(sum(r["max_drawdown"] for r in results) / len(results), 2)
+
+    wins_usdt = [t["pnl_usdt"] for t in all_trades if t["pnl_usdt"] > 0]
+    loss_usdt = [t["pnl_usdt"] for t in all_trades if t["pnl_usdt"] < 0]
+
+    # Топ и худшие пары
+    results_sorted = sorted(results, key=lambda x: x["total_pnl_pct"], reverse=True)
+
+    return {
+        "period_days": req.period_days,
+        "symbols_tested": len(symbols),
+        "symbols_with_trades": len(results),
+        "summary": {
+            "total_trades": total_trades,
+            "wins": total_wins,
+            "losses": total_losses,
+            "breakeven": total_bes,
+            "winrate": round(total_wins / total_trades * 100, 1) if total_trades > 0 else 0,
+            "total_pnl_pct": total_pnl,
+            "avg_pnl_per_trade": round(total_pnl / total_trades, 2) if total_trades > 0 else 0,
+            "avg_drawdown": avg_dd,
+            "profit_factor": round(abs(sum(wins_usdt) / sum(loss_usdt)), 2) if loss_usdt and sum(loss_usdt) != 0 else 0,
+            "trades_per_month": round(total_trades / (req.period_days / 30), 1),
+        },
+        "by_symbol": results_sorted,
+        "all_trades": all_trades[-100:],  # последние 100 для таблицы
+        "errors": errors,
     }
