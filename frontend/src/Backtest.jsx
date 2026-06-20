@@ -35,6 +35,7 @@ export default function Backtest() {
   const [commission, setCommission] = useState(0.055)
   const [slippage, setSlippage] = useState(0.05)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [scannerMode, setScannerMode] = useState(false)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -54,6 +55,7 @@ export default function Backtest() {
           period_days: period.days,
           commission: Number(commission),
           slippage: Number(slippage),
+          scanner_mode: scannerMode,
         }),
       })
       if (!res.ok) {
@@ -80,6 +82,24 @@ export default function Backtest() {
         </p>
       </div>
 
+      {/* Scanner mode toggle */}
+      <div className="bt-scanner-mode">
+        <button
+          className={`bt-scanner-btn ${scannerMode ? 'active' : ''}`}
+          onClick={() => { setScannerMode(v => !v); setResult(null) }}
+        >
+          <span className="bsm-icon">{scannerMode ? '🟢' : '⚪'}</span>
+          <div>
+            <div className="bsm-title">Режим сканера (30m + 1h + 4h)</div>
+            <div className="bsm-sub">
+              {scannerMode
+                ? 'Активен — точная копия живого сканера: 30m основной, 1h и 4h подтверждение'
+                : 'Выключен — используется выбранный таймфрейм'}
+            </div>
+          </div>
+        </button>
+      </div>
+
       {/* Settings */}
       <div className="bt-settings">
         <div className="bf-group">
@@ -88,8 +108,8 @@ export default function Backtest() {
             {PAIRS.map(p => <option key={p}>{p}</option>)}
           </select>
         </div>
-        <div className="bf-group">
-          <label className="bf-label">Таймфрейм</label>
+        <div className="bf-group" style={{opacity: scannerMode ? 0.4 : 1, pointerEvents: scannerMode ? 'none' : 'auto'}}>
+          <label className="bf-label">Таймфрейм {scannerMode && <span style={{color:'var(--accent)'}}>— авто (30m)</span>}</label>
           <div className="bf-toggle">
             {TIMEFRAMES.map(tf => (
               <button key={tf.value} className={`bft ${timeframe.value === tf.value ? 'active' : ''}`}
@@ -155,11 +175,14 @@ export default function Backtest() {
       {/* Info */}
       <div className="bt-info">
         <span>📡 Данные: реальные свечи Bybit</span>
-        <span>⚙ Стратегия: EMA9/21/50 · RSI · ADX · ATR</span>
+        {scannerMode
+          ? <span style={{color:'var(--long)',fontWeight:600}}>🟢 30m + 1h + 4h — точный режим сканера</span>
+          : <span>⚙ Таймфрейм: {timeframe.label}</span>
+        }
         <span>📅 Период: {period.label}</span>
         <span>💸 Комиссия: {commission}% × 2</span>
         <span>📉 Проскальзывание: {slippage}%</span>
-        <span>💰 Риск на сделку: 1.5% депозита</span>
+        <span>💰 Риск: 1.5% депозита</span>
       </div>
 
       {/* Error */}
@@ -326,6 +349,19 @@ export default function Backtest() {
         .bt-advanced-toggle:hover { border-color: var(--accent); color: var(--accent); }
         .bt-advanced { display: flex; gap: 20px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px; margin-top: 8px; box-shadow: var(--shadow-card); }
         .bt-advanced .bf-group { flex: 1; min-width: 200px; }
+        .bt-scanner-mode { margin-bottom: 12px; }
+        .bt-scanner-btn {
+          width: 100%; display: flex; align-items: center; gap: 14px;
+          background: var(--surface); border: 2px solid var(--border);
+          border-radius: var(--radius-lg); padding: 14px 18px;
+          text-align: left; transition: all 0.2s; box-shadow: var(--shadow-card);
+        }
+        .bt-scanner-btn:hover { border-color: var(--accent); }
+        .bt-scanner-btn.active { border-color: var(--long); background: var(--long-soft); }
+        .bsm-icon { font-size: 22px; flex-shrink: 0; }
+        .bsm-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 3px; }
+        .bsm-sub { font-size: 12px; color: var(--text-secondary); }
+        .bt-scanner-btn.active .bsm-title { color: var(--long); }
         .bt-page { max-width: 100%; }
         .bt-settings {
           display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;
