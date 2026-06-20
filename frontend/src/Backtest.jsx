@@ -30,12 +30,12 @@ function resolveBase() {
 export default function Backtest() {
   const [pair, setPair] = useState('BTC/USDT')
   const [timeframe, setTimeframe] = useState(TIMEFRAMES[2])
-  const [period, setPeriod] = useState(PERIODS[0])
+  const [period, setPeriod] = useState(PERIODS[1])  // 3 месяца по умолчанию
   const [deposit, setDeposit] = useState(1000)
   const [commission, setCommission] = useState(0.055)
   const [slippage, setSlippage] = useState(0.05)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [scannerMode, setScannerMode] = useState(false)
+  const [scannerMode, setScannerMode] = useState(true)  // режим сканера включён по умолчанию
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
