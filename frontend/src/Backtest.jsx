@@ -90,10 +90,10 @@ export default function Backtest() {
         >
           <span className="bsm-icon">{scannerMode ? '🟢' : '⚪'}</span>
           <div>
-            <div className="bsm-title">Режим сканера (30m + 1h + 4h)</div>
+            <div className="bsm-title">Режим сканера (1h + 4h)</div>
             <div className="bsm-sub">
               {scannerMode
-                ? 'Активен — точная копия живого сканера: 30m основной, 1h и 4h подтверждение'
+                ? 'Активен — 1h основной таймфрейм, 4h подтверждение'
                 : 'Выключен — используется выбранный таймфрейм'}
             </div>
           </div>
@@ -176,7 +176,7 @@ export default function Backtest() {
       <div className="bt-info">
         <span>📡 Данные: реальные свечи Bybit</span>
         {scannerMode
-          ? <span style={{color:'var(--long)',fontWeight:600}}>🟢 30m + 1h + 4h — точный режим сканера</span>
+          ? <span style={{color:'var(--long)',fontWeight:600}}>🟢 1h + 4h — режим сканера</span>
           : <span>⚙ Таймфрейм: {timeframe.label}</span>
         }
         <span>📅 Период: {period.label}</span>
