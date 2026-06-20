@@ -12,12 +12,12 @@ from data_layer import (
 )
 
 # Параметры входа
-EWO_BUY = 2.0           # Порог EWO для buy (EMA5 > EMA35 и значение > 2.0)
-EWO_SELL = -2.0         # Порог EWO для sell
+EWO_BUY = 0.5           # Порог EWO для buy (EMA5 > EMA35 и значение > 2.0)
+EWO_SELL = -0.5         # Порог EWO для sell
 BB_LENGTH = 20          # Период Bollinger Bands
 BB_STD = 2.0            # Стандартные отклонения
-RSI_MIN_BUY = 30        # Минимальный RSI для входа в лонг
-RSI_MAX_BUY = 70        # Максимальный RSI для входа в лонг
+RSI_MIN_BUY = 25        # Минимальный RSI для входа в лонг
+RSI_MAX_BUY = 75        # Максимальный RSI для входа в лонг
 RSI_MIN_SELL = 30       # Минимальный RSI для входа в шорт
 RSI_MAX_SELL = 70       # Максимальный RSI для входа в шорт
 
