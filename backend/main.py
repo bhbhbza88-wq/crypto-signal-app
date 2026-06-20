@@ -114,7 +114,30 @@ def _summarize(trades):
     }
 
 
-# ─── BACKTEST ────────────────────────────────────────────────────────────────
+@app.get("/api/history")
+def get_history(limit: int = 100):
+    """История закрытых сделок."""
+    return db.load_history(limit=limit)
+
+
+@app.get("/api/events")
+def get_events(limit: int = 50):
+    """Лог событий."""
+    return db.load_events(limit=limit)
+
+
+@app.get("/api/market")
+def get_market():
+    """Рыночные данные BTC/ETH."""
+    try:
+        btc = api_call(exchange.fetch_ticker, 'BTC/USDT') or {}
+        eth = api_call(exchange.fetch_ticker, 'ETH/USDT') or {}
+        return {
+            "btc": {"price": btc.get('last', 0), "change": btc.get('percentage', 0)},
+            "eth": {"price": eth.get('last', 0), "change": eth.get('percentage', 0)},
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 class BacktestRequest(BaseModel):
     symbol: str = "BTC/USDT"
