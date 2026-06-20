@@ -48,6 +48,18 @@ def init_db():
                 position_size REAL
             )
         """)
+        # Миграция: добавляем колонки если их нет (для старых БД)
+        existing = [r[1] for r in conn.execute("PRAGMA table_info(open_trades)").fetchall()]
+        for col, typedef in [
+            ("pre_tp1_trail", "INTEGER DEFAULT 0"),
+            ("position_size", "REAL"),
+            ("candles_json", "TEXT"),
+            ("entry_reasons_json", "TEXT"),
+            ("dca_done", "INTEGER DEFAULT 0"),
+        ]:
+            if col not in existing:
+                conn.execute(f"ALTER TABLE open_trades ADD COLUMN {col} {typedef}")
+                print(f"✅ Миграция: добавлена колонка {col}")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
