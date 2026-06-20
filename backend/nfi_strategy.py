@@ -1,321 +1,356 @@
 """
-NFI Strategy — упрощённая версия NostalgiaForInfinity логики.
-EWO (Elliott Wave Oscillator) + Bollinger Bands + простой, но эффективный DCA.
+V8 Strategy — MTF (4h+1h+30m), Pullback, Structure, Trend Strength,
+Volume Climax Filter, Score 0-20, ADX >= 23.
+Извлечено из native_cod.py, адаптировано под текущий проект.
 """
 
 import os
+import time
 import pandas as pd
-import numpy as np
 from data_layer import (
     fetch_data_cached, build_features, detect_regime,
     get_active_symbols, api_call, exchange,
 )
 
-# Параметры входа
-EWO_BUY = 1.5           # Порог EWO — поднят с 0.5 до 1.5, фильтрует слабые сигналы
-EWO_SELL = -0.5         # Порог EWO для sell
-BB_LENGTH = 20          # Период Bollinger Bands
-BB_STD = 2.0            # Стандартные отклонения
-RSI_MIN_BUY = 30        # Минимальный RSI для входа в лонг
-RSI_MAX_BUY = 70        # Максимальный RSI для входа в лонг
-RSI_MIN_SELL = 30       # Минимальный RSI для входа в шорт
-RSI_MAX_SELL = 70       # Максимальный RSI для входа в шорт
-ADX_MIN = 20            # Минимальный ADX — входим только при наличии тренда
+# ── Параметры ────────────────────────────────────────────────────
+SL_BASE  = 1.8
+TP1_BASE = 2.5
+TP2_BASE = 4.0
+TP3_BASE = 6.0
 
-SL_BASE = 1.5
-TP1_BASE = 3.0
-TP2_BASE = 5.0
-
-DEPOSIT = float(os.environ.get("DEPOSIT", "1000"))
+DEPOSIT  = float(os.environ.get("DEPOSIT",  "1000"))
 RISK_PCT = float(os.environ.get("RISK_PCT", "1.5"))
 
-
-def calc_ewo(df):
-    """
-    Elliott Wave Oscillator = EMA(5) - EMA(35), нормализовано на цену.
-    Показывает силу и направление импульса.
-    """
-    if len(df) < 35:
-        return pd.Series(0, index=df.index)
-    ema5 = df['close'].ewm(span=5, adjust=False).mean()
-    ema35 = df['close'].ewm(span=35, adjust=False).mean()
-    ewo = ((ema5 - ema35) / df['close']) * 100
-    return ewo
+SCORE_MIN = int(os.environ.get("SCORE_MIN", "13"))
+SCORE_MAX = 20
+ADX_MIN   = 23
 
 
-def calc_bollinger_bands(df, length=20, std=2.0):
-    """Bollinger Bands для определения уровней входа (средняя и нижняя полоса)."""
-    sma = df['close'].rolling(length).mean()
-    std_dev = df['close'].rolling(length).std()
-    upper = sma + std_dev * std
-    lower = sma - std_dev * std
-    return sma, upper, lower
-
-
-def is_dip_buy_signal(df, signal='LONG'):
-    """
-    Сигнал входа в лонг:
-    - EWO растёт и выше порога (2.0) — волна импульса вверх
-    - Цена выше нижней полосы BB (не переигрок)
-    - RSI в зоне (30-70)
-    """
-    if len(df) < 50:
-        return False
-    
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-    
-    # Проверяем EWO
-    ewo_last = last.get('ewo', 0)
-    ewo_prev = prev.get('ewo', 0) if len(df) > 1 else 0
-    
+def detect_pullback(df, signal):
+    if len(df) < 10:
+        return False, 0
+    recent = df.tail(10)
+    last   = df.iloc[-1]
     if signal == 'LONG':
-        # EWO растёт выше порога
-        ewo_ok = ewo_last > EWO_BUY and ewo_last > ewo_prev
-        
-        # Цена выше нижней BB (не переигрок)
-        bb_ok = last['close'] > last.get('bb_lower', last['close'] * 0.99)
-        
-        # RSI в нормальной зоне (не перекуплено, но растёт)
-        rsi_ok = RSI_MIN_BUY < last['rsi'] < RSI_MAX_BUY
-        
-        return ewo_ok and bb_ok and rsi_ok
+        touched_ema21 = (recent['low'] <= recent['ema21'] * 1.005).any()
+        touched_ema50 = (recent['low'] <= recent['ema50'] * 1.008).any()
+        resumed = last['close'] > last['ema21']
+        if (touched_ema21 or touched_ema50) and resumed:
+            return True, (3 if touched_ema50 else 2)
     else:
-        # SHORT: EWO падает ниже порога
-        ewo_ok = ewo_last < EWO_SELL and ewo_last < ewo_prev
-        bb_ok = last['close'] < last.get('bb_upper', last['close'] * 1.01)
-        rsi_ok = RSI_MIN_SELL < last['rsi'] < RSI_MAX_SELL
-        return ewo_ok and bb_ok and rsi_ok
+        touched_ema21 = (recent['high'] >= recent['ema21'] * 0.995).any()
+        touched_ema50 = (recent['high'] >= recent['ema50'] * 0.992).any()
+        resumed = last['close'] < last['ema21']
+        if (touched_ema21 or touched_ema50) and resumed:
+            return True, (3 if touched_ema50 else 2)
+    return False, 0
 
 
-_btc_cache = {"ts": 0, "bullish": None}
-_BTC_CACHE_TTL = 300  # 5 минут
-
-
-def btc_is_bullish() -> bool:
-    """
-    Проверяет тренд BTC на 1h:
-    - EMA9 > EMA21 (краткосрочный импульс вверх)
-    - close > EMA50 (выше среднесрочного тренда)
-    - ADX > 15 (есть направленное движение)
-    Кэшируется на 5 минут чтобы не долбить биржу.
-    """
-    import time
-    now = time.time()
-    if _btc_cache["bullish"] is not None and now - _btc_cache["ts"] < _BTC_CACHE_TTL:
-        return _btc_cache["bullish"]
-
-    try:
-        data = fetch_data_cached('BTC/USDT')
-        if not data:
-            return True  # если данных нет — не блокируем
-        df_btc = build_features(data['1h'])
-        last = df_btc.iloc[-1]
-        bullish = (
-            last['ema9'] > last['ema21'] and
-            last['close'] > last['ema50'] and
-            (pd.isna(last['adx']) or last['adx'] > 15)
-        )
-        _btc_cache["ts"] = now
-        _btc_cache["bullish"] = bullish
-        return bullish
-    except Exception:
-        return True  # при ошибке не блокируем
-
-
-def should_enter(df, signal):
-    """
-    Полный набор условий для входа в LONG:
-    1. EWO > 1.5 и растёт (сильный импульс)
-    2. ADX > 20 (есть тренд, не боковик)
-    3. Цена > EMA50 (бычий рынок)
-    4. EMA9 > EMA21 (краткосрочный тренд вверх)
-    5. BTC в бычьем тренде на 1h (глобальный фильтр)
-    6. RSI и BB из is_dip_buy_signal
-    """
-    if len(df) < 50:
-        return False
-
-    # Только LONG
-    if signal == 'SHORT':
-        return False
-
-    last = df.iloc[-1]
-
-    # 1. ADX фильтр — входим только при наличии тренда
-    adx = last.get('adx', None)
-    if adx is not None and not pd.isna(adx) and adx < ADX_MIN:
-        return False
-
-    # 2. Цена выше EMA50 (бычий рынок)
-    if last['close'] < last['ema50']:
-        return False
-
-    # 3. Краткосрочный тренд: EMA9 > EMA21
-    if last['ema9'] < last['ema21']:
-        return False
-
-    # 4. BTC тренд — глобальный фильтр рынка
-    if not btc_is_bullish():
-        return False
-
-    return is_dip_buy_signal(df, 'LONG')
-
-
-def build_nfi_features(df):
-    """Добавляет EWO и Bollinger Bands к датафрейму."""
-    df = df.copy()
-    
-    # EWO
-    df['ewo'] = calc_ewo(df)
-    
-    # Bollinger Bands
-    bb_mid, bb_upper, bb_lower = calc_bollinger_bands(df, BB_LENGTH, BB_STD)
-    df['bb_mid'] = bb_mid
-    df['bb_upper'] = bb_upper
-    df['bb_lower'] = bb_lower
-    
-    return df
-
-
-def get_mults(atr_pct):
-    """Динамические множители SL/TP в зависимости от волатильности."""
-    sl, tp1, tp2 = SL_BASE, TP1_BASE, TP2_BASE
-    if atr_pct > 0.008:
-        sl *= 1.2
-        tp1 *= 1.1
-        tp2 *= 1.1
-    elif atr_pct > 0.005:
-        sl *= 1.05
-    return round(sl, 3), round(tp1, 3), round(tp2, 3)
-
-
-def calc_levels(signal, entry, atr, sl_m, tp1_m, tp2_m):
-    """Расчёт уровней SL/TP на основе ATR."""
-    d = atr * sl_m
+def detect_structure(df, signal):
+    if len(df) < 20:
+        return False, 0
+    recent = df.tail(20)
+    highs, lows = [], []
+    for i in range(1, len(recent) - 1):
+        if recent['high'].iloc[i] > recent['high'].iloc[i-1] and recent['high'].iloc[i] > recent['high'].iloc[i+1]:
+            highs.append(recent['high'].iloc[i])
+        if recent['low'].iloc[i] < recent['low'].iloc[i-1] and recent['low'].iloc[i] < recent['low'].iloc[i+1]:
+            lows.append(recent['low'].iloc[i])
+    if len(highs) < 2 or len(lows) < 2:
+        return False, 0
     if signal == 'LONG':
-        return (
-            entry - d,                    # stop
-            entry + atr * tp1_m,          # tp1
-            entry + atr * tp2_m,          # tp2
-        )
-    return (
-        entry + d,
-        entry - atr * tp1_m,
-        entry - atr * tp2_m,
-    )
+        hh = all(highs[i] > highs[i-1] for i in range(1, len(highs)))
+        hl = all(lows[i]  > lows[i-1]  for i in range(1, len(lows)))
+        if hh and hl: return True, 3
+        if hh or hl:  return True, 1
+    else:
+        lh = all(highs[i] < highs[i-1] for i in range(1, len(highs)))
+        ll = all(lows[i]  < lows[i-1]  for i in range(1, len(lows)))
+        if lh and ll: return True, 3
+        if lh or ll:  return True, 1
+    return False, 0
 
+
+def detect_trend_strength(df):
+    last = df.iloc[-1]
+    if last['close'] == 0:
+        return 0
+    spread = abs(last['ema9'] - last['ema50']) / last['close']
+    if spread > 0.04:   return 3
+    elif spread > 0.02: return 2
+    elif spread > 0.01: return 1
+    return 0
+
+
+def detect_volume_climax(df):
+    if len(df) < 20:
+        return False
+    last    = df.iloc[-1]
+    vol_avg = last['vol_avg']
+    if pd.isna(vol_avg) or vol_avg == 0:
+        return False
+    return (last['volume'] / vol_avg) > 4.0
+
+
+def detect_ema_cross_fresh(df, signal, max_bars=5):
+    if len(df) < max_bars + 2:
+        return False
+    recent = df.tail(max_bars + 1)
+    for i in range(1, len(recent)):
+        prev = recent.iloc[i-1]
+        curr = recent.iloc[i]
+        if signal == 'LONG'  and prev['ema9'] <= prev['ema21'] and curr['ema9'] > curr['ema21']:
+            return True
+        if signal == 'SHORT' and prev['ema9'] >= prev['ema21'] and curr['ema9'] < curr['ema21']:
+            return True
+    return False
+
+
+def detect_trend_stable(df, signal, lookback=5):
+    if len(df) < lookback + 1:
+        return False
+    recent = df.tail(lookback)
+    if signal == 'LONG':
+        return ((recent['ema9'] > recent['ema21']).all() and
+                (recent['close'] > recent['ema50']).sum() >= lookback - 1)
+    return ((recent['ema9'] < recent['ema21']).all() and
+            (recent['close'] < recent['ema50']).sum() >= lookback - 1)
+
+
+def volume_healthy(df):
+    last = df.iloc[-1]
+    return last['volume'] > last['vol_avg'] and last['vol_trend'] > 0.85
+
+
+def mtf_confirms(df_4h, df_1h, signal):
+    l4 = df_4h.iloc[-1]
+    l1 = df_1h.iloc[-1]
+    if signal == 'LONG':
+        return (l4['ema9'] > l4['ema21'] and l4['close'] > l4['ema50'] and
+                l1['ema9'] > l1['ema21'] and l1['close'] > l1['ema50'])
+    return (l4['ema9'] < l4['ema21'] and l4['close'] < l4['ema50'] and
+            l1['ema9'] < l1['ema21'] and l1['close'] < l1['ema50'])
+
+
+def is_overextended(df, signal):
+    last = df.iloc[-1]
+    atr  = last['atr']
+    if pd.isna(atr) or atr == 0:
+        return False
+    if abs(last['close'] - last['open']) > atr * 2.5:
+        return True
+    if signal == 'LONG'  and last['rsi'] > 76: return True
+    if signal == 'SHORT' and last['rsi'] < 24: return True
+    if df.tail(4)['high'].max() - df.tail(4)['low'].min() > atr * 4.0:
+        return True
+    return False
+
+
+def entry_conditions(df, signal):
+    last = df.iloc[-1]
+    if signal == 'LONG':
+        return (last['ema9'] > last['ema21'] and last['close'] > last['ema50'] and
+                40 < last['rsi'] < 70 and last['plus_di'] > last['minus_di'])
+    return (last['ema9'] < last['ema21'] and last['close'] < last['ema50'] and
+            30 < last['rsi'] < 60 and last['minus_di'] > last['plus_di'])
+
+
+# ── BTC Filter ───────────────────────────────────────────────────
+_btc_cache = {'ts': 0.0, 'regime': 'CHOP'}
+
+def get_btc_regime():
+    now = time.time()
+    if now - _btc_cache['ts'] < 300:
+        return _btc_cache['regime']
+    d = api_call(exchange.fetch_ohlcv, 'BTC/USDT', '1h', limit=60)
+    if not d:
+        return _btc_cache['regime']
+    df = build_features(pd.DataFrame(d, columns=['timestamp','open','high','low','close','volume']))
+    regime, _ = detect_regime(df)
+    _btc_cache.update({'ts': now, 'regime': regime})
+    return regime
+
+def btc_allows(symbol, signal):
+    if symbol == 'BTC/USDT':
+        return True
+    btc = get_btc_regime()
+    if signal == 'LONG'  and btc == 'DOWNTREND':
+        print(f"  🚫 BTC DOWNTREND — лонг заблокирован")
+        return False
+    if signal == 'SHORT' and btc == 'UPTREND':
+        print(f"  🚫 BTC UPTREND — шорт заблокирован")
+        return False
+    return True
+
+
+# ── Score 0-20 ───────────────────────────────────────────────────
+def calc_score(df_30m, df_1h, regime, adx_1h, signal):
+    last      = df_30m.iloc[-1]
+    adx_30m   = last['adx']   if not pd.isna(last['adx'])   else 0
+    atr_pct   = last['atr'] / last['close'] if last['close'] > 0 else 0
+    vol_ratio = last['volume'] / (last['vol_avg'] + 1e-10)
+    score     = 0
+
+    if vol_ratio > 2.0:     score += 3
+    elif vol_ratio > 1.5:   score += 2
+    elif vol_ratio > 1.2:   score += 1
+
+    if adx_30m > 35:        score += 3
+    elif adx_30m > 28:      score += 2
+    elif adx_30m > ADX_MIN: score += 1
+
+    if regime in ('UPTREND', 'DOWNTREND'):
+        score += 2
+        if adx_1h > 20: score += 1
+
+    if atr_pct > 0.006:     score += 2
+    elif atr_pct > 0.003:   score += 1
+
+    _, pb_bonus = detect_pullback(df_30m, signal)
+    score += pb_bonus
+
+    _, st_bonus = detect_structure(df_30m, signal)
+    score += st_bonus
+
+    score += detect_trend_strength(df_30m)
+
+    return min(score, SCORE_MAX)
+
+
+# ── Levels ───────────────────────────────────────────────────────
+def get_mults(adx, atr_pct):
+    sl, tp1, tp2, tp3 = SL_BASE, TP1_BASE, TP2_BASE, TP3_BASE
+    if adx > 40:
+        tp1 *= 1.25; tp2 *= 1.35; tp3 *= 1.50; sl *= 1.15
+    elif adx > 28:
+        tp1 *= 1.10; tp2 *= 1.15; tp3 *= 1.20; sl *= 1.08
+    if atr_pct > 0.008:   sl *= 1.15
+    elif atr_pct > 0.005: sl *= 1.08
+    return round(sl,3), round(tp1,3), round(tp2,3), round(tp3,3)
+
+def calc_levels(signal, entry, atr_30m, atr_1h, sl_m, tp1_m, tp2_m, tp3_m):
+    atr = atr_30m * 0.35 + atr_1h * 0.65
+    d   = atr * sl_m
+    if signal == 'LONG':
+        return entry - d, entry + atr*tp1_m, entry + atr*tp2_m, entry + atr*tp3_m
+    return entry + d, entry - atr*tp1_m, entry - atr*tp2_m, entry - atr*tp3_m
 
 def calc_position_size(entry, stop):
-    """Размер позиции на основе риска."""
     risk_usdt = DEPOSIT * RISK_PCT / 100
-    sl_dist = abs(entry - stop)
+    sl_dist   = abs(entry - stop)
     if sl_dist == 0:
         return 0.0
     return round(risk_usdt / sl_dist * entry, 2)
 
 
+# ── Generate Signal ──────────────────────────────────────────────
 def generate_nfi_signal(symbol):
-    """
-    Генерирует сигнал на основе NFI-логики.
-    Вход: EWO + BB + тренд + RSI.
-    Простой, но эффективный.
-    """
     data = fetch_data_cached(symbol)
     if not data:
         return None
-    
-    # Грузим и обогащаем данные
-    df_1h = build_features(data['1h'])
+
+    df_4h  = build_features(data['4h'])
+    df_1h  = build_features(data['1h'])
     df_30m = build_features(data['30m'])
-    df_30m = build_nfi_features(df_30m)
-    
-    last = df_30m.iloc[-1]
-    
-    # Базовые проверки
-    if pd.isna(last['atr']) or last['atr'] <= 0:
+
+    regime, adx_1h = detect_regime(df_1h)
+    if regime in ('FLAT', 'CHOP'):
         return None
-    if pd.isna(last['rsi']):
-        return None
-    if pd.isna(last.get('ewo', 0)):
-        return None
-    
-    # Определяем сигнал — только LONG по тренду
+
+    last    = df_30m.iloc[-1]
+    adx_30m = last['adx'] if not pd.isna(last['adx']) else 0
+
+    if adx_30m < ADX_MIN:         return None
+    if pd.isna(last['atr']) or last['atr'] <= 0: return None
+    if pd.isna(last['rsi']):      return None
+
     signal = None
-    if should_enter(df_30m, 'LONG'):
-        signal = 'LONG'
-    
-    if not signal:
+    if entry_conditions(df_30m, 'LONG')  and regime == 'UPTREND':   signal = 'LONG'
+    elif entry_conditions(df_30m, 'SHORT') and regime == 'DOWNTREND': signal = 'SHORT'
+    if not signal: return None
+
+    if not detect_trend_stable(df_30m, signal):  return None
+    if not mtf_confirms(df_4h, df_1h, signal):   return None
+    if not volume_healthy(df_30m):                return None
+    if not btc_allows(symbol, signal):            return None
+    if is_overextended(df_30m, signal):           return None
+    if detect_volume_climax(df_30m):
+        print(f"  🚫 {symbol}: объём кульминация")
         return None
-    
-    # Расчёт уровней
-    entry = last['close']
-    atr = last['atr']
-    atr_pct = atr / entry if entry > 0 else 0
-    
-    sl_m, tp1_m, tp2_m = get_mults(atr_pct)
-    stop, tp1, tp2 = calc_levels(signal, entry, atr, sl_m, tp1_m, tp2_m)
+
+    fresh_cross     = detect_ema_cross_fresh(df_30m, signal, max_bars=5)
+    has_pullback, _ = detect_pullback(df_30m, signal)
+    if not fresh_cross and not has_pullback:
+        print(f"  ⛔ {symbol}: нет кросса и нет отката")
+        return None
+
+    score = calc_score(df_30m, df_1h, regime, adx_1h, signal)
+    if score < SCORE_MIN:
+        print(f"  ⛔ {symbol}: score={score} < {SCORE_MIN}")
+        return None
+
+    entry   = last['close']
+    atr_30m_val = last['atr']
+    atr_1h_val  = df_1h.iloc[-1]['atr']
+    if pd.isna(atr_1h_val) or atr_1h_val <= 0:
+        atr_1h_val = atr_30m_val
+
+    atr_pct = atr_30m_val / entry if entry > 0 else 0
+    sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx_30m, atr_pct)
+    stop, tp1, tp2, tp3 = calc_levels(signal, entry, atr_30m_val, atr_1h_val, sl_m, tp1_m, tp2_m, tp3_m)
     pos_size = calc_position_size(entry, stop)
-    
-    if pos_size <= 0:
-        return None
-    
-    # Оценка качества (простой скоринг)
-    score = 10  # базовая оценка
-    ewo = last['ewo']
-    
-    if signal == 'LONG':
-        if ewo > 5.0:
-            score += 3
-        elif ewo > 3.0:
-            score += 2
-        elif ewo > EWO_BUY:
-            score += 1
-    else:
-        if abs(ewo) > 5.0:
-            score += 3
-        elif abs(ewo) > 3.0:
-            score += 2
-    
-    # Проверяем волатильность
-    if atr_pct > 0.01:
-        score += 2
-    elif atr_pct > 0.005:
-        score += 1
-    
+    if pos_size <= 0: return None
+
+    _, pb_bonus = detect_pullback(df_30m, signal)
+    _, st_bonus = detect_structure(df_30m, signal)
+
+    print(f"💎 {symbol}: {signal} | {regime} | ADX={adx_30m:.0f} | score={score}/{SCORE_MAX}")
+
     return {
-        'symbol': symbol,
-        'signal': signal,
-        'score': min(score, 20),
-        'entry': entry,
-        'stop': stop,
-        'tp1': tp1,
-        'tp2': tp2,
+        'symbol':        symbol,
+        'signal':        signal,
+        'score':         score,
+        'regime':        regime,
+        'entry':         entry,
+        'stop':          stop,
+        'tp1':           tp1,
+        'tp2':           tp2,
+        'tp3':           tp3,
         'position_size': pos_size,
-        'last': last,
-        'last_1h': df_1h.iloc[-1],
-        'df': df_30m,
+        'last':          last,
+        'last_1h':       df_1h.iloc[-1],
+        'df':            df_30m,
         'entry_reasons': [
-            f'EWO сигнал: {ewo:.1f} (порог {EWO_BUY})',
-            f'ADX: {last.get("adx", 0):.0f} (тренд {"есть" if not pd.isna(last.get("adx", float("nan"))) and last.get("adx", 0) > ADX_MIN else "слабый"})',
-            f'RSI: {last["rsi"]:.0f}',
-            f'BTC тренд: бычий ✓',
-            f'ATR: {atr:.4f} ({atr_pct*100:.2f}%)',
-        ]
+            f'Режим: {regime} | ADX {adx_30m:.0f}',
+            f'RSI: {last["rsi"]:.0f} | Score: {score}/{SCORE_MAX}',
+            f'Pullback к EMA: {"✓" if pb_bonus > 0 else "—"}',
+            f'Структура HH/HL: {"✓" if st_bonus > 0 else "—"}',
+            f'MTF 4h+1h: ✓',
+            f'BTC: {get_btc_regime()}',
+        ],
     }
 
 
 def scan_for_nfi_signals():
-    """
-    Сканирует все пары и возвращает список всех найденных сигналов
-    (отсортированных по score), или пустой список.
-    """
     signals = []
     for symbol in get_active_symbols():
         sig = generate_nfi_signal(symbol)
         if sig:
             signals.append(sig)
-    
-    # Сортируем по score
     signals.sort(key=lambda x: x['score'], reverse=True)
     return signals
+
+
+# ── Совместимость с бэктестом в main.py ─────────────────────────
+def build_nfi_features(df):
+    return df
+
+def should_enter(df, signal):
+    """Упрощённая версия для бэктеста (только 30m данные)."""
+    if len(df) < 50 or signal == 'SHORT':
+        return False
+    last = df.iloc[-1]
+    adx  = last.get('adx', 0) if not pd.isna(last.get('adx', float('nan'))) else 0
+    if adx < ADX_MIN:
+        return False
+    return entry_conditions(df, 'LONG') and detect_trend_stable(df, 'LONG')
