@@ -12,14 +12,15 @@ from data_layer import (
 )
 
 # Параметры входа
-EWO_BUY = 0.5           # Порог EWO для buy (EMA5 > EMA35 и значение > 2.0)
+EWO_BUY = 1.5           # Порог EWO — поднят с 0.5 до 1.5, фильтрует слабые сигналы
 EWO_SELL = -0.5         # Порог EWO для sell
 BB_LENGTH = 20          # Период Bollinger Bands
 BB_STD = 2.0            # Стандартные отклонения
-RSI_MIN_BUY = 25        # Минимальный RSI для входа в лонг
-RSI_MAX_BUY = 75        # Максимальный RSI для входа в лонг
+RSI_MIN_BUY = 30        # Минимальный RSI для входа в лонг
+RSI_MAX_BUY = 70        # Максимальный RSI для входа в лонг
 RSI_MIN_SELL = 30       # Минимальный RSI для входа в шорт
 RSI_MAX_SELL = 70       # Максимальный RSI для входа в шорт
+ADX_MIN = 20            # Минимальный ADX — входим только при наличии тренда
 
 SL_BASE = 1.5
 TP1_BASE = 3.0
@@ -87,25 +88,77 @@ def is_dip_buy_signal(df, signal='LONG'):
         return ewo_ok and bb_ok and rsi_ok
 
 
+_btc_cache = {"ts": 0, "bullish": None}
+_BTC_CACHE_TTL = 300  # 5 минут
+
+
+def btc_is_bullish() -> bool:
+    """
+    Проверяет тренд BTC на 1h:
+    - EMA9 > EMA21 (краткосрочный импульс вверх)
+    - close > EMA50 (выше среднесрочного тренда)
+    - ADX > 15 (есть направленное движение)
+    Кэшируется на 5 минут чтобы не долбить биржу.
+    """
+    import time
+    now = time.time()
+    if _btc_cache["bullish"] is not None and now - _btc_cache["ts"] < _BTC_CACHE_TTL:
+        return _btc_cache["bullish"]
+
+    try:
+        data = fetch_data_cached('BTC/USDT')
+        if not data:
+            return True  # если данных нет — не блокируем
+        df_btc = build_features(data['1h'])
+        last = df_btc.iloc[-1]
+        bullish = (
+            last['ema9'] > last['ema21'] and
+            last['close'] > last['ema50'] and
+            (pd.isna(last['adx']) or last['adx'] > 15)
+        )
+        _btc_cache["ts"] = now
+        _btc_cache["bullish"] = bullish
+        return bullish
+    except Exception:
+        return True  # при ошибке не блокируем
+
+
 def should_enter(df, signal):
-    """Проверка полного набора условий для входа."""
+    """
+    Полный набор условий для входа в LONG:
+    1. EWO > 1.5 и растёт (сильный импульс)
+    2. ADX > 20 (есть тренд, не боковик)
+    3. Цена > EMA50 (бычий рынок)
+    4. EMA9 > EMA21 (краткосрочный тренд вверх)
+    5. BTC в бычьем тренде на 1h (глобальный фильтр)
+    6. RSI и BB из is_dip_buy_signal
+    """
     if len(df) < 50:
         return False
-    
-    # Торгуем ТОЛЬКО LONG — против тренда не входим
+
+    # Только LONG
     if signal == 'SHORT':
         return False
-    
+
     last = df.iloc[-1]
-    
-    # Цена выше EMA50 (бычий рынок, slope не проверяем)
+
+    # 1. ADX фильтр — входим только при наличии тренда
+    adx = last.get('adx', None)
+    if adx is not None and not pd.isna(adx) and adx < ADX_MIN:
+        return False
+
+    # 2. Цена выше EMA50 (бычий рынок)
     if last['close'] < last['ema50']:
         return False
-    
-    # Краткосрочный тренд: EMA9 > EMA21
+
+    # 3. Краткосрочный тренд: EMA9 > EMA21
     if last['ema9'] < last['ema21']:
         return False
-    
+
+    # 4. BTC тренд — глобальный фильтр рынка
+    if not btc_is_bullish():
+        return False
+
     return is_dip_buy_signal(df, 'LONG')
 
 
@@ -243,9 +296,10 @@ def generate_nfi_signal(symbol):
         'last_1h': df_1h.iloc[-1],
         'df': df_30m,
         'entry_reasons': [
-            f'EWO сигнал: {ewo:.1f}',
-            f'Цена на уровне {"между BB" if signal == "LONG" else "между BB"}',
-            f'RSI в зоне: {last["rsi"]:.0f}',
+            f'EWO сигнал: {ewo:.1f} (порог {EWO_BUY})',
+            f'ADX: {last.get("adx", 0):.0f} (тренд {"есть" if not pd.isna(last.get("adx", float("nan"))) and last.get("adx", 0) > ADX_MIN else "слабый"})',
+            f'RSI: {last["rsi"]:.0f}',
+            f'BTC тренд: бычий ✓',
             f'ATR: {atr:.4f} ({atr_pct*100:.2f}%)',
         ]
     }
