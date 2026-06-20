@@ -11,18 +11,18 @@ from data_layer import (
     get_active_symbols, api_call, exchange,
 )
 
-SL_BASE = 2.2
-TP1_BASE = 2.0
+SL_BASE = 1.8
+TP1_BASE = 2.5
 TP2_BASE = 4.0
 TP3_BASE = 6.0
 
 DEPOSIT = float(os.environ.get("DEPOSIT", "1000"))
 RISK_PCT = float(os.environ.get("RISK_PCT", "1.5"))
 
-SCORE_MIN = int(os.environ.get("SCORE_MIN", "12"))
+SCORE_MIN = int(os.environ.get("SCORE_MIN", "15"))
 SCORE_MAX = 20
 
-ADX_MIN = 18
+ADX_MIN = 23
 
 
 def detect_pullback(df, signal):
@@ -374,13 +374,16 @@ def generate_signal(symbol):
 
     if not detect_trend_stable(df_30m, signal):
         return None
-    # mtf_confirms убран — слишком жёсткий, режет много хороших входов
-    # volume_healthy убран — объём не всегда коррелирует с качеством сигнала
+    if not mtf_confirms(df_4h, df_1h, signal):
+        return None
+    if not volume_healthy(df_30m):
+        return None
     if not btc_allows(symbol, signal):
         return None
     if is_overextended(df_30m, signal):
         return None
-    # detect_volume_climax убран
+    if detect_volume_climax(df_30m):
+        return None
 
     fresh_cross = detect_ema_cross_fresh(df_30m, signal, max_bars=5)
     has_pullback, _ = detect_pullback(df_30m, signal)

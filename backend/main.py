@@ -133,7 +133,8 @@ import time as _time
 
 from signal_engine import (
     get_mults, entry_conditions,
-    detect_trend_stable, is_overextended,
+    detect_trend_stable, mtf_confirms, volume_healthy,
+    is_overextended, detect_volume_climax,
     detect_ema_cross_fresh, detect_pullback, calc_score,
     ADX_MIN, SCORE_MIN,
 )
@@ -298,15 +299,21 @@ def run_backtest(req: BacktestRequest):
                 pnl_p  = _pnl(t_signal, t_entry, exit_p)
                 result = 'be' if t_be_hit else 'sl'
 
-            # 2. TP1 достигнут → переносим стоп в б/у, держим всю позицию
+            # 2. TP1 — фиксируем 50%, стоп в б/у
             if not result and not t_tp1_hit:
                 if (t_signal == 'LONG' and hi >= t_tp1) or (t_signal == 'SHORT' and lo <= t_tp1):
                     t_tp1_hit = True
                     t_be_hit  = True
-                    t_stop    = t_entry  # стоп в б/у — всё что выше это профит
-                    # НЕ фиксируем, держим всю позицию дальше
+                    ep = t_tp1 * (1 - SLIP) if t_signal == 'LONG' else t_tp1 * (1 + SLIP)
+                    p  = _pnl(t_signal, t_entry, ep)
+                    c  = t_pos * 0.5 * COMM * 2
+                    equity += t_pos * 0.5 * (p / 100) - c
+                    total_comm += c
+                    t_stop = t_entry
+                    equity_curve.append({"ts": int(ts_now), "equity": round(equity, 2)})
+                    continue
 
-            # 3. Trailing stop после TP1 (подтягиваем за ценой)
+            # 3. Trailing stop после TP1
             if not result and t_tp1_hit:
                 atr_now = candle['atr']
                 if not pd.isna(atr_now) and atr_now > 0:
@@ -314,30 +321,30 @@ def run_backtest(req: BacktestRequest):
                     if abs(new_stop - t_stop) / (t_stop + 1e-10) > 0.003:
                         t_stop = new_stop
 
-            # 4. TP2 — закрываем всю позицию
+            # 4. TP2
             if not result and t_tp1_hit:
                 if (t_signal == 'LONG' and hi >= t_tp2) or (t_signal == 'SHORT' and lo <= t_tp2):
                     exit_p = t_tp2 * (1 - SLIP) if t_signal == 'LONG' else t_tp2 * (1 + SLIP)
                     pnl_p  = _pnl(t_signal, t_entry, exit_p)
                     result = 'tp2'
 
-            # 5. TP3 — закрываем всю позицию
+            # 5. TP3
             if not result:
                 if (t_signal == 'LONG' and hi >= t_tp3) or (t_signal == 'SHORT' and lo <= t_tp3):
                     exit_p = t_tp3 * (1 - SLIP) if t_signal == 'LONG' else t_tp3 * (1 + SLIP)
                     pnl_p  = _pnl(t_signal, t_entry, exit_p)
                     result = 'tp3'
 
-            # 6. Таймаут (72 бара)
-            if not result and i - t_open_i > 72:
+            # 6. Таймаут (48 баров)
+            if not result and i - t_open_i > 48:
                 exit_p = price * (1 - SLIP if t_signal == 'LONG' else 1 + SLIP)
                 pnl_p  = _pnl(t_signal, t_entry, exit_p)
                 result = 'timeout'
 
             if result:
-                # Закрываем 100% позиции
-                pnl_usdt  = t_pos * (pnl_p / 100)
-                comm      = t_pos * COMM * 2
+                remaining = 0.5 if t_tp1_hit else 1.0
+                pnl_usdt  = t_pos * remaining * (pnl_p / 100)
+                comm      = t_pos * remaining * COMM * 2
                 pnl_usdt -= comm
                 total_comm += comm
                 equity    += pnl_usdt
@@ -351,7 +358,6 @@ def run_backtest(req: BacktestRequest):
                 if result in ('tp1', 'tp2', 'tp3') or (result == 'timeout' and pnl_usdt > 0):
                     wins += 1
                 elif result == 'be' and pnl_usdt > 0:
-                    # Трейлинг закрыл в небольшой плюс — считаем как TP1
                     result = 'tp1'
                     wins += 1
                 elif result == 'sl':
@@ -376,7 +382,7 @@ def run_backtest(req: BacktestRequest):
                 t_tp1_hit = t_be_hit = t_pre_trail = t_potential_warned = False
             continue
 
-        # ── ПОИСК ВХОДА (точная логика generate_signal) ───────────────
+        # ── ПОИСК ВХОДА ───────────────────────────────────────────────
         df_slice   = df_main.iloc[:i + 1].copy()
         df_1h_sl   = df_1h[df_1h['timestamp'] <= ts_now].copy()
         df_4h_sl   = df_4h[df_4h['timestamp'] <= ts_now].copy()
@@ -403,11 +409,14 @@ def run_backtest(req: BacktestRequest):
 
         if not detect_trend_stable(df_slice, signal):
             continue
-        # mtf_confirms убран
-        # volume_healthy убран
+        if not mtf_confirms(df_4h_sl, df_1h_sl, signal):
+            continue
+        if not volume_healthy(df_slice):
+            continue
         if is_overextended(df_slice, signal):
             continue
-        # detect_volume_climax убран
+        if detect_volume_climax(df_slice):
+            continue
 
         fresh_cross   = detect_ema_cross_fresh(df_slice, signal, max_bars=5)
         has_pullback, _ = detect_pullback(df_slice, signal)
