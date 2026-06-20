@@ -350,6 +350,10 @@ def run_backtest(req: BacktestRequest):
 
                 if result in ('tp1', 'tp2', 'tp3') or (result == 'timeout' and pnl_usdt > 0):
                     wins += 1
+                elif result == 'be' and pnl_usdt > 0:
+                    # Трейлинг закрыл в небольшой плюс — считаем как TP1
+                    result = 'tp1'
+                    wins += 1
                 elif result == 'sl':
                     losses += 1
                 else:
