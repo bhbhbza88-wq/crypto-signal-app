@@ -21,6 +21,45 @@ except ImportError:
     TELEGRAM_ENABLED = False
     print("⚠️ telegram_bot не найден, уведомления отключены")
 
+MAX_OPEN_TRADES = 3  # максимум одновременных позиций
+DCA_THRESHOLD = -1.5  # DCA при просадке -1.5%
+DCA_MULT = 0.5        # DCA добавляет 50% от исходной позиции
+
+
+def pnl_pct(signal, entry, price):
+    return ((price - entry) / entry * 100) if signal == 'LONG' else ((entry - price) / entry * 100)
+
+
+def try_dca(symbol, trade):
+    """DCA — добавляем к позиции если просадка >= DCA_THRESHOLD."""
+    if trade.get('dca_done'):
+        return
+    try:
+        from data_layer import fetch_ticker
+        ticker = fetch_ticker(symbol)
+        if not ticker:
+            return
+        price = ticker['last']
+        pnl = pnl_pct(trade['signal'], trade['entry'], price)
+        if pnl <= DCA_THRESHOLD:
+            # Считаем новую среднюю цену входа
+            orig_pos = trade.get('position_size', 0)
+            dca_pos = orig_pos * DCA_MULT
+            orig_entry = trade['entry']
+            if trade['signal'] == 'LONG':
+                new_entry = (orig_entry * orig_pos + price * dca_pos) / (orig_pos + dca_pos)
+            else:
+                new_entry = (orig_entry * orig_pos + price * dca_pos) / (orig_pos + dca_pos)
+            trade['entry'] = new_entry
+            trade['position_size'] = orig_pos + dca_pos
+            trade['dca_done'] = True
+            db.upsert_trade(symbol, trade)
+            db.add_event(symbol, 'dca',
+                         f"DCA: добавлено {dca_pos:.0f} USDT по {price:.4f} | новая средняя: {new_entry:.4f}")
+            print(f"📊 DCA {symbol}: новая средняя {new_entry:.4f}")
+    except Exception as e:
+        print(f"⚠️ DCA ошибка {symbol}: {e}")
+
 SCAN_INTERVAL_SECONDS = 2 * 60
 
 
@@ -92,17 +131,35 @@ def scan_once():
     tracker.check_trades()
 
     open_trades = db.load_trades()
-    if open_trades:
-        print(f"⏳ Активно: {', '.join(open_trades.keys())}")
+
+    # DCA для открытых позиций
+    for symbol, trade in open_trades.items():
+        try_dca(symbol, trade)
+
+    if len(open_trades) >= MAX_OPEN_TRADES:
+        print(f"⏳ Активно {len(open_trades)}/{MAX_OPEN_TRADES}: {', '.join(open_trades.keys())}")
         return
 
-    print("🔍 Ищем сигнал...")
-    best = scan_for_best_signal()
-    if best:
-        print(f"💎 Лучший: {best['symbol']} {best['signal']} score={best['score']}/20")
-        register_signal(best)
-    else:
+    # Ищем лучшие сигналы (топ по score)
+    from signal_engine import get_active_symbols, generate_signal
+    signals = []
+    for s in get_active_symbols():
+        if s in open_trades:
+            continue  # уже есть открытая по этой паре
+        r = generate_signal(s)
+        if r:
+            signals.append(r)
+
+    if not signals:
         print("⏳ Нет сигналов...")
+        return
+
+    # Сортируем по score и берём топ до MAX_OPEN_TRADES
+    signals.sort(key=lambda x: x['score'], reverse=True)
+    slots = MAX_OPEN_TRADES - len(open_trades)
+    for best in signals[:slots]:
+        print(f"💎 Открываем: {best['symbol']} {best['signal']} score={best['score']}/20")
+        register_signal(best)
 
 
 def safe_scan():

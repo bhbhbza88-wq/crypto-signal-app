@@ -299,15 +299,15 @@ def run_backtest(req: BacktestRequest):
                 pnl_p  = _pnl(t_signal, t_entry, exit_p)
                 result = 'be' if t_be_hit else 'sl'
 
-            # 2. TP1 — фиксируем 50%, стоп в б/у
+            # 2. TP1 — фиксируем 70%, стоп в б/у
             if not result and not t_tp1_hit:
                 if (t_signal == 'LONG' and hi >= t_tp1) or (t_signal == 'SHORT' and lo <= t_tp1):
                     t_tp1_hit = True
                     t_be_hit  = True
                     ep = t_tp1 * (1 - SLIP) if t_signal == 'LONG' else t_tp1 * (1 + SLIP)
                     p  = _pnl(t_signal, t_entry, ep)
-                    c  = t_pos * 0.5 * COMM * 2
-                    equity += t_pos * 0.5 * (p / 100) - c
+                    c  = t_pos * 0.7 * COMM * 2
+                    equity += t_pos * 0.7 * (p / 100) - c
                     total_comm += c
                     t_stop = t_entry
                     equity_curve.append({"ts": int(ts_now), "equity": round(equity, 2)})
@@ -342,7 +342,7 @@ def run_backtest(req: BacktestRequest):
                 result = 'timeout'
 
             if result:
-                remaining = 0.5 if t_tp1_hit else 1.0
+                remaining = 0.3 if t_tp1_hit else 1.0
                 pnl_usdt  = t_pos * remaining * (pnl_p / 100)
                 comm      = t_pos * remaining * COMM * 2
                 pnl_usdt -= comm

@@ -387,16 +387,16 @@ def generate_signal(symbol):
 
     fresh_cross = detect_ema_cross_fresh(df_30m, signal, max_bars=5)
     has_pullback, _ = detect_pullback(df_30m, signal)
-    # Требуем откат — он даёт лучшее соотношение риск/прибыль
-    # Свежий кросс без отката = слишком рано, часто ложный
     if not has_pullback and not fresh_cross:
         return None
+
+    score = calc_score(df_30m, df_1h, regime, adx_1h, signal)
+
     # Если только кросс без отката — повышаем порог score
     if not has_pullback and fresh_cross:
         if score < SCORE_MIN + 2:
             return None
 
-    score = calc_score(df_30m, df_1h, regime, adx_1h, signal)
     if score < SCORE_MIN:
         return None
 
