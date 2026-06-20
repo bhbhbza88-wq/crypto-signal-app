@@ -284,63 +284,29 @@ def run_backtest(req: BacktestRequest):
             price  = next_c['close']
             hi     = next_c['high']
             lo     = next_c['low']
-            df_now = df_main.iloc[:i + 1]
             result = None
             pnl_p  = 0.0
             exit_p = price
 
-            # 1. Потеря потенциала (до TP1)
-            if not t_tp1_hit and not t_potential_warned:
-                if _check_potential_loss(df_now, t_signal, t_entry, price):
-                    t_potential_warned = True
-                    pnl_p  = _pnl(t_signal, t_entry, price * (1 - SLIP if t_signal == 'LONG' else 1 + SLIP))
-                    exit_p = price * (1 - SLIP if t_signal == 'LONG' else 1 + SLIP)
-                    result = 'potential'
+            # 1. Стоп
+            if t_signal == 'LONG' and lo <= t_stop:
+                exit_p = t_stop * (1 - SLIP)
+                pnl_p  = _pnl(t_signal, t_entry, exit_p)
+                result = 'be' if t_be_hit else 'sl'
+            elif t_signal == 'SHORT' and hi >= t_stop:
+                exit_p = t_stop * (1 + SLIP)
+                pnl_p  = _pnl(t_signal, t_entry, exit_p)
+                result = 'be' if t_be_hit else 'sl'
 
-            # 2. Trailing stop до TP1 (70% пути)
-            if not result and not t_tp1_hit and not t_pre_trail:
-                dist_total = abs(t_tp1 - t_entry)
-                dist_done  = abs(price - t_entry)
-                if dist_total > 0 and dist_done / dist_total >= 0.70:
-                    if t_signal == 'LONG':
-                        new_stop = t_entry * 1.003
-                        if new_stop > t_stop:
-                            t_stop    = new_stop
-                            t_be_hit  = True
-                            t_pre_trail = True
-                    else:
-                        new_stop = t_entry * 0.997
-                        if new_stop < t_stop:
-                            t_stop    = new_stop
-                            t_be_hit  = True
-                            t_pre_trail = True
-
-            # 3. Стоп
-            if not result:
-                if t_signal == 'LONG' and lo <= t_stop:
-                    exit_p = t_stop * (1 - SLIP)
-                    pnl_p  = _pnl(t_signal, t_entry, exit_p)
-                    result = 'be' if t_be_hit else 'sl'
-                elif t_signal == 'SHORT' and hi >= t_stop:
-                    exit_p = t_stop * (1 + SLIP)
-                    pnl_p  = _pnl(t_signal, t_entry, exit_p)
-                    result = 'be' if t_be_hit else 'sl'
-
-            # 4. TP1 — частичная фиксация 50%
+            # 2. TP1 достигнут → переносим стоп в б/у, держим всю позицию
             if not result and not t_tp1_hit:
                 if (t_signal == 'LONG' and hi >= t_tp1) or (t_signal == 'SHORT' and lo <= t_tp1):
                     t_tp1_hit = True
                     t_be_hit  = True
-                    ep = t_tp1 * (1 - SLIP) if t_signal == 'LONG' else t_tp1 * (1 + SLIP)
-                    p  = _pnl(t_signal, t_entry, ep)
-                    c  = t_pos * 0.5 * COMM * 2
-                    equity += t_pos * 0.5 * (p / 100) - c
-                    total_comm += c
-                    t_stop = t_entry  # стоп в б/у
-                    equity_curve.append({"ts": int(ts_now), "equity": round(equity, 2)})
-                    continue
+                    t_stop    = t_entry  # стоп в б/у — всё что выше это профит
+                    # НЕ фиксируем, держим всю позицию дальше
 
-            # 5. Trailing stop после TP1
+            # 3. Trailing stop после TP1 (подтягиваем за ценой)
             if not result and t_tp1_hit:
                 atr_now = candle['atr']
                 if not pd.isna(atr_now) and atr_now > 0:
@@ -348,31 +314,30 @@ def run_backtest(req: BacktestRequest):
                     if abs(new_stop - t_stop) / (t_stop + 1e-10) > 0.003:
                         t_stop = new_stop
 
-            # 6. TP2
+            # 4. TP2 — закрываем всю позицию
             if not result and t_tp1_hit:
                 if (t_signal == 'LONG' and hi >= t_tp2) or (t_signal == 'SHORT' and lo <= t_tp2):
                     exit_p = t_tp2 * (1 - SLIP) if t_signal == 'LONG' else t_tp2 * (1 + SLIP)
                     pnl_p  = _pnl(t_signal, t_entry, exit_p)
                     result = 'tp2'
 
-            # 7. TP3
+            # 5. TP3 — закрываем всю позицию
             if not result:
                 if (t_signal == 'LONG' and hi >= t_tp3) or (t_signal == 'SHORT' and lo <= t_tp3):
                     exit_p = t_tp3 * (1 - SLIP) if t_signal == 'LONG' else t_tp3 * (1 + SLIP)
                     pnl_p  = _pnl(t_signal, t_entry, exit_p)
                     result = 'tp3'
 
-            # 8. Таймаут (48 баров)
-            if not result and i - t_open_i > 48:
+            # 6. Таймаут (72 бара)
+            if not result and i - t_open_i > 72:
                 exit_p = price * (1 - SLIP if t_signal == 'LONG' else 1 + SLIP)
                 pnl_p  = _pnl(t_signal, t_entry, exit_p)
                 result = 'timeout'
 
             if result:
-                # Закрываем оставшиеся 50% (или 100% если TP1 не был достигнут)
-                remaining = 0.5 if t_tp1_hit else 1.0
-                pnl_usdt  = t_pos * remaining * (pnl_p / 100)
-                comm      = t_pos * remaining * COMM * 2
+                # Закрываем 100% позиции
+                pnl_usdt  = t_pos * (pnl_p / 100)
+                comm      = t_pos * COMM * 2
                 pnl_usdt -= comm
                 total_comm += comm
                 equity    += pnl_usdt
@@ -385,7 +350,7 @@ def run_backtest(req: BacktestRequest):
 
                 if result in ('tp1', 'tp2', 'tp3') or (result == 'timeout' and pnl_usdt > 0):
                     wins += 1
-                elif result in ('sl',):
+                elif result == 'sl':
                     losses += 1
                 else:
                     bes += 1
