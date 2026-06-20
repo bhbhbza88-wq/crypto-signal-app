@@ -29,13 +29,11 @@ function resolveBase() {
 
 export default function Backtest() {
   const [pair, setPair] = useState('BTC/USDT')
-  const [timeframe, setTimeframe] = useState(TIMEFRAMES[2])
   const [period, setPeriod] = useState(PERIODS[1])  // 3 месяца по умолчанию
   const [deposit, setDeposit] = useState(1000)
   const [commission, setCommission] = useState(0.055)
   const [slippage, setSlippage] = useState(0.05)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [scannerMode, setScannerMode] = useState(true)  // режим сканера включён по умолчанию
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -50,12 +48,10 @@ export default function Backtest() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           symbol: pair,
-          timeframe: timeframe.value,
           deposit: Number(deposit),
           period_days: period.days,
           commission: Number(commission),
           slippage: Number(slippage),
-          scanner_mode: scannerMode,
         }),
       })
       if (!res.ok) {
@@ -78,26 +74,8 @@ export default function Backtest() {
       <div className="page-header" style={{marginBottom:20}}>
         <h1 className="page-title">Бэктестинг</h1>
         <p style={{fontSize:13,color:'var(--text-secondary)',marginTop:4}}>
-          Реальная проверка стратегии сканера на исторических данных Bybit
+          NFI стратегия (EWO + Bollinger Bands) на 30m таймфрейме — историческое тестирование
         </p>
-      </div>
-
-      {/* Scanner mode toggle */}
-      <div className="bt-scanner-mode">
-        <button
-          className={`bt-scanner-btn ${scannerMode ? 'active' : ''}`}
-          onClick={() => { setScannerMode(v => !v); setResult(null) }}
-        >
-          <span className="bsm-icon">{scannerMode ? '🟢' : '⚪'}</span>
-          <div>
-            <div className="bsm-title">Режим сканера (1h + 4h)</div>
-            <div className="bsm-sub">
-              {scannerMode
-                ? 'Активен — 1h основной таймфрейм, 4h подтверждение'
-                : 'Выключен — используется выбранный таймфрейм'}
-            </div>
-          </div>
-        </button>
       </div>
 
       {/* Settings */}
@@ -107,15 +85,6 @@ export default function Backtest() {
           <select className="bf-input" value={pair} onChange={e => setPair(e.target.value)}>
             {PAIRS.map(p => <option key={p}>{p}</option>)}
           </select>
-        </div>
-        <div className="bf-group" style={{opacity: scannerMode ? 0.4 : 1, pointerEvents: scannerMode ? 'none' : 'auto'}}>
-          <label className="bf-label">Таймфрейм {scannerMode && <span style={{color:'var(--accent)'}}>— авто (30m)</span>}</label>
-          <div className="bf-toggle">
-            {TIMEFRAMES.map(tf => (
-              <button key={tf.value} className={`bft ${timeframe.value === tf.value ? 'active' : ''}`}
-                onClick={() => setTimeframe(tf)}>{tf.label}</button>
-            ))}
-          </div>
         </div>
         <div className="bf-group">
           <label className="bf-label">Период</label>
@@ -212,7 +181,7 @@ export default function Backtest() {
           {/* Real data badge */}
           <div className="bt-real-badge">
             <span className="bt-real-dot" />
-            Реальные данные Bybit · {result.candles_used} свечей {result.timeframe} · {result.symbol} · {result.period_days} дней
+            NFI (EWO + Bollinger Bands) · 30m таймфрейм · {result.candles_used} свечей · {result.symbol} · {result.period_days} дней
             <span style={{marginLeft:'auto',color:'var(--text-tertiary)',fontSize:11}}>
               TP1→стоп в б/у → вся позиция до TP2 · Комиссии: ${result.total_commission}
             </span>
