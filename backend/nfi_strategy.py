@@ -12,7 +12,7 @@ from data_layer import (
 )
 
 # Параметры входа
-EWO_BUY = 0.5           # Порог EWO для buy (EMA5 > EMA35 и значение > 2.0)
+EWO_BUY = 0.5           # Порог EWO для buy
 EWO_SELL = -0.5         # Порог EWO для sell
 BB_LENGTH = 20          # Период Bollinger Bands
 BB_STD = 2.0            # Стандартные отклонения
@@ -54,83 +54,61 @@ def calc_bollinger_bands(df, length=20, std=2.0):
 def is_dip_buy_signal(df, signal='LONG'):
     """
     Сигнал входа в лонг:
-    - EWO растёт и выше порога (2.0) — волна импульса вверх
-    - Цена выше нижней полосы BB (не переигрок)
-    - RSI в зоне (30-70)
+    - EWO растёт и выше порога — волна импульса вверх
+    - Цена выше нижней полосы BB
+    - RSI в рабочей зоне (25-75)
     """
     if len(df) < 50:
         return False
-    
+
     last = df.iloc[-1]
     prev = df.iloc[-2]
-    
-    # Проверяем EWO
+
     ewo_last = last.get('ewo', 0)
     ewo_prev = prev.get('ewo', 0) if len(df) > 1 else 0
-    
+
     if signal == 'LONG':
-        # EWO растёт выше порога
         ewo_ok = ewo_last > EWO_BUY and ewo_last > ewo_prev
-        
-        # Цена выше нижней BB (не переигрок)
-        bb_ok = last['close'] > last.get('bb_lower', last['close'] * 0.99)
-        
-        # RSI в нормальной зоне (не перекуплено, но растёт)
+        bb_ok  = last['close'] > last.get('bb_lower', last['close'] * 0.99)
         rsi_ok = RSI_MIN_BUY < last['rsi'] < RSI_MAX_BUY
-        
         return ewo_ok and bb_ok and rsi_ok
     else:
-        # SHORT: EWO падает ниже порога
         ewo_ok = ewo_last < EWO_SELL and ewo_last < ewo_prev
-        bb_ok = last['close'] < last.get('bb_upper', last['close'] * 1.01)
+        bb_ok  = last['close'] < last.get('bb_upper', last['close'] * 1.01)
         rsi_ok = RSI_MIN_SELL < last['rsi'] < RSI_MAX_SELL
         return ewo_ok and bb_ok and rsi_ok
 
 
 def should_enter(df, signal):
-    """Проверка полного набора условий для входа."""
+    """Проверка условий для входа. Только LONG, без slope-фильтра EMA50."""
     if len(df) < 50:
         return False
-    
-    # Торгуем ТОЛЬКО LONG — против тренда не входим
+
+    # Торгуем ТОЛЬКО LONG
     if signal == 'SHORT':
         return False
-    
+
     last = df.iloc[-1]
-    
-    # Глобальный тренд: EMA50 должна расти последние 10 свечей
-    ema50_now = last['ema50']
-    ema50_10 = df.iloc[-10]['ema50']
-    ema50_slope = (ema50_now - ema50_10) / ema50_10 * 100
-    
-    # Тренд вверх: EMA50 растёт хотя бы на 0.1% за 10 свечей
-    if ema50_slope < 0.05:
-        return False
-    
-    # Цена выше EMA50 (бычий рынок)
-    if last['close'] < last['ema50'] * 0.995:
-        return False
-    
+
     # Краткосрочный тренд: EMA9 > EMA21
     if last['ema9'] < last['ema21']:
         return False
-    
+
+    # Цена выше EMA50 — бычий рынок (slope НЕ проверяем)
+    if last['close'] < last['ema50']:
+        return False
+
     return is_dip_buy_signal(df, 'LONG')
 
 
 def build_nfi_features(df):
     """Добавляет EWO и Bollinger Bands к датафрейму."""
     df = df.copy()
-    
-    # EWO
     df['ewo'] = calc_ewo(df)
-    
-    # Bollinger Bands
     bb_mid, bb_upper, bb_lower = calc_bollinger_bands(df, BB_LENGTH, BB_STD)
-    df['bb_mid'] = bb_mid
+    df['bb_mid']   = bb_mid
     df['bb_upper'] = bb_upper
     df['bb_lower'] = bb_lower
-    
     return df
 
 
@@ -151,9 +129,9 @@ def calc_levels(signal, entry, atr, sl_m, tp1_m, tp2_m):
     d = atr * sl_m
     if signal == 'LONG':
         return (
-            entry - d,                    # stop
-            entry + atr * tp1_m,          # tp1
-            entry + atr * tp2_m,          # tp2
+            entry - d,
+            entry + atr * tp1_m,
+            entry + atr * tp2_m,
         )
     return (
         entry + d,
@@ -175,51 +153,45 @@ def generate_nfi_signal(symbol):
     """
     Генерирует сигнал на основе NFI-логики.
     Вход: EWO + BB + тренд + RSI.
-    Простой, но эффективный.
     """
     data = fetch_data_cached(symbol)
     if not data:
         return None
-    
-    # Грузим и обогащаем данные
-    df_1h = build_features(data['1h'])
+
+    df_1h  = build_features(data['1h'])
     df_30m = build_features(data['30m'])
     df_30m = build_nfi_features(df_30m)
-    
+
     last = df_30m.iloc[-1]
-    
-    # Базовые проверки
+
     if pd.isna(last['atr']) or last['atr'] <= 0:
         return None
     if pd.isna(last['rsi']):
         return None
     if pd.isna(last.get('ewo', 0)):
         return None
-    
-    # Определяем сигнал — только LONG по тренду
+
     signal = None
     if should_enter(df_30m, 'LONG'):
         signal = 'LONG'
-    
+
     if not signal:
         return None
-    
-    # Расчёт уровней
-    entry = last['close']
-    atr = last['atr']
+
+    entry   = last['close']
+    atr     = last['atr']
     atr_pct = atr / entry if entry > 0 else 0
-    
+
     sl_m, tp1_m, tp2_m = get_mults(atr_pct)
     stop, tp1, tp2 = calc_levels(signal, entry, atr, sl_m, tp1_m, tp2_m)
     pos_size = calc_position_size(entry, stop)
-    
+
     if pos_size <= 0:
         return None
-    
-    # Оценка качества (простой скоринг)
-    score = 10  # базовая оценка
+
+    score = 10
     ewo = last['ewo']
-    
+
     if signal == 'LONG':
         if ewo > 5.0:
             score += 3
@@ -232,28 +204,26 @@ def generate_nfi_signal(symbol):
             score += 3
         elif abs(ewo) > 3.0:
             score += 2
-    
-    # Проверяем волатильность
+
     if atr_pct > 0.01:
         score += 2
     elif atr_pct > 0.005:
         score += 1
-    
+
     return {
-        'symbol': symbol,
-        'signal': signal,
-        'score': min(score, 20),
-        'entry': entry,
-        'stop': stop,
-        'tp1': tp1,
-        'tp2': tp2,
+        'symbol':   symbol,
+        'signal':   signal,
+        'score':    min(score, 20),
+        'entry':    entry,
+        'stop':     stop,
+        'tp1':      tp1,
+        'tp2':      tp2,
         'position_size': pos_size,
-        'last': last,
-        'last_1h': df_1h.iloc[-1],
-        'df': df_30m,
+        'last':     last,
+        'last_1h':  df_1h.iloc[-1],
+        'df':       df_30m,
         'entry_reasons': [
             f'EWO сигнал: {ewo:.1f}',
-            f'Цена на уровне {"между BB" if signal == "LONG" else "между BB"}',
             f'RSI в зоне: {last["rsi"]:.0f}',
             f'ATR: {atr:.4f} ({atr_pct*100:.2f}%)',
         ]
@@ -262,15 +232,12 @@ def generate_nfi_signal(symbol):
 
 def scan_for_nfi_signals():
     """
-    Сканирует все пары и возвращает список всех найденных сигналов
-    (отсортированных по score), или пустой список.
+    Сканирует все пары и возвращает список сигналов, отсортированных по score.
     """
     signals = []
     for symbol in get_active_symbols():
         sig = generate_nfi_signal(symbol)
         if sig:
             signals.append(sig)
-    
-    # Сортируем по score
     signals.sort(key=lambda x: x['score'], reverse=True)
     return signals
