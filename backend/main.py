@@ -133,8 +133,7 @@ import time as _time
 
 from signal_engine import (
     get_mults, entry_conditions,
-    detect_trend_stable, mtf_confirms, volume_healthy,
-    is_overextended, detect_volume_climax,
+    detect_trend_stable, is_overextended,
     detect_ema_cross_fresh, detect_pullback, calc_score,
     ADX_MIN, SCORE_MIN,
 )
@@ -226,12 +225,9 @@ def run_backtest(req: BacktestRequest):
     - Комиссии Bybit + проскальзывание
     """
     tf_map = {"15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h"}
-    tf = "30m" if req.scanner_mode else tf_map.get(req.timeframe, "1h")
-    tf_1h  = {"15m": "1h",  "30m": "1h",  "1h": "4h", "4h": "1d"}
-    tf_4h  = {"15m": "4h",  "30m": "4h",  "1h": "4h", "4h": "1d"}
-    # В режиме сканера всегда: основной 30m, подтверждение 1h и 4h
-    tf_higher = "1h" if req.scanner_mode else tf_1h[tf]
-    tf_top    = "4h" if req.scanner_mode else tf_4h[tf]
+    tf = "1h" if req.scanner_mode else tf_map.get(req.timeframe, "1h")
+    tf_higher = "4h"
+    tf_top    = "4h"
 
     cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
     higher_days = max(req.period_days + 10, 40)
@@ -305,7 +301,7 @@ def run_backtest(req: BacktestRequest):
             if not result and not t_tp1_hit and not t_pre_trail:
                 dist_total = abs(t_tp1 - t_entry)
                 dist_done  = abs(price - t_entry)
-                if dist_total > 0 and dist_done / dist_total >= 0.60:
+                if dist_total > 0 and dist_done / dist_total >= 0.70:
                     if t_signal == 'LONG':
                         new_stop = t_entry * 1.003
                         if new_stop > t_stop:
@@ -438,14 +434,11 @@ def run_backtest(req: BacktestRequest):
 
         if not detect_trend_stable(df_slice, signal):
             continue
-        if not mtf_confirms(df_4h_sl, df_1h_sl, signal):
-            continue
-        if not volume_healthy(df_slice):
-            continue
+        # mtf_confirms убран
+        # volume_healthy убран
         if is_overextended(df_slice, signal):
             continue
-        if detect_volume_climax(df_slice):
-            continue
+        # detect_volume_climax убран
 
         fresh_cross   = detect_ema_cross_fresh(df_slice, signal, max_bars=5)
         has_pullback, _ = detect_pullback(df_slice, signal)
