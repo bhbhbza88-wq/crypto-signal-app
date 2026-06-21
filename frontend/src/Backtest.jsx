@@ -35,7 +35,7 @@ function SingleResult({ result, deposit }) {
     <div className="bt-results animate-in">
       <div className="bt-real-badge">
         <span className="bt-real-dot" />
-        V8 · 1h · ADX≥30 · Score≥18 · {result.candles_used} свечей · {result.symbol} · {result.period_days} дней
+        V9 · 1h · откат · Supertrend · R:R 1:2 · {result.candles_used} свечей · {result.symbol} · {result.period_days} дней
         <span style={{ marginLeft: 'auto', color: 'var(--text-tertiary)', fontSize: 11 }}>
           Комиссии: ${result.total_commission}
         </span>
@@ -313,7 +313,7 @@ export default function Backtest() {
       <div className="page-header" style={{ marginBottom: 20 }}>
         <h1 className="page-title">Бэктестинг</h1>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
-          V8 стратегия (1h основной, Pullback, Structure, ADX≥30, Score≥18)
+          V9 (вход на откате, Supertrend, R:R 1:2, ADX≥22, Score≥13)
         </p>
       </div>
 
@@ -395,7 +395,7 @@ export default function Backtest() {
         <span>⚙ Таймфрейм: 1h</span>
         <span>📅 {period.label}</span>
         <span>💸 Комиссия: {commission}% × 2</span>
-        <span>⚙ ADX≥30 | Score≥18/20 | 💰 Риск 1.5%</span>
+        <span>⚙ ADX≥22 | Score≥13/20 | 💰 Риск 1.5%</span>
         {mode === 'multi' && <span>🌐 Пар: {ALL_PAIRS.length}</span>}
       </div>
 

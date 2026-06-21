@@ -1,12 +1,18 @@
 """
-V8 Strategy — оптимизированная версия.
-Новое: Supertrend, MACD Histogram filter, Volatility Position Sizing,
-Chandelier Exit trailing, Daily Loss Limit, Cooldown per pair.
+V9 Strategy — единая логика для лайва и бэктеста.
+Ключевые принципы:
+  - Вход на ОТКАТЕ к EMA (не на хае): RSI 35-55 для LONG, 45-65 для SHORT
+  - R:R минимум 2:1 (SL 2.2 ATR, TP1 2.5, TP2 4.5, TP3 7.0)
+  - Правильный векторизованный Supertrend (без look-ahead)
+  - Score 0-20, единый core_signal() для лайва и бэктеста
+  - Supertrend + MACD + ADX + объём + структура как фильтры
+  - Cooldown, Daily Loss Limit, Volatility Sizing
 """
 
 import os
 import time
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 from data_layer import (
     fetch_data_cached, build_features, detect_regime,
@@ -14,211 +20,131 @@ from data_layer import (
 )
 
 # ── Параметры ────────────────────────────────────────────────────
-SL_BASE  = 1.8
-TP1_BASE = 2.5
-TP2_BASE = 4.0
-TP3_BASE = 6.0
+SL_BASE   = 2.2     # шире — меньше ложных выбиваний на шуме
+TP1_BASE  = 2.5     # R:R 1.14 на первой цели (фиксируем 40%)
+TP2_BASE  = 4.5     # R:R 2.0
+TP3_BASE  = 7.0     # R:R 3.2
 
-DEPOSIT       = float(os.environ.get("DEPOSIT",  "1000"))
-RISK_PCT      = float(os.environ.get("RISK_PCT", "1.5"))
-SCORE_MIN     = int(os.environ.get("SCORE_MIN",  "18"))
-SCORE_MAX     = 20
-ADX_MIN       = 30
-DAILY_LOSS_LIMIT_PCT = 3.0    # стоп торговли если за день потеряли >3% депозита
-COOLDOWN_HOURS       = 4      # пауза после стопа на той же паре
+DEPOSIT   = float(os.environ.get("DEPOSIT",  "1000"))
+RISK_PCT  = float(os.environ.get("RISK_PCT", "1.5"))
+SCORE_MIN = int(os.environ.get("SCORE_MIN",  "13"))
+SCORE_MAX = 20
+ADX_MIN   = 22
+
+DAILY_LOSS_LIMIT_PCT = 4.0
+COOLDOWN_HOURS       = 3
+
+# RSI окна — вход на откате, а не на пике импульса
+RSI_LONG_MIN,  RSI_LONG_MAX  = 35, 58
+RSI_SHORT_MIN, RSI_SHORT_MAX = 42, 65
 
 
 # ══════════════════════════════════════════════════════════════════
-# НОВЫЕ ИНДИКАТОРЫ
+# ИНДИКАТОРЫ
 # ══════════════════════════════════════════════════════════════════
 
 def calc_supertrend(df, period=10, multiplier=3.0):
     """
-    Supertrend — лучший трендовый индикатор.
-    Возвращает колонки supertrend_up (bullish) и supertrend_dir (1=up, -1=down).
+    Правильный векторизованный Supertrend без look-ahead.
+    supertrend_dir: 1 = bullish (цена выше), -1 = bearish.
     """
     df = df.copy()
-    hl2 = (df['high'] + df['low']) / 2
+    high, low, close = df['high'], df['low'], df['close']
+    hl2 = (high + low) / 2
 
-    # ATR
     tr = pd.concat([
-        df['high'] - df['low'],
-        (df['high'] - df['close'].shift()).abs(),
-        (df['low']  - df['close'].shift()).abs(),
+        high - low,
+        (high - close.shift()).abs(),
+        (low  - close.shift()).abs(),
     ], axis=1).max(axis=1)
-    atr = tr.rolling(period).mean()
+    atr = tr.ewm(alpha=1/period, adjust=False).mean()
 
-    upper = hl2 + multiplier * atr
-    lower = hl2 - multiplier * atr
+    upperband = hl2 + multiplier * atr
+    lowerband = hl2 - multiplier * atr
 
-    supertrend = pd.Series(index=df.index, dtype=float)
-    direction  = pd.Series(1, index=df.index, dtype=int)
+    final_upper = upperband.copy()
+    final_lower = lowerband.copy()
+    n = len(df)
+    fu = final_upper.values
+    fl = final_lower.values
+    cl = close.values
 
-    for i in range(1, len(df)):
-        # Upper band
-        if upper.iloc[i] < upper.iloc[i-1] or df['close'].iloc[i-1] > upper.iloc[i-1]:
-            upper.iloc[i] = upper.iloc[i]
+    for i in range(1, n):
+        fu[i] = upperband.iloc[i] if (upperband.iloc[i] < fu[i-1] or cl[i-1] > fu[i-1]) else fu[i-1]
+        fl[i] = lowerband.iloc[i] if (lowerband.iloc[i] > fl[i-1] or cl[i-1] < fl[i-1]) else fl[i-1]
+
+    direction = np.ones(n, dtype=int)
+    supertrend = np.zeros(n)
+    supertrend[0] = fu[0]
+    for i in range(1, n):
+        if cl[i] > fu[i]:
+            direction[i] = 1
+        elif cl[i] < fl[i]:
+            direction[i] = -1
         else:
-            upper.iloc[i] = upper.iloc[i-1]
-
-        # Lower band
-        if lower.iloc[i] > lower.iloc[i-1] or df['close'].iloc[i-1] < lower.iloc[i-1]:
-            lower.iloc[i] = lower.iloc[i]
-        else:
-            lower.iloc[i] = lower.iloc[i-1]
-
-        # Direction
-        if supertrend.iloc[i-1] == upper.iloc[i-1]:
-            direction.iloc[i] = -1 if df['close'].iloc[i] > upper.iloc[i] else 1
-        else:
-            direction.iloc[i] = 1 if df['close'].iloc[i] < lower.iloc[i] else -1
-
-        supertrend.iloc[i] = lower.iloc[i] if direction.iloc[i] == -1 else upper.iloc[i]
+            direction[i] = direction[i-1]
+        supertrend[i] = fl[i] if direction[i] == 1 else fu[i]
 
     df['supertrend']     = supertrend
-    df['supertrend_dir'] = direction   # -1 = bullish, 1 = bearish
+    df['supertrend_dir'] = direction   # 1 = bullish, -1 = bearish
     return df
 
 
-def calc_macd_histogram(df):
-    """MACD Histogram — растёт = импульс в направлении тренда."""
+def calc_macd(df):
+    """MACD + histogram."""
     ema12 = df['close'].ewm(span=12, adjust=False).mean()
     ema26 = df['close'].ewm(span=26, adjust=False).mean()
     macd  = ema12 - ema26
     signal_line = macd.ewm(span=9, adjust=False).mean()
-    histogram   = macd - signal_line
-    return histogram
+    return macd - signal_line
 
 
 def calc_chandelier_exit(df, period=22, multiplier=3.0):
-    """
-    Chandelier Exit — трейлинг от максимума/минимума свечей.
-    Лучше ATR-трейлинга: меньше ложных выбиваний.
-    Returns: (long_stop, short_stop)
-    """
-    atr = df['atr'] if 'atr' in df.columns else (
-        pd.concat([
+    """Chandelier Exit для трейлинга."""
+    if 'atr' in df.columns:
+        atr = df['atr']
+    else:
+        tr = pd.concat([
             df['high'] - df['low'],
             (df['high'] - df['close'].shift()).abs(),
             (df['low']  - df['close'].shift()).abs(),
-        ], axis=1).max(axis=1).rolling(14).mean()
-    )
-    highest_high = df['high'].rolling(period).max()
-    lowest_low   = df['low'].rolling(period).min()
-    long_stop    = highest_high - multiplier * atr
-    short_stop   = lowest_low  + multiplier * atr
+        ], axis=1).max(axis=1)
+        atr = tr.rolling(14).mean()
+    long_stop  = df['high'].rolling(period).max() - multiplier * atr
+    short_stop = df['low'].rolling(period).min()  + multiplier * atr
     return long_stop, short_stop
 
 
-def supertrend_bullish(df):
-    """Последние 3 свечи Supertrend = bullish."""
-    if 'supertrend_dir' not in df.columns:
-        return True  # если нет — не блокируем
-    return (df['supertrend_dir'].tail(3) == -1).all()
-
-
-def supertrend_bearish(df):
-    """Последние 3 свечи Supertrend = bearish."""
-    if 'supertrend_dir' not in df.columns:
-        return True
-    return (df['supertrend_dir'].tail(3) == 1).all()
-
-
-def macd_confirms(df, signal):
-    """MACD histogram растёт последние 2 свечи в направлении сигнала."""
-    hist = calc_macd_histogram(df)
-    if len(hist) < 3:
-        return True
-    h1, h2 = hist.iloc[-2], hist.iloc[-1]
-    if signal == 'LONG':
-        return h2 > h1 and h2 > 0   # растёт и в плюсе
-    return h2 < h1 and h2 < 0       # падает и в минусе
-
-
-def volatility_position_size(entry, stop, atr_pct):
-    """
-    Динамический размер позиции.
-    При высокой волатильности (ATR > 1%) — уменьшаем риск вдвое.
-    """
-    risk_pct = RISK_PCT
-    if atr_pct > 0.015:
-        risk_pct *= 0.5    # экстремальная волатильность — половина риска
-    elif atr_pct > 0.01:
-        risk_pct *= 0.75   # высокая волатильность — 75% риска
-    risk_usdt = DEPOSIT * risk_pct / 100
-    sl_dist   = abs(entry - stop)
-    if sl_dist == 0:
-        return 0.0
-    return round(risk_usdt / sl_dist * entry, 2)
-
-
 # ══════════════════════════════════════════════════════════════════
-# COOLDOWN и DAILY LOSS LIMIT
-# ══════════════════════════════════════════════════════════════════
-
-_cooldown_map = {}   # symbol -> datetime когда cooldown кончается
-_daily_loss   = {'date': '', 'loss_pct': 0.0}
-
-
-def set_cooldown(symbol):
-    """Ставим паузу на COOLDOWN_HOURS после стопа."""
-    _cooldown_map[symbol] = datetime.now() + timedelta(hours=COOLDOWN_HOURS)
-    print(f"  ⏳ Cooldown {symbol}: {COOLDOWN_HOURS}ч")
-
-
-def is_in_cooldown(symbol):
-    until = _cooldown_map.get(symbol)
-    if until and datetime.now() < until:
-        return True
-    return False
-
-
-def record_daily_loss(pnl_pct_val):
-    """Записываем потерю дня."""
-    today = datetime.now().strftime('%Y-%m-%d')
-    if _daily_loss['date'] != today:
-        _daily_loss['date']     = today
-        _daily_loss['loss_pct'] = 0.0
-    if pnl_pct_val < 0:
-        _daily_loss['loss_pct'] += abs(pnl_pct_val)
-
-
-def daily_loss_ok():
-    """True если лимит потерь за день не достигнут."""
-    today = datetime.now().strftime('%Y-%m-%d')
-    if _daily_loss['date'] != today:
-        return True
-    if _daily_loss['loss_pct'] >= DAILY_LOSS_LIMIT_PCT:
-        print(f"  🛑 Daily loss limit {DAILY_LOSS_LIMIT_PCT}% достигнут — торговля остановлена")
-        return False
-    return True
-
-
-# ══════════════════════════════════════════════════════════════════
-# СУЩЕСТВУЮЩИЕ ДЕТЕКТОРЫ
+# ДЕТЕКТОРЫ
 # ══════════════════════════════════════════════════════════════════
 
 def detect_pullback(df, signal):
+    """
+    Откат к EMA21/EMA50 с возобновлением. Это ТОЧКА ВХОДА.
+    Возвращает (bool, bonus).
+    """
     if len(df) < 10:
         return False, 0
-    recent = df.tail(10)
+    recent = df.tail(8)
     last   = df.iloc[-1]
     if signal == 'LONG':
-        touched_ema21 = (recent['low'] <= recent['ema21'] * 1.005).any()
-        touched_ema50 = (recent['low'] <= recent['ema50'] * 1.008).any()
-        resumed = last['close'] > last['ema21']
-        if (touched_ema21 or touched_ema50) and resumed:
-            return True, (3 if touched_ema50 else 2)
+        touched21 = (recent['low'] <= recent['ema21'] * 1.004).any()
+        touched50 = (recent['low'] <= recent['ema50'] * 1.006).any()
+        resumed   = last['close'] > last['ema9'] and last['close'] > df.iloc[-2]['close']
+        if (touched21 or touched50) and resumed:
+            return True, (3 if touched50 else 2)
     else:
-        touched_ema21 = (recent['high'] >= recent['ema21'] * 0.995).any()
-        touched_ema50 = (recent['high'] >= recent['ema50'] * 0.992).any()
-        resumed = last['close'] < last['ema21']
-        if (touched_ema21 or touched_ema50) and resumed:
-            return True, (3 if touched_ema50 else 2)
+        touched21 = (recent['high'] >= recent['ema21'] * 0.996).any()
+        touched50 = (recent['high'] >= recent['ema50'] * 0.994).any()
+        resumed   = last['close'] < last['ema9'] and last['close'] < df.iloc[-2]['close']
+        if (touched21 or touched50) and resumed:
+            return True, (3 if touched50 else 2)
     return False, 0
 
 
 def detect_structure(df, signal):
+    """HH/HL для LONG, LH/LL для SHORT."""
     if len(df) < 20:
         return False, 0
     recent = df.tail(20)
@@ -231,13 +157,13 @@ def detect_structure(df, signal):
     if len(highs) < 2 or len(lows) < 2:
         return False, 0
     if signal == 'LONG':
-        hh = all(highs[i] > highs[i-1] for i in range(1, len(highs)))
-        hl = all(lows[i]  > lows[i-1]  for i in range(1, len(lows)))
+        hh = highs[-1] > highs[-2]
+        hl = lows[-1]  > lows[-2]
         if hh and hl: return True, 3
         if hh or hl:  return True, 1
     else:
-        lh = all(highs[i] < highs[i-1] for i in range(1, len(highs)))
-        ll = all(lows[i]  < lows[i-1]  for i in range(1, len(lows)))
+        lh = highs[-1] < highs[-2]
+        ll = lows[-1]  < lows[-2]
         if lh and ll: return True, 3
         if lh or ll:  return True, 1
     return False, 0
@@ -255,79 +181,101 @@ def detect_trend_strength(df):
 
 
 def detect_volume_climax(df):
+    """Аномальный объём = кульминация = разворот. Не входим."""
     if len(df) < 20:
         return False
-    last    = df.iloc[-1]
-    vol_avg = last['vol_avg']
-    if pd.isna(vol_avg) or vol_avg == 0:
-        return False
-    return (last['volume'] / vol_avg) > 4.0
-
-
-def detect_ema_cross_fresh(df, signal, max_bars=5):
-    if len(df) < max_bars + 2:
-        return False
-    recent = df.tail(max_bars + 1)
-    for i in range(1, len(recent)):
-        prev = recent.iloc[i-1]
-        curr = recent.iloc[i]
-        if signal == 'LONG'  and prev['ema9'] <= prev['ema21'] and curr['ema9'] > curr['ema21']:
-            return True
-        if signal == 'SHORT' and prev['ema9'] >= prev['ema21'] and curr['ema9'] < curr['ema21']:
-            return True
-    return False
-
-
-def detect_trend_stable(df, signal, lookback=5):
-    if len(df) < lookback + 1:
-        return False
-    recent = df.tail(lookback)
-    if signal == 'LONG':
-        return ((recent['ema9'] > recent['ema21']).all() and
-                (recent['close'] > recent['ema50']).sum() >= lookback - 1)
-    return ((recent['ema9'] < recent['ema21']).all() and
-            (recent['close'] < recent['ema50']).sum() >= lookback - 1)
-
-
-def volume_healthy(df):
     last = df.iloc[-1]
-    return last['volume'] > last['vol_avg'] and last['vol_trend'] > 0.85
-
-
-def mtf_confirms(df_4h, df_1h, signal):
-    l4 = df_4h.iloc[-1]
-    l1 = df_1h.iloc[-1]
-    if signal == 'LONG':
-        return (l4['ema9'] > l4['ema21'] and l4['close'] > l4['ema50'] and
-                l1['ema9'] > l1['ema21'] and l1['close'] > l1['ema50'])
-    return (l4['ema9'] < l4['ema21'] and l4['close'] < l4['ema50'] and
-            l1['ema9'] < l1['ema21'] and l1['close'] < l1['ema50'])
+    if pd.isna(last['vol_avg']) or last['vol_avg'] == 0:
+        return False
+    return (last['volume'] / last['vol_avg']) > 4.5
 
 
 def is_overextended(df, signal):
+    """Цена слишком растянута — ждём отката."""
     last = df.iloc[-1]
     atr  = last['atr']
     if pd.isna(atr) or atr == 0:
         return False
-    if abs(last['close'] - last['open']) > atr * 2.5:
+    # Большая импульсная свеча
+    if abs(last['close'] - last['open']) > atr * 2.8:
         return True
-    if signal == 'LONG'  and last['rsi'] > 76: return True
-    if signal == 'SHORT' and last['rsi'] < 24: return True
-    if df.tail(4)['high'].max() - df.tail(4)['low'].min() > atr * 4.0:
+    # RSI на экстремуме
+    if signal == 'LONG'  and last['rsi'] > 72: return True
+    if signal == 'SHORT' and last['rsi'] < 28: return True
+    # Цена далеко от EMA21 (>3 ATR) — перерастянута
+    dist_ema21 = abs(last['close'] - last['ema21'])
+    if dist_ema21 > atr * 3.0:
         return True
     return False
 
 
 def entry_conditions(df, signal):
+    """
+    Базовые условия. RSI окно сдвинуто на ОТКАТ:
+    LONG: тренд вверх, но RSI ещё не перегрет (35-58)
+    SHORT: тренд вниз, RSI ещё не перепродан (42-65)
+    """
     last = df.iloc[-1]
     if signal == 'LONG':
-        return (last['ema9'] > last['ema21'] and last['close'] > last['ema50'] and
-                40 < last['rsi'] < 70 and last['plus_di'] > last['minus_di'])
-    return (last['ema9'] < last['ema21'] and last['close'] < last['ema50'] and
-            30 < last['rsi'] < 60 and last['minus_di'] > last['plus_di'])
+        return (last['ema9'] > last['ema21'] and
+                last['close'] > last['ema50'] and
+                RSI_LONG_MIN < last['rsi'] < RSI_LONG_MAX and
+                last['plus_di'] > last['minus_di'])
+    return (last['ema9'] < last['ema21'] and
+            last['close'] < last['ema50'] and
+            RSI_SHORT_MIN < last['rsi'] < RSI_SHORT_MAX and
+            last['minus_di'] > last['plus_di'])
 
 
-# ── BTC Filter ───────────────────────────────────────────────────
+def macd_confirms(df, signal):
+    """MACD histogram в нужную сторону и разворачивается к тренду."""
+    hist = calc_macd(df)
+    if len(hist) < 3:
+        return True
+    h1, h2 = hist.iloc[-2], hist.iloc[-1]
+    if signal == 'LONG':
+        return h2 > h1            # растёт (необязательно >0 — ловим разворот с отката)
+    return h2 < h1               # падает
+
+
+def supertrend_ok(df, signal):
+    if 'supertrend_dir' not in df.columns:
+        return True
+    d = df['supertrend_dir'].iloc[-1]
+    return d == 1 if signal == 'LONG' else d == -1
+
+
+# ══════════════════════════════════════════════════════════════════
+# COOLDOWN + DAILY LOSS
+# ══════════════════════════════════════════════════════════════════
+_cooldown_map = {}
+_daily_loss   = {'date': '', 'loss_pct': 0.0}
+
+def set_cooldown(symbol):
+    _cooldown_map[symbol] = datetime.now() + timedelta(hours=COOLDOWN_HOURS)
+
+def is_in_cooldown(symbol):
+    until = _cooldown_map.get(symbol)
+    return bool(until and datetime.now() < until)
+
+def record_daily_loss(pnl_pct_val):
+    today = datetime.now().strftime('%Y-%m-%d')
+    if _daily_loss['date'] != today:
+        _daily_loss['date'] = today
+        _daily_loss['loss_pct'] = 0.0
+    if pnl_pct_val < 0:
+        _daily_loss['loss_pct'] += abs(pnl_pct_val)
+
+def daily_loss_ok():
+    today = datetime.now().strftime('%Y-%m-%d')
+    if _daily_loss['date'] != today:
+        return True
+    return _daily_loss['loss_pct'] < DAILY_LOSS_LIMIT_PCT
+
+
+# ══════════════════════════════════════════════════════════════════
+# BTC FILTER
+# ══════════════════════════════════════════════════════════════════
 _btc_cache = {'ts': 0.0, 'regime': 'CHOP'}
 
 def get_btc_regime():
@@ -346,84 +294,87 @@ def btc_allows(symbol, signal):
     if symbol == 'BTC/USDT':
         return True
     btc = get_btc_regime()
-    if signal == 'LONG'  and btc == 'DOWNTREND':
-        return False
-    if signal == 'SHORT' and btc == 'UPTREND':
-        return False
+    if signal == 'LONG'  and btc == 'DOWNTREND': return False
+    if signal == 'SHORT' and btc == 'UPTREND':   return False
     return True
 
 
-# ── Score 0-20 ───────────────────────────────────────────────────
-def calc_score(df_1h, df_1h_unused, regime, adx_1h, signal):
-    last      = df_1h.iloc[-1]
-    adx_val   = last['adx']   if not pd.isna(last['adx'])   else 0
+# ══════════════════════════════════════════════════════════════════
+# SCORE
+# ══════════════════════════════════════════════════════════════════
+def calc_score(df, regime, signal):
+    last      = df.iloc[-1]
+    adx_val   = last['adx'] if not pd.isna(last['adx']) else 0
     atr_pct   = last['atr'] / last['close'] if last['close'] > 0 else 0
     vol_ratio = last['volume'] / (last['vol_avg'] + 1e-10)
-    score     = 0
+    score = 0
 
     # Объём (0-3)
-    if vol_ratio > 2.0:     score += 3
-    elif vol_ratio > 1.5:   score += 2
-    elif vol_ratio > 1.2:   score += 1
+    if vol_ratio > 1.8:   score += 3
+    elif vol_ratio > 1.4: score += 2
+    elif vol_ratio > 1.1: score += 1
 
     # ADX (0-3)
-    if adx_val > 40:        score += 3
-    elif adx_val > 35:      score += 2
+    if adx_val > 38:        score += 3
+    elif adx_val > 30:      score += 2
     elif adx_val > ADX_MIN: score += 1
 
     # Режим (0-3)
     if regime in ('UPTREND', 'DOWNTREND'):
         score += 2
-        if adx_1h > 25: score += 1
+        if adx_val > 28: score += 1
 
-    # Волатильность ATR (0-2)
-    if atr_pct > 0.006:     score += 2
-    elif atr_pct > 0.003:   score += 1
+    # Волатильность (0-2)
+    if atr_pct > 0.006:   score += 2
+    elif atr_pct > 0.003: score += 1
 
-    # Pullback (0-3)
-    _, pb_bonus = detect_pullback(df_1h, signal)
-    score += pb_bonus
+    # Pullback (0-3) — главный бонус, это точка входа
+    _, pb = detect_pullback(df, signal)
+    score += pb
 
-    # Structure (0-3)
-    _, st_bonus = detect_structure(df_1h, signal)
-    score += st_bonus
+    # Структура (0-3)
+    _, st = detect_structure(df, signal)
+    score += st
 
-    # Trend Strength (0-3)
-    score += detect_trend_strength(df_1h)
+    # Сила тренда (0-3)
+    score += detect_trend_strength(df)
 
-    # Supertrend бонус (0-1)
-    try:
-        df_st = calc_supertrend(df_1h)
-        if signal == 'LONG'  and supertrend_bullish(df_st): score += 1
-        if signal == 'SHORT' and supertrend_bearish(df_st): score += 1
-    except Exception:
-        pass
+    # Supertrend (0-1)
+    if supertrend_ok(df, signal):
+        score += 1
 
     return min(score, SCORE_MAX)
 
 
-# ── Levels ───────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════
+# LEVELS
+# ══════════════════════════════════════════════════════════════════
 def get_mults(adx, atr_pct):
     sl, tp1, tp2, tp3 = SL_BASE, TP1_BASE, TP2_BASE, TP3_BASE
-    if adx > 40:
-        tp1 *= 1.25; tp2 *= 1.35; tp3 *= 1.50; sl *= 1.15
+    if adx > 38:
+        tp1 *= 1.2; tp2 *= 1.3; tp3 *= 1.45
     elif adx > 30:
-        tp1 *= 1.10; tp2 *= 1.15; tp3 *= 1.20; sl *= 1.08
-    if atr_pct > 0.008:   sl *= 1.15
-    elif atr_pct > 0.005: sl *= 1.08
+        tp1 *= 1.1; tp2 *= 1.15; tp3 *= 1.2
+    if atr_pct > 0.008:   sl *= 1.1
     return round(sl,3), round(tp1,3), round(tp2,3), round(tp3,3)
 
-
-def calc_levels(signal, entry, atr_30m, atr_1h, sl_m, tp1_m, tp2_m, tp3_m):
-    atr = atr_1h
-    d   = atr * sl_m
+def calc_levels(signal, entry, atr, sl_m, tp1_m, tp2_m, tp3_m):
+    d = atr * sl_m
     if signal == 'LONG':
         return entry - d, entry + atr*tp1_m, entry + atr*tp2_m, entry + atr*tp3_m
     return entry + d, entry - atr*tp1_m, entry - atr*tp2_m, entry - atr*tp3_m
 
+def volatility_position_size(entry, stop, atr_pct):
+    risk_pct = RISK_PCT
+    if atr_pct > 0.015:   risk_pct *= 0.5
+    elif atr_pct > 0.01:  risk_pct *= 0.75
+    risk_usdt = DEPOSIT * risk_pct / 100
+    sl_dist   = abs(entry - stop)
+    if sl_dist == 0:
+        return 0.0
+    return round(risk_usdt / sl_dist * entry, 2)
 
 def calc_position_size(entry, stop):
-    """Базовый размер позиции — используй volatility_position_size для динамического."""
     risk_usdt = DEPOSIT * RISK_PCT / 100
     sl_dist   = abs(entry - stop)
     if sl_dist == 0:
@@ -431,24 +382,68 @@ def calc_position_size(entry, stop):
     return round(risk_usdt / sl_dist * entry, 2)
 
 
-# ── Generate Signal ──────────────────────────────────────────────
-def generate_nfi_signal(symbol):
-    # Cooldown проверка
-    if is_in_cooldown(symbol):
-        return None
+# ══════════════════════════════════════════════════════════════════
+# ЕДИНОЕ ЯДРО СИГНАЛА — используется и лайвом, и бэктестом
+# ══════════════════════════════════════════════════════════════════
+def core_signal(df_1h, signal, df_4h=None):
+    """
+    Единая проверка входа. df_4h опционален (None в бэктесте).
+    Возвращает True/False.
+    """
+    if len(df_1h) < 50:
+        return False
 
-    # Daily loss limit
-    if not daily_loss_ok():
-        return None
+    last = df_1h.iloc[-1]
+    adx  = last['adx'] if not pd.isna(last['adx']) else 0
+
+    if adx < ADX_MIN:                                return False
+    if pd.isna(last['atr']) or last['atr'] <= 0:     return False
+    if pd.isna(last['rsi']):                          return False
+
+    # Базовые условия (RSI на откате)
+    if not entry_conditions(df_1h, signal):          return False
+
+    # Supertrend в сторону тренда
+    if not supertrend_ok(df_1h, signal):             return False
+
+    # MACD разворот в сторону сигнала
+    if not macd_confirms(df_1h, signal):             return False
+
+    # Не входим на растянутой цене
+    if is_overextended(df_1h, signal):               return False
+
+    # Не входим на кульминации объёма
+    if detect_volume_climax(df_1h):                  return False
+
+    # Главное условие — должен быть ОТКАТ (вход дёшево)
+    has_pullback, _ = detect_pullback(df_1h, signal)
+    if not has_pullback:                              return False
+
+    # MTF подтверждение 4h (только в лайве)
+    if df_4h is not None:
+        l4 = df_4h.iloc[-1]
+        if signal == 'LONG'  and not (l4['ema9'] > l4['ema21'] and l4['close'] > l4['ema50']):
+            return False
+        if signal == 'SHORT' and not (l4['ema9'] < l4['ema21'] and l4['close'] < l4['ema50']):
+            return False
+
+    return True
+
+
+# ══════════════════════════════════════════════════════════════════
+# LIVE SIGNAL
+# ══════════════════════════════════════════════════════════════════
+def generate_nfi_signal(symbol):
+    if is_in_cooldown(symbol):  return None
+    if not daily_loss_ok():     return None
 
     data = fetch_data_cached(symbol)
     if not data:
         return None
 
-    df_4h  = build_features(data['4h'])
-    df_1h  = build_features(data['1h'])
+    df_4h = build_features(data['4h'])
+    df_1h = build_features(data['1h'])
 
-    # Supertrend на 1h
     try:
         df_1h = calc_supertrend(df_1h)
     except Exception:
@@ -458,86 +453,53 @@ def generate_nfi_signal(symbol):
     if regime in ('FLAT', 'CHOP'):
         return None
 
-    last_1h    = df_1h.iloc[-1]
-    adx_1h_val = last_1h['adx'] if not pd.isna(last_1h['adx']) else 0
-
-    if adx_1h_val < ADX_MIN:                           return None
-    if pd.isna(last_1h['atr']) or last_1h['atr'] <= 0: return None
-    if pd.isna(last_1h['rsi']):                         return None
-
+    # Определяем направление по режиму
     signal = None
-    if entry_conditions(df_1h, 'LONG')  and regime == 'UPTREND':   signal = 'LONG'
-    elif entry_conditions(df_1h, 'SHORT') and regime == 'DOWNTREND': signal = 'SHORT'
-    if not signal: return None
-
-    # Supertrend фильтр
-    if signal == 'LONG'  and not supertrend_bullish(df_1h): return None
-    if signal == 'SHORT' and not supertrend_bearish(df_1h): return None
-
-    # MACD histogram фильтр
-    if not macd_confirms(df_1h, signal):
-        print(f"  ⛔ {symbol}: MACD не подтверждает")
+    if regime == 'UPTREND'   and core_signal(df_1h, 'LONG',  df_4h):  signal = 'LONG'
+    elif regime == 'DOWNTREND' and core_signal(df_1h, 'SHORT', df_4h): signal = 'SHORT'
+    if not signal:
         return None
 
-    if not detect_trend_stable(df_1h, signal):  return None
-    if not mtf_confirms(df_4h, df_1h, signal):  return None
-    if not volume_healthy(df_1h):               return None
-    if not btc_allows(symbol, signal):          return None
-    if is_overextended(df_1h, signal):          return None
-    if detect_volume_climax(df_1h):             return None
+    if not btc_allows(symbol, signal):
+        return None
 
-    fresh_cross     = detect_ema_cross_fresh(df_1h, signal, max_bars=3)
-    has_pullback, _ = detect_pullback(df_1h, signal)
-    if not fresh_cross and not has_pullback:    return None
-
-    score = calc_score(df_1h, df_1h, regime, adx_1h_val, signal)
+    score = calc_score(df_1h, regime, signal)
     if score < SCORE_MIN:
         print(f"  ⛔ {symbol}: score={score} < {SCORE_MIN}")
         return None
 
-    entry       = last_1h['close']
-    atr_val     = last_1h['atr']
-    atr_pct     = atr_val / entry if entry > 0 else 0
+    last    = df_1h.iloc[-1]
+    entry   = last['close']
+    atr_val = last['atr']
+    atr_pct = atr_val / entry if entry > 0 else 0
+    adx_val = last['adx'] if not pd.isna(last['adx']) else 0
 
-    sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx_1h_val, atr_pct)
-    stop, tp1, tp2, tp3 = calc_levels(signal, entry, atr_val, atr_val, sl_m, tp1_m, tp2_m, tp3_m)
-
-    # Динамический размер позиции
+    sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx_val, atr_pct)
+    stop, tp1, tp2, tp3 = calc_levels(signal, entry, atr_val, sl_m, tp1_m, tp2_m, tp3_m)
     pos_size = volatility_position_size(entry, stop, atr_pct)
-    if pos_size <= 0: return None
+    if pos_size <= 0:
+        return None
 
-    _, pb_bonus = detect_pullback(df_1h, signal)
-    _, st_bonus = detect_structure(df_1h, signal)
-
-    # Chandelier Exit уровни для трекера
+    _, pb = detect_pullback(df_1h, signal)
+    _, st = detect_structure(df_1h, signal)
     long_ce, short_ce = calc_chandelier_exit(df_1h)
     chandelier_stop = float(long_ce.iloc[-1]) if signal == 'LONG' else float(short_ce.iloc[-1])
 
-    print(f"💎 {symbol}: {signal} | {regime} | ADX={adx_1h_val:.0f} | score={score}/{SCORE_MAX} | vol_size={pos_size:.0f}$")
+    print(f"💎 {symbol}: {signal} | {regime} | ADX={adx_val:.0f} | score={score}/{SCORE_MAX} | {pos_size:.0f}$")
 
     return {
-        'symbol':           symbol,
-        'signal':           signal,
-        'score':            score,
-        'regime':           regime,
-        'entry':            entry,
-        'stop':             stop,
-        'tp1':              tp1,
-        'tp2':              tp2,
-        'tp3':              tp3,
-        'chandelier_stop':  chandelier_stop,
-        'position_size':    pos_size,
-        'last':             last_1h,
-        'last_1h':          last_1h,
-        'df':               df_1h,
+        'symbol': symbol, 'signal': signal, 'score': score, 'regime': regime,
+        'entry': entry, 'stop': stop, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
+        'chandelier_stop': chandelier_stop, 'position_size': pos_size,
+        'last': last, 'last_1h': last, 'df': df_1h,
         'entry_reasons': [
-            f'Режим: {regime} | ADX {adx_1h_val:.0f}',
-            f'Supertrend: {"✓ бычий" if signal == "LONG" else "✓ медвежий"}',
-            f'MACD histogram: подтверждает ✓',
-            f'RSI: {last_1h["rsi"]:.0f} | Score: {score}/{SCORE_MAX}',
-            f'Pullback к EMA: {"✓" if pb_bonus > 0 else "—"}',
-            f'Структура: {"✓" if st_bonus > 0 else "—"}',
-            f'Позиция: {pos_size:.0f}$ (volatility-adjusted)',
+            f'Режим: {regime} | ADX {adx_val:.0f}',
+            f'Вход на откате к EMA (RSI {last["rsi"]:.0f})',
+            f'Supertrend: {"бычий ✓" if signal == "LONG" else "медвежий ✓"}',
+            f'MACD разворот: ✓',
+            f'Структура: {"✓" if st > 0 else "—"} | Score: {score}/{SCORE_MAX}',
+            f'Позиция: {pos_size:.0f}$ (volatility-adj)',
+            f'R:R ≈ 1:2 (SL {sl_m:.1f} ATR / TP2 {tp2_m:.1f} ATR)',
             f'BTC: {get_btc_regime()}',
         ],
     }
@@ -556,37 +518,28 @@ def scan_for_nfi_signals():
     return signals
 
 
-# ── Совместимость с бэктестом ────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════
+# BACKTEST INTERFACE — та же логика через core_signal
+# ══════════════════════════════════════════════════════════════════
 def build_nfi_features(df):
-    return df
+    """Добавляет Supertrend (build_features уже вызван в main.py)."""
+    try:
+        return calc_supertrend(df)
+    except Exception:
+        return df
 
 
 def should_enter(df, signal):
-    """Для бэктеста на 1h — все фильтры кроме BTC и cooldown."""
+    """
+    Бэктест-вход. Использует то же core_signal что и лайв (без 4h MTF).
+    Доп. проверка режима через detect_regime — как в лайве.
+    """
     if len(df) < 50:
         return False
-    last = df.iloc[-1]
-    adx  = last['adx'] if not pd.isna(last.get('adx', float('nan'))) else 0
-    if adx < ADX_MIN:
-        return False
-    if not entry_conditions(df, signal):
-        return False
-    if not detect_trend_stable(df, signal):
-        return False
-    if is_overextended(df, signal):
-        return False
-    if detect_volume_climax(df):
-        return False
-    # Supertrend
-    try:
-        df_st = calc_supertrend(df)
-        if signal == 'LONG'  and not supertrend_bullish(df_st): return False
-        if signal == 'SHORT' and not supertrend_bearish(df_st): return False
-    except Exception:
-        pass
-    # MACD
-    if not macd_confirms(df, signal):
-        return False
-    fresh_cross     = detect_ema_cross_fresh(df, signal, max_bars=3)
-    has_pullback, _ = detect_pullback(df, signal)
-    return fresh_cross or has_pullback
+    # Supertrend должен быть посчитан (build_nfi_features в main.py)
+    regime, _ = detect_regime(df)
+    if regime == 'UPTREND'  and signal == 'LONG':
+        return core_signal(df, 'LONG', None)
+    if regime == 'DOWNTREND' and signal == 'SHORT':
+        return core_signal(df, 'SHORT', None)
+    return False

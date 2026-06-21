@@ -18,7 +18,7 @@ from scanner import start_background_scanner
 from data_layer import exchange, api_call, build_features, detect_regime, get_active_symbols, CANDIDATES
 from nfi_strategy import (
     build_nfi_features, should_enter,
-    get_mults, calc_levels, calc_position_size, ADX_MIN
+    get_mults, calc_levels, calc_position_size, volatility_position_size, ADX_MIN
 )
 
 
@@ -215,6 +215,7 @@ def _run_one(symbol: str, period_days: int, deposit: float,
         return None
 
     df_main = build_features(pd.DataFrame(raw, columns=cols))
+    df_main = build_nfi_features(df_main)  # + Supertrend
 
     # BTC режим фильтр
     btc_regimes = {}
@@ -264,8 +265,8 @@ def _run_one(symbol: str, period_days: int, deposit: float,
                     t_be_hit  = True
                     ep  = t_tp1 * (1 - SLIP) if t_signal == 'LONG' else t_tp1 * (1 + SLIP)
                     p   = _pnl(t_signal, t_entry, ep)
-                    c   = t_pos * 0.5 * COMM * 2
-                    equity    += t_pos * 0.5 * (p / 100) - c
+                    c   = t_pos * 0.4 * COMM * 2
+                    equity    += t_pos * 0.4 * (p / 100) - c
                     total_comm += c
                     t_stop = t_entry
                     if single_mode:
@@ -301,7 +302,7 @@ def _run_one(symbol: str, period_days: int, deposit: float,
                 result = 'timeout'
 
             if result:
-                remaining  = 0.5 if t_tp1_hit else 1.0
+                remaining  = 0.6 if t_tp1_hit else 1.0
                 pnl_usdt   = t_pos * remaining * (pnl_p / 100)
                 comm       = t_pos * remaining * COMM * 2
                 pnl_usdt  -= comm
@@ -381,8 +382,8 @@ def _run_one(symbol: str, period_days: int, deposit: float,
         atr_pct = atr_val / entry if entry > 0 else 0
 
         sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx_val, atr_pct)
-        stop, tp1, tp2, tp3 = calc_levels(signal, entry, atr_val, atr_val, sl_m, tp1_m, tp2_m, tp3_m)
-        pos_usdt = calc_position_size(entry, stop)
+        stop, tp1, tp2, tp3 = calc_levels(signal, entry, atr_val, sl_m, tp1_m, tp2_m, tp3_m)
+        pos_usdt = volatility_position_size(entry, stop, atr_pct)
         if pos_usdt <= 0:
             continue
 
