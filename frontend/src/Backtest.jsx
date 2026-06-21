@@ -35,7 +35,9 @@ function SingleResult({ result, deposit }) {
     <div className="bt-results animate-in">
       <div className="bt-real-badge">
         <span className="bt-real-dot" />
-        {result.strategy === 'mean_reversion' ? 'MR · BB+RSI · флэт' : 'Trend V9 · откат · Supertrend · R:R 1:2'} · {result.symbol} · {result.period_days} дней
+        {result.strategy === 'mean_reversion' ? 'MR · BB+RSI · флэт'
+          : result.strategy === 'momentum' ? 'Momentum · ADX+EMA · time-exit'
+          : 'Trend V9 · откат · Supertrend · R:R 1:2'} · {result.symbol} · {result.period_days} дней
         <span style={{ marginLeft: 'auto', color: 'var(--text-tertiary)', fontSize: 11 }}>
           Комиссии: ${result.total_commission}
         </span>
@@ -104,7 +106,9 @@ function MultiResult({ result }) {
     <div className="bt-results animate-in">
       <div className="bt-real-badge">
         <span className="bt-real-dot" />
-        {result.strategy === 'mean_reversion' ? '🔄 Mean-Reversion' : '📈 Trend V9'} · все пары ({result.symbols_with_trades} из {result.symbols_tested}) · {result.period_days} дней
+        {result.strategy === 'mean_reversion' ? '🔄 Mean-Reversion'
+          : result.strategy === 'momentum' ? '🚀 Momentum'
+          : '📈 Trend V9'} · все пары ({result.symbols_with_trades} из {result.symbols_tested}) · {result.period_days} дней
         <span style={{ marginLeft: 'auto', color: 'var(--text-tertiary)', fontSize: 11 }}>
           {s.trades_per_month} сделок/месяц
         </span>
@@ -314,7 +318,9 @@ export default function Backtest() {
       <div className="page-header" style={{ marginBottom: 20 }}>
         <h1 className="page-title">Бэктестинг</h1>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
-          {strategy === 'trend' ? 'Trend V9 — вход на откате, Supertrend, R:R 1:2, ADX≥22' : 'Mean-Reversion — вход на экстремуме BB, RSI <30/>70, флэт ADX≤25'}
+          {strategy === 'trend' ? 'Trend V9 — вход на откате, Supertrend, R:R 1:2, ADX≥22'
+            : strategy === 'mean_reversion' ? 'Mean-Reversion — вход на экстремуме BB, RSI <30/>70, флэт ADX≤25'
+            : 'Momentum — ADX+EMA continuation, вход на переходе в тренд, выход по времени (~36ч)'}
         </p>
       </div>
 
@@ -370,6 +376,9 @@ export default function Backtest() {
             <button className={`bft ${strategy === 'mean_reversion' ? 'active' : ''}`} onClick={() => { setStrategy('mean_reversion'); setResult(null) }}>
               🔄 Mean Rev
             </button>
+            <button className={`bft ${strategy === 'momentum' ? 'active' : ''}`} onClick={() => { setStrategy('momentum'); setResult(null) }}>
+              🚀 Momentum
+            </button>
           </div>
         </div>
         <button className="bt-run-btn" onClick={runBacktest} disabled={running}>
@@ -407,7 +416,9 @@ export default function Backtest() {
         <span>⚙ Таймфрейм: 1h</span>
         <span>📅 {period.label}</span>
         <span>💸 Комиссия: {commission}% × 2</span>
-        <span>{strategy === 'trend' ? '⚙ ADX≥22 | Score≥13 | Supertrend' : '🔄 ADX≤25 | BB+RSI | флэт'} | 💰 Риск 1.5%</span>
+        <span>{strategy === 'trend' ? '⚙ ADX≥22 | Score≥13 | Supertrend'
+          : strategy === 'mean_reversion' ? '🔄 ADX≤25 | BB+RSI | флэт'
+          : '🚀 ADX≥22 растёт | EMA-переход | time-exit'} | 💰 Риск 1.5%</span>
         {mode === 'multi' && <span>🌐 Пар: {ALL_PAIRS.length}</span>}
       </div>
 

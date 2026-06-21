@@ -21,4 +21,7 @@ export const api = {
   getEvents: (limit = 50) => get(`/events?limit=${limit}`),
   getStats: () => get('/stats'),
   getMarket: () => get('/market'),
+  getDryrunStatus: () => get('/dryrun/status'),
+  getDryrunOpen: () => get('/dryrun/open'),
+  getDryrunBreakdown: (days = 30) => get(`/dryrun/breakdown?days=${days}`),
 }
