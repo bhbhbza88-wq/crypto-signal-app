@@ -172,17 +172,17 @@ def _trailing(signal, price, atr, current_stop):
 def _run_one(symbol: str, period_days: int, deposit: float,
              commission: float, slippage: float, single_mode=False) -> dict:
     """
-    V8 бэктест одной пары на 30m.
+    V8 бэктест одной пары на 1h.
     Логика выхода: TP1 фиксирует 50% → стоп в б/у → трейлинг → TP2 → TP3.
-    Таймаут 72 свечи (36 часов на 30m).
+    Таймаут 36 свечей (36 часов на 1h).
     """
     COMM = commission / 100
     SLIP = slippage  / 100
     cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
 
     try:
-        raw = fetch_ohlcv_paginated(symbol, '30m', period_days)
-        if not raw or len(raw) < 60:
+        raw = fetch_ohlcv_paginated(symbol, '1h', period_days)
+        if not raw or len(raw) < 50:
             return None
     except Exception:
         return None
@@ -260,7 +260,7 @@ def _run_one(symbol: str, period_days: int, deposit: float,
                     result = 'tp3'
 
             # Таймаут 72 свечи (36 часов)
-            if not result and i - t_open_i > 72:
+            if not result and i - t_open_i > 36:
                 exit_p = price * (1 - SLIP if t_signal == 'LONG' else 1 + SLIP)
                 pnl_p  = _pnl(t_signal, t_entry, exit_p)
                 result = 'timeout'
@@ -312,7 +312,7 @@ def _run_one(symbol: str, period_days: int, deposit: float,
 
         # ── Поиск входа (V8 логика через should_enter) ───────────
         df_slice = df_main.iloc[:i + 1].copy()
-        if len(df_slice) < 60:
+        if len(df_slice) < 50:
             continue
 
         last = df_slice.iloc[-1]
@@ -402,7 +402,7 @@ def run_backtest(req: BacktestRequest):
     # Формат совместимый с фронтендом
     return {
         "symbol":           result["symbol"],
-        "timeframe":        "30m",
+        "timeframe":        "1h",
         "period_days":      req.period_days,
         "candles_used":     0,
         "deposit":          req.deposit,

@@ -229,7 +229,8 @@ def get_mults(adx, atr_pct):
     return round(sl,3), round(tp1,3), round(tp2,3), round(tp3,3)
 
 def calc_levels(signal, entry, atr_30m, atr_1h, sl_m, tp1_m, tp2_m, tp3_m):
-    atr = atr_30m * 0.35 + atr_1h * 0.65
+    # Основной таймфрейм 1h — используем только atr_1h
+    atr = atr_1h
     d   = atr * sl_m
     if signal == 'LONG':
         return entry - d, entry + atr*tp1_m, entry + atr*tp2_m, entry + atr*tp3_m
@@ -253,58 +254,60 @@ def generate_nfi_signal(symbol):
     df_1h  = build_features(data['1h'])
     df_30m = build_features(data['30m'])
 
+    # Режим рынка и основная логика — на 1h
     regime, adx_1h = detect_regime(df_1h)
     if regime in ('FLAT', 'CHOP'):
         return None
 
-    last    = df_30m.iloc[-1]
-    adx_30m = last['adx'] if not pd.isna(last['adx']) else 0
+    last_1h = df_1h.iloc[-1]
+    adx_1h_val = last_1h['adx'] if not pd.isna(last_1h['adx']) else 0
 
-    if adx_30m < ADX_MIN:         return None
-    if pd.isna(last['atr']) or last['atr'] <= 0: return None
-    if pd.isna(last['rsi']):      return None
+    if adx_1h_val < ADX_MIN:                          return None
+    if pd.isna(last_1h['atr']) or last_1h['atr'] <= 0: return None
+    if pd.isna(last_1h['rsi']):                        return None
 
+    # Условия входа проверяем на 1h (основной TF)
     signal = None
-    if entry_conditions(df_30m, 'LONG')  and regime == 'UPTREND':   signal = 'LONG'
-    elif entry_conditions(df_30m, 'SHORT') and regime == 'DOWNTREND': signal = 'SHORT'
+    if entry_conditions(df_1h, 'LONG')  and regime == 'UPTREND':   signal = 'LONG'
+    elif entry_conditions(df_1h, 'SHORT') and regime == 'DOWNTREND': signal = 'SHORT'
     if not signal: return None
 
-    if not detect_trend_stable(df_30m, signal):  return None
-    if not mtf_confirms(df_4h, df_1h, signal):   return None
-    if not volume_healthy(df_30m):                return None
-    if not btc_allows(symbol, signal):            return None
-    if is_overextended(df_30m, signal):           return None
-    if detect_volume_climax(df_30m):
+    if not detect_trend_stable(df_1h, signal):  return None
+    if not mtf_confirms(df_4h, df_1h, signal):  return None
+    if not volume_healthy(df_1h):               return None
+    if not btc_allows(symbol, signal):          return None
+    if is_overextended(df_1h, signal):          return None
+    if detect_volume_climax(df_1h):
         print(f"  🚫 {symbol}: объём кульминация")
         return None
 
-    fresh_cross     = detect_ema_cross_fresh(df_30m, signal, max_bars=5)
-    has_pullback, _ = detect_pullback(df_30m, signal)
+    # Триггер входа — свежий кросс или откат на 1h
+    fresh_cross     = detect_ema_cross_fresh(df_1h, signal, max_bars=3)
+    has_pullback, _ = detect_pullback(df_1h, signal)
     if not fresh_cross and not has_pullback:
-        print(f"  ⛔ {symbol}: нет кросса и нет отката")
+        print(f"  ⛔ {symbol}: нет кросса и нет отката на 1h")
         return None
 
-    score = calc_score(df_30m, df_1h, regime, adx_1h, signal)
+    # Score считаем по 1h
+    score = calc_score(df_1h, df_1h, regime, adx_1h_val, signal)
     if score < SCORE_MIN:
         print(f"  ⛔ {symbol}: score={score} < {SCORE_MIN}")
         return None
 
-    entry   = last['close']
-    atr_30m_val = last['atr']
-    atr_1h_val  = df_1h.iloc[-1]['atr']
-    if pd.isna(atr_1h_val) or atr_1h_val <= 0:
-        atr_1h_val = atr_30m_val
+    entry       = last_1h['close']
+    atr_1h_val2 = last_1h['atr']
+    atr_pct     = atr_1h_val2 / entry if entry > 0 else 0
 
-    atr_pct = atr_30m_val / entry if entry > 0 else 0
-    sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx_30m, atr_pct)
-    stop, tp1, tp2, tp3 = calc_levels(signal, entry, atr_30m_val, atr_1h_val, sl_m, tp1_m, tp2_m, tp3_m)
+    sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx_1h_val, atr_pct)
+    # calc_levels теперь использует atr_1h как основной
+    stop, tp1, tp2, tp3 = calc_levels(signal, entry, atr_1h_val2, atr_1h_val2, sl_m, tp1_m, tp2_m, tp3_m)
     pos_size = calc_position_size(entry, stop)
     if pos_size <= 0: return None
 
-    _, pb_bonus = detect_pullback(df_30m, signal)
-    _, st_bonus = detect_structure(df_30m, signal)
+    _, pb_bonus = detect_pullback(df_1h, signal)
+    _, st_bonus = detect_structure(df_1h, signal)
 
-    print(f"💎 {symbol}: {signal} | {regime} | ADX={adx_30m:.0f} | score={score}/{SCORE_MAX}")
+    print(f"💎 {symbol}: {signal} | {regime} | ADX={adx_1h_val:.0f} | score={score}/{SCORE_MAX}")
 
     return {
         'symbol':        symbol,
@@ -317,15 +320,15 @@ def generate_nfi_signal(symbol):
         'tp2':           tp2,
         'tp3':           tp3,
         'position_size': pos_size,
-        'last':          last,
-        'last_1h':       df_1h.iloc[-1],
-        'df':            df_30m,
+        'last':          last_1h,
+        'last_1h':       last_1h,
+        'df':            df_1h,   # основной TF теперь 1h
         'entry_reasons': [
-            f'Режим: {regime} | ADX {adx_30m:.0f}',
-            f'RSI: {last["rsi"]:.0f} | Score: {score}/{SCORE_MAX}',
+            f'Режим: {regime} | ADX {adx_1h_val:.0f}',
+            f'RSI: {last_1h["rsi"]:.0f} | Score: {score}/{SCORE_MAX}',
             f'Pullback к EMA: {"✓" if pb_bonus > 0 else "—"}',
             f'Структура HH/HL: {"✓" if st_bonus > 0 else "—"}',
-            f'MTF 4h+1h: ✓',
+            f'MTF 4h подтверждение: ✓',
             f'BTC: {get_btc_regime()}',
         ],
     }
@@ -346,11 +349,24 @@ def build_nfi_features(df):
     return df
 
 def should_enter(df, signal):
-    """Упрощённая версия для бэктеста (только 30m данные)."""
+    """
+    Для бэктеста на 1h данных.
+    Та же логика что и в generate_nfi_signal, но без MTF (данные только 1h).
+    """
     if len(df) < 50 or signal == 'SHORT':
         return False
     last = df.iloc[-1]
-    adx  = last.get('adx', 0) if not pd.isna(last.get('adx', float('nan'))) else 0
+    adx  = last['adx'] if not pd.isna(last.get('adx', float('nan'))) else 0
     if adx < ADX_MIN:
         return False
-    return entry_conditions(df, 'LONG') and detect_trend_stable(df, 'LONG')
+    if not entry_conditions(df, 'LONG'):
+        return False
+    if not detect_trend_stable(df, 'LONG'):
+        return False
+    if is_overextended(df, 'LONG'):
+        return False
+    if detect_volume_climax(df):
+        return False
+    fresh_cross     = detect_ema_cross_fresh(df, 'LONG', max_bars=3)
+    has_pullback, _ = detect_pullback(df, 'LONG')
+    return fresh_cross or has_pullback

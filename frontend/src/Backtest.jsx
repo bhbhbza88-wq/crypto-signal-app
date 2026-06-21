@@ -392,7 +392,7 @@ export default function Backtest() {
 
       <div className="bt-info">
         <span>📡 Данные: Bybit</span>
-        <span>⚙ Таймфрейм: 30m</span>
+        <span>⚙ Таймфрейм: 1h</span>
         <span>📅 {period.label}</span>
         <span>💸 Комиссия: {commission}% × 2</span>
         <span>⚙ ADX≥23 | Score≥13/20 | 💰 Риск 1.5%</span>
