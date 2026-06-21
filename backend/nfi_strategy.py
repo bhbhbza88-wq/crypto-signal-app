@@ -39,20 +39,30 @@ RSI_LONG_MIN,  RSI_LONG_MAX  = 35, 58
 RSI_SHORT_MIN, RSI_SHORT_MAX = 42, 65
 
 # ── Выбор стратегии ──────────────────────────────────────────────
-# "trend"          — трендследящая (вход на откате по тренду)
-# "mean_reversion" — возврат к среднему (вход против движения на экстремуме)
-STRATEGY_MODE = os.environ.get("STRATEGY_MODE", "trend")
+# "trend"          — трендследящая (вход на откате по тренду) — PF < 1, не использовать
+# "mean_reversion" — возврат к среднему — анти-edge на этих данных, НЕ использовать
+# "breakout"       — пробой консолидации — PF < 1, не использовать
+# "momentum"       — ADX+EMA continuation, edge подтверждён forward-return аудитом —
+#                    кандидат для dry-run (PF 1.59/0.65/1.77 на 30/90/180д с MAX_OPEN_TRADES=3)
+STRATEGY_MODE = os.environ.get("STRATEGY_MODE", "momentum")
 
 # ── Mean-reversion параметры ─────────────────────────────────────
 BB_LENGTH    = 20
-BB_STD       = 2.0
-MR_RSI_LONG  = 30     # покупаем когда RSI < 30 (перепродан)
-MR_RSI_SHORT = 70     # продаём когда RSI > 70 (перекуплен)
+BB_STD       = 1.8    # было 2.0 — полосы ближе, больше касаний
+MR_RSI_LONG  = 35     # было 30 — покупаем когда RSI < 35 (перепродан)
+MR_RSI_SHORT = 65     # было 70 — продаём когда RSI > 65 (перекуплен)
 MR_SL_BASE   = 2.0    # стоп за пределами полосы
 MR_TP1_BASE  = 1.5    # цель — возврат к средней (короче чем у тренда)
 MR_TP2_BASE  = 2.5
 MR_TP3_BASE  = 3.5
-MR_ADX_MAX   = 25     # mean-reversion работает в ФЛЭТЕ, не в тренде
+MR_ADX_MAX   = 30     # было 25 — чуть шире окно "не сильный тренд"
+
+# ── Breakout параметры ────────────────────────────────────────────
+BO_LOOKBACK      = 20     # свечей консолидации до пробоя
+BO_RANGE_MAX_PCT = 0.05   # диапазон консолидации <= 5% от цены
+BO_VOL_MULT      = 1.5    # объём пробойной свечи >= 1.5x среднего
+BO_BUFFER_ATR    = 0.15   # пробой должен быть за пределами диапазона на 0.15 ATR
+BO_SL_BUFFER_ATR = 0.3    # стоп за диапазоном + буфер
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -144,16 +154,23 @@ def detect_pullback(df, signal):
         return False, 0
     recent = df.tail(8)
     last   = df.iloc[-1]
+    atr = last['atr'] if not pd.isna(last.get('atr', float('nan'))) else 0
     if signal == 'LONG':
         touched21 = (recent['low'] <= recent['ema21'] * 1.004).any()
         touched50 = (recent['low'] <= recent['ema50'] * 1.006).any()
-        resumed   = last['close'] > last['ema9'] and last['close'] > df.iloc[-2]['close']
+        prev      = df.iloc[-2]
+        resumed   = (last['close'] > last['ema9'] + atr * 0.15 and
+                     last['close'] > prev['close'] and
+                     prev['close'] > df.iloc[-3]['close'])
         if (touched21 or touched50) and resumed:
             return True, (3 if touched50 else 2)
     else:
         touched21 = (recent['high'] >= recent['ema21'] * 0.996).any()
         touched50 = (recent['high'] >= recent['ema50'] * 0.994).any()
-        resumed   = last['close'] < last['ema9'] and last['close'] < df.iloc[-2]['close']
+        prev      = df.iloc[-2]
+        resumed   = (last['close'] < last['ema9'] - atr * 0.15 and
+                     last['close'] < prev['close'] and
+                     prev['close'] < df.iloc[-3]['close'])
         if (touched21 or touched50) and resumed:
             return True, (3 if touched50 else 2)
     return False, 0
@@ -246,12 +263,12 @@ def entry_conditions(df, signal):
 def macd_confirms(df, signal):
     """MACD histogram в нужную сторону и разворачивается к тренду."""
     hist = calc_macd(df)
-    if len(hist) < 3:
+    if len(hist) < 4:
         return True
-    h1, h2 = hist.iloc[-2], hist.iloc[-1]
+    h0, h1, h2 = hist.iloc[-3], hist.iloc[-2], hist.iloc[-1]
     if signal == 'LONG':
-        return h2 > h1            # растёт (необязательно >0 — ловим разворот с отката)
-    return h2 < h1               # падает
+        return h2 > h1 > h0          # 2 свечи подряд растёт, не разовый дёрг
+    return h2 < h1 < h0               # 2 свечи подряд падает
 
 
 def supertrend_ok(df, signal):
@@ -287,6 +304,24 @@ def daily_loss_ok():
     if _daily_loss['date'] != today:
         return True
     return _daily_loss['loss_pct'] < DAILY_LOSS_LIMIT_PCT
+
+
+def get_risk_status():
+    """Снимок риск-менеджмента для дашборда дальрана."""
+    today = datetime.now().strftime('%Y-%m-%d')
+    loss_pct = _daily_loss['loss_pct'] if _daily_loss['date'] == today else 0.0
+    now = datetime.now()
+    cooldowns = [
+        {'symbol': sym, 'until': until.isoformat(), 'minutes_left': max(0, round((until - now).total_seconds() / 60))}
+        for sym, until in _cooldown_map.items() if until > now
+    ]
+    return {
+        'strategy_mode': STRATEGY_MODE,
+        'daily_loss_pct': round(loss_pct, 2),
+        'daily_loss_limit_pct': DAILY_LOSS_LIMIT_PCT,
+        'daily_loss_ok': loss_pct < DAILY_LOSS_LIMIT_PCT,
+        'cooldowns': cooldowns,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -443,13 +478,13 @@ def core_signal_mean_reversion(df_1h, signal, df_4h=None):
         touched = last['low'] <= bb_lower
         # RSI перепродан
         rsi_ok  = last['rsi'] < MR_RSI_LONG
-        # Разворотная свеча: закрытие выше открытия и выше предыдущего close
-        reversal = last['close'] > last['open'] and last['close'] > prev['close']
+        # Разворотная свеча: закрытие выше открытия ИЛИ выше предыдущего close
+        reversal = last['close'] > last['open'] or last['close'] > prev['close']
         return bool(touched and rsi_ok and reversal)
     else:
         touched = last['high'] >= bb_upper
         rsi_ok  = last['rsi'] > MR_RSI_SHORT
-        reversal = last['close'] < last['open'] and last['close'] < prev['close']
+        reversal = last['close'] < last['open'] or last['close'] < prev['close']
         return bool(touched and rsi_ok and reversal)
 
 
@@ -473,6 +508,72 @@ def mr_levels(signal, entry, atr, df):
         tp2  = entry - atr * MR_TP2_BASE
         tp3  = entry - atr * MR_TP3_BASE
         return stop, tp1, tp2, tp3
+
+
+def _breakout_range(df):
+    """Диапазон консолидации за BO_LOOKBACK свечей ДО текущей (текущая исключена)."""
+    window = df.iloc[-(BO_LOOKBACK + 1):-1]
+    return window['high'].max(), window['low'].min()
+
+
+def core_signal_breakout(df, signal):
+    """
+    Вход на пробое диапазона консолидации с подтверждением объёмом.
+    LONG:  close выше максимума диапазона + буфер ATR, объём >= 1.5x среднего
+    SHORT: close ниже минимума диапазона - буфер ATR, объём >= 1.5x среднего
+    Диапазон должен быть узким (<= 5% от цены) — иначе это не консолидация.
+    """
+    if len(df) < BO_LOOKBACK + 10:
+        return False
+
+    last = df.iloc[-1]
+    atr  = last['atr'] if not pd.isna(last['atr']) else 0
+    if atr <= 0:
+        return False
+    if pd.isna(last.get('vol_avg', float('nan'))) or last['vol_avg'] <= 0:
+        return False
+
+    range_high, range_low = _breakout_range(df)
+    if pd.isna(range_high) or pd.isna(range_low):
+        return False
+    mid = (range_high + range_low) / 2
+    if mid <= 0:
+        return False
+    range_pct = (range_high - range_low) / mid
+    if range_pct > BO_RANGE_MAX_PCT:
+        return False  # рынок не консолидировался — это не пробой, а просто движение
+
+    vol_ok = last['volume'] >= last['vol_avg'] * BO_VOL_MULT
+
+    if signal == 'LONG':
+        broke = last['close'] > range_high + atr * BO_BUFFER_ATR
+        return bool(broke and vol_ok)
+    else:
+        broke = last['close'] < range_low - atr * BO_BUFFER_ATR
+        return bool(broke and vol_ok)
+
+
+def breakout_levels(signal, entry, atr, df):
+    """
+    Уровни для breakout. Стоп — за диапазоном консолидации.
+    Цели — измеренное движение (range width x 1/2/3), классика breakout-трейдинга.
+    """
+    range_high, range_low = _breakout_range(df)
+    range_width = range_high - range_low
+    if range_width <= 0 or pd.isna(range_width):
+        range_width = atr * 2  # fallback
+
+    if signal == 'LONG':
+        stop = range_low - atr * BO_SL_BUFFER_ATR
+        tp1  = entry + range_width * 1.0
+        tp2  = entry + range_width * 2.0
+        tp3  = entry + range_width * 3.0
+    else:
+        stop = range_high + atr * BO_SL_BUFFER_ATR
+        tp1  = entry - range_width * 1.0
+        tp2  = entry - range_width * 2.0
+        tp3  = entry - range_width * 3.0
+    return stop, tp1, tp2, tp3
 
 
 def core_signal(df_1h, signal, df_4h=None):
@@ -523,6 +624,54 @@ def core_signal(df_1h, signal, df_4h=None):
 # ══════════════════════════════════════════════════════════════════
 # LIVE SIGNAL
 # ══════════════════════════════════════════════════════════════════
+def _generate_momentum_signal(symbol, df_1h):
+    """
+    Live-версия momentum: входим в момент перехода ADX+EMA-тренда в true
+    (см. core_signal_momentum). Не зависит от detect_regime — направление
+    уже закодировано в самом условии. Уровни — те же, что в бэктесте
+    (backtest_levels с STRATEGY_MODE='momentum': широкий стоп + время-выход).
+    """
+    signal = None
+    if core_signal_momentum(df_1h, 'LONG'):
+        signal = 'LONG'
+    elif core_signal_momentum(df_1h, 'SHORT'):
+        signal = 'SHORT'
+    if not signal:
+        return None
+
+    if not btc_allows(symbol, signal):
+        return None
+
+    last    = df_1h.iloc[-1]
+    entry   = last['close']
+    atr_val = last['atr']
+    atr_pct = atr_val / entry if entry > 0 else 0
+    adx_val = last['adx'] if not pd.isna(last['adx']) else 0
+
+    stop, tp1, tp2, tp3 = backtest_levels(signal, entry, atr_val, adx_val, atr_pct, df_1h)
+    pos_size = volatility_position_size(entry, stop, atr_pct)
+    if pos_size <= 0:
+        return None
+
+    score = min(SCORE_MAX, int(adx_val))  # прокси силы сигнала для сортировки в сканере
+
+    print(f"💎 {symbol}: {signal} | MOMENTUM | ADX={adx_val:.0f} | {pos_size:.0f}$")
+
+    return {
+        'symbol': symbol, 'signal': signal, 'score': score, 'regime': 'MOMENTUM',
+        'entry': entry, 'stop': stop, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
+        'chandelier_stop': stop, 'position_size': pos_size,
+        'last': last, 'last_1h': last, 'df': df_1h,
+        'entry_reasons': [
+            f'Momentum: ADX {adx_val:.0f} (растёт), переход в тренд',
+            f'EMA-стек по сигналу: ✓',
+            f'Позиция: {pos_size:.0f}$ (volatility-adj)',
+            f'Выход по времени (~36ч) — широкий защитный стоп {stop:.4f}',
+            f'BTC: {get_btc_regime()}',
+        ],
+    }
+
+
 def generate_nfi_signal(symbol):
     if is_in_cooldown(symbol):  return None
     if not daily_loss_ok():     return None
@@ -538,6 +687,9 @@ def generate_nfi_signal(symbol):
         df_1h = calc_supertrend(df_1h)
     except Exception:
         pass
+
+    if STRATEGY_MODE == "momentum":
+        return _generate_momentum_signal(symbol, df_1h)
 
     regime, adx_1h = detect_regime(df_1h)
     if regime in ('FLAT', 'CHOP'):
@@ -619,11 +771,47 @@ def build_nfi_features(df):
         return df
 
 
+def _momentum_condition(row, signal):
+    adx = row['adx'] if not pd.isna(row['adx']) else 0
+    if pd.isna(row['atr']) or row['atr'] <= 0 or adx < ADX_MIN:
+        return False
+    if signal == 'LONG':
+        return bool(row['ema9'] > row['ema21'] and row['close'] > row['ema50'])
+    return bool(row['ema9'] < row['ema21'] and row['close'] < row['ema50'])
+
+
+def core_signal_momentum(df, signal):
+    """
+    По результатам forward-return аудита: ADX>=22 + EMA-стек в сторону сигнала —
+    статистически значимый continuation-сигнал, растущий на горизонте 6-24ч.
+    ВАЖНО: условие персистентно (держится много баров подряд внутри тренда),
+    поэтому входим только в момент ПЕРЕХОДА false->true (начало тренда),
+    а не на каждом баре, где оно истинно — иначе плодим избыточные пересдводы.
+
+    Доп. фильтр чопа: ADX должен РАСТИ последние 3 свечи (не просто быть выше
+    порога) — отсекает ложные старты, когда ADX дёргается около границы 22
+    в боковике, а не разворачивается в настоящий тренд.
+    """
+    if len(df) < 5:
+        return False
+    now_true  = _momentum_condition(df.iloc[-1], signal)
+    prev_true = _momentum_condition(df.iloc[-2], signal)
+    if not (now_true and not prev_true):
+        return False
+
+    adx_now  = df['adx'].iloc[-1]
+    adx_3ago = df['adx'].iloc[-4]
+    if pd.isna(adx_now) or pd.isna(adx_3ago):
+        return False
+    return bool(adx_now > adx_3ago)
+
+
 def should_enter(df, signal):
     """
     Бэктест-вход. Переключается по STRATEGY_MODE.
     trend          — core_signal (вход на откате по тренду, нужен UPTREND/DOWNTREND)
     mean_reversion — core_signal_mean_reversion (вход на экстремуме во флэте)
+    momentum       — core_signal_momentum (чистый ADX+EMA continuation, по аудиту)
     """
     if len(df) < 50:
         return False
@@ -631,6 +819,13 @@ def should_enter(df, signal):
     if STRATEGY_MODE == "mean_reversion":
         # MR не зависит от режима тренда — работает во флэте
         return core_signal_mean_reversion(df, signal, None)
+
+    if STRATEGY_MODE == "breakout":
+        # Breakout не зависит от режима тренда — работает на выходе из консолидации
+        return core_signal_breakout(df, signal)
+
+    if STRATEGY_MODE == "momentum":
+        return core_signal_momentum(df, signal)
 
     # trend (по умолчанию)
     regime, _ = detect_regime(df)
@@ -648,5 +843,16 @@ def backtest_levels(signal, entry, atr, adx, atr_pct, df):
     """
     if STRATEGY_MODE == "mean_reversion":
         return mr_levels(signal, entry, atr, df)
+    if STRATEGY_MODE == "breakout":
+        return breakout_levels(signal, entry, atr, df)
+    if STRATEGY_MODE == "momentum":
+        # Время-ориентированный выход: держим до таймаута (~36ч, близко к
+        # измеренному в аудите 24ч-горизонту edge). TP недостижимы специально —
+        # стоп только катастрофический, чтобы не резать позицию раньше срока.
+        sl = atr * 4.5
+        far = atr * 999
+        if signal == 'LONG':
+            return entry - sl, entry + far, entry + far, entry + far
+        return entry + sl, entry - far, entry - far, entry - far
     sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx, atr_pct)
     return calc_levels(signal, entry, atr, sl_m, tp1_m, tp2_m, tp3_m)

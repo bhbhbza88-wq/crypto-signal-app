@@ -8,6 +8,7 @@ import MarketView from './MarketView'
 import AIChat from './AIChat'
 import Backtest from './Backtest'
 import SmartTrade from './SmartTrade'
+import DryRunDashboard from './DryRunDashboard'
 
 const POLL_INTERVAL = 15000
 const MARKET_POLL_INTERVAL = 60000
@@ -16,6 +17,7 @@ const NAV_SECTIONS = [
   { items: [
     { key: 'ai_assistant', label: 'AI Ассистент', icon: '✦', badge: 'BETA' },
     { key: 'overview',     label: 'Dashboard',     icon: '◈' },
+    { key: 'dryrun',       label: 'Дальран',        icon: '🛰', badge: 'LIVE' },
     { key: 'portfolio',    label: 'Мой портфель',  icon: '◉' },
     { key: 'strategies',   label: 'Стратегии',     icon: '★', badge: 'HOT' },
     { key: 'dca_bot',      label: 'DCA Bot',        icon: '⟳' },
@@ -726,6 +728,7 @@ export default function App() {
           {tab === 'market' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Скринер рынка</h1></div><MarketView market={market} /></section>}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} /></section>}
           {tab === 'backtest' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Бэктест <span className="beta-tag">BETA</span></h1></div><Backtest /></section>}
+          {tab === 'dryrun' && <section className="section animate-in"><DryRunDashboard /></section>}
           {tab === 'smarttrade_calc' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Smart Trade <span className="hot-tag">NEW</span></h1></div><SmartTrade /></section>}
           {tab === 'scanner' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Сканер <span className="hot-tag">AI</span></h1></div><MarketView market={market} /></section>}
           {tab === 'ai' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat signals={signals} stats={stats} market={market} /></section>}

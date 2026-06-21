@@ -14,13 +14,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import database as db
-from scanner import start_background_scanner
+from scanner import start_background_scanner, MAX_OPEN_TRADES
 from data_layer import exchange, api_call, build_features, detect_regime, get_active_symbols, CANDIDATES
 import nfi_strategy
 from nfi_strategy import (
     build_nfi_features, should_enter,
     get_mults, calc_levels, calc_position_size, volatility_position_size,
-    backtest_levels, ADX_MIN
+    backtest_levels, ADX_MIN, get_risk_status
 )
 
 
@@ -113,6 +113,70 @@ def get_events(limit: int = 50):
     return db.load_events(limit=limit)
 
 
+@app.get("/api/dryrun/status")
+def get_dryrun_status():
+    open_trades = db.load_trades()
+    risk = get_risk_status()
+    return {
+        **risk,
+        "open_trades_count": len(open_trades),
+        "max_open_trades": MAX_OPEN_TRADES,
+    }
+
+
+@app.get("/api/dryrun/open")
+def get_dryrun_open():
+    """Открытые сделки с live-ценой и unrealized PnL% — для дашборда дальрана."""
+    trades = db.load_trades()
+    out = []
+    for symbol, t in trades.items():
+        try:
+            ticker = api_call(exchange.fetch_ticker, symbol) or {}
+            price = ticker.get('last', t['entry'])
+        except Exception:
+            price = t['entry']
+        signal = t['signal']
+        pnl_pct = ((price - t['entry']) / t['entry'] * 100) if signal == 'LONG' \
+            else ((t['entry'] - price) / t['entry'] * 100)
+        out.append({
+            "symbol": symbol, "signal": signal, "entry": t['entry'], "price": price,
+            "stop": t['stop'], "tp1": t['tp1'], "tp2": t['tp2'], "tp3": t['tp3'],
+            "tp1_hit": bool(t.get('tp1_hit')), "be_hit": bool(t.get('be_hit')),
+            "pnl_pct": round(pnl_pct, 2),
+            "opened_at": t.get('opened_at'),
+            "position_size": t.get('position_size'),
+            "score": t.get('score'),
+        })
+    return out
+
+
+@app.get("/api/dryrun/breakdown")
+def get_dryrun_breakdown(days: int = 30):
+    """Разбивка закрытых сделок по result (sl/tp1/tp2/tp3/timeout/be) — для дашборда."""
+    cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    history = [t for t in db.load_history(limit=5000) if t['date'] >= cutoff]
+    by_result = {}
+    cum = 0.0
+    equity_curve = []
+    for t in sorted(history, key=lambda x: (x['date'], x['time'])):
+        r = t['result']
+        if r not in by_result:
+            by_result[r] = {"count": 0, "sum_pnl": 0.0}
+        by_result[r]["count"] += 1
+        by_result[r]["sum_pnl"] += t['pnl']
+        cum += t['pnl']
+        equity_curve.append({"date": t['date'], "time": t['time'], "cum_pnl": round(cum, 2),
+                              "symbol": t['symbol'], "result": r, "pnl": t['pnl']})
+    for r in by_result:
+        by_result[r]["sum_pnl"] = round(by_result[r]["sum_pnl"], 2)
+    return {
+        "by_result": by_result,
+        "equity_curve": equity_curve,
+        "total_trades": len(history),
+        "total_pnl_pct": round(cum, 2),
+    }
+
+
 @app.get("/api/market")
 def get_market():
     try:
@@ -201,18 +265,18 @@ def _load_btc_regime_series(period_days: int) -> pd.DataFrame:
 
 
 def _run_one(symbol: str, period_days: int, deposit: float,
-             commission: float, slippage: float, single_mode=False) -> dict:
+             commission: float, slippage: float, single_mode=False, timeframe='1h') -> dict:
     """
-    V8 бэктест одной пары на 1h.
+    V8 бэктест одной пары. По умолчанию 1h.
     Логика выхода: TP1 фиксирует 50% → стоп в б/у → трейлинг → TP2 → TP3.
-    Таймаут 36 свечей (36 часов на 1h).
+    Таймаут 36 свечей.
     """
     COMM = commission / 100
     SLIP = slippage  / 100
     cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
 
     try:
-        raw = fetch_ohlcv_paginated(symbol, '1h', period_days)
+        raw = fetch_ohlcv_paginated(symbol, timeframe, period_days)
         if not raw or len(raw) < 50:
             return None
     except Exception:
@@ -221,9 +285,9 @@ def _run_one(symbol: str, period_days: int, deposit: float,
     df_main = build_features(pd.DataFrame(raw, columns=cols))
     df_main = build_nfi_features(df_main)  # + Supertrend
 
-    # BTC режим фильтр
+    # BTC режим фильтр (только для 1h — на других ТФ пропускаем)
     btc_regimes = {}
-    if symbol != 'BTC/USDT':
+    if symbol != 'BTC/USDT' and timeframe == '1h':
         try:
             btc_regimes = _load_btc_regime_series(period_days)
         except Exception:
@@ -233,6 +297,8 @@ def _run_one(symbol: str, period_days: int, deposit: float,
     t_signal  = t_entry = t_stop = t_tp1 = t_tp2 = t_tp3 = t_pos = 0
     t_open_i  = 0
     t_tp1_hit = t_be_hit = False
+    t_tp1_pnl_usdt = 0
+    pending = None  # сигнал, найденный на предыдущей свече — вход на открытии текущей
 
     equity      = deposit
     max_equity  = deposit
@@ -269,8 +335,9 @@ def _run_one(symbol: str, period_days: int, deposit: float,
                     t_be_hit  = True
                     ep  = t_tp1 * (1 - SLIP) if t_signal == 'LONG' else t_tp1 * (1 + SLIP)
                     p   = _pnl(t_signal, t_entry, ep)
-                    c   = t_pos * 0.4 * COMM * 2
-                    equity    += t_pos * 0.4 * (p / 100) - c
+                    c   = t_pos * 0.4 * COMM
+                    t_tp1_pnl_usdt = t_pos * 0.4 * (p / 100) - c
+                    equity    += t_tp1_pnl_usdt
                     total_comm += c
                     t_stop = t_entry
                     if single_mode:
@@ -308,7 +375,7 @@ def _run_one(symbol: str, period_days: int, deposit: float,
             if result:
                 remaining  = 0.6 if t_tp1_hit else 1.0
                 pnl_usdt   = t_pos * remaining * (pnl_p / 100)
-                comm       = t_pos * remaining * COMM * 2
+                comm       = t_pos * remaining * COMM
                 pnl_usdt  -= comm
                 total_comm += comm
                 equity     += pnl_usdt
@@ -317,12 +384,16 @@ def _run_one(symbol: str, period_days: int, deposit: float,
                 dd = (max_equity - equity) / max_equity * 100
                 if dd > max_drawdown: max_drawdown = dd
 
-                if result in ('tp2', 'tp3') or (result == 'timeout' and pnl_usdt > 0):
+                trade_total_pnl = pnl_usdt + t_tp1_pnl_usdt  # с учётом зафиксированного TP1
+
+                if result in ('tp2', 'tp3') or (result == 'timeout' and trade_total_pnl > 0):
                     wins += 1
-                elif result == 'be' and pnl_usdt > 0:
+                elif result == 'be' and trade_total_pnl > 0:
                     result = 'tp1'; wins += 1
-                elif result == 'sl':
+                elif result == 'sl' and trade_total_pnl <= 0:
                     losses += 1
+                elif trade_total_pnl > 0:
+                    wins += 1
                 else:
                     bes += 1
 
@@ -348,9 +419,37 @@ def _run_one(symbol: str, period_days: int, deposit: float,
 
                 in_trade = False
                 t_tp1_hit = t_be_hit = False
+                t_tp1_pnl_usdt = 0
             continue
 
-        # ── Поиск входа (V8 логика через should_enter) ───────────
+        # ── Исполнение сигнала, найденного на ПРЕДЫДУЩЕЙ свече ────
+        # (вход на открытии текущей свечи — без look-ahead)
+        if pending is not None:
+            signal, atr_val, adx_val = pending
+            pending = None
+
+            entry   = candle['open']
+            atr_pct = atr_val / entry if entry > 0 else 0
+
+            stop, tp1, tp2, tp3 = backtest_levels(signal, entry, atr_val, adx_val, atr_pct, df_main.iloc[:i])
+            pos_usdt = volatility_position_size(entry, stop, atr_pct)
+            if pos_usdt > 0:
+                equity    -= pos_usdt * COMM
+                total_comm += pos_usdt * COMM
+
+                in_trade  = True
+                t_signal  = signal
+                t_entry   = entry
+                t_stop    = stop
+                t_tp1     = tp1
+                t_tp2     = tp2
+                t_tp3     = tp3
+                t_pos     = pos_usdt
+                t_open_i  = i
+                t_tp1_hit = t_be_hit = False
+            continue
+
+        # ── Поиск сигнала на ЗАКРЫТОЙ свече (V8 логика через should_enter) ──
         df_slice = df_main.iloc[:i + 1].copy()
         if len(df_slice) < 50:
             continue
@@ -380,29 +479,9 @@ def _run_one(symbol: str, period_days: int, deposit: float,
             if signal == 'SHORT' and btc_r == 'UPTREND':
                 continue
 
-        entry   = last['close']
         atr_val = last['atr']
         adx_val = last['adx'] if not pd.isna(last['adx']) else 0
-        atr_pct = atr_val / entry if entry > 0 else 0
-
-        stop, tp1, tp2, tp3 = backtest_levels(signal, entry, atr_val, adx_val, atr_pct, df_slice)
-        pos_usdt = volatility_position_size(entry, stop, atr_pct)
-        if pos_usdt <= 0:
-            continue
-
-        equity    -= pos_usdt * COMM
-        total_comm += pos_usdt * COMM
-
-        in_trade  = True
-        t_signal  = signal
-        t_entry   = entry
-        t_stop    = stop
-        t_tp1     = tp1
-        t_tp2     = tp2
-        t_tp3     = tp3
-        t_pos     = pos_usdt
-        t_open_i  = i
-        t_tp1_hit = t_be_hit = False
+        pending = (signal, atr_val, adx_val)  # войдём на открытии следующей свечи
 
     total = wins + losses + bes
     if total == 0:
