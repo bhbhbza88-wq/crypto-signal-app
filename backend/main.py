@@ -407,7 +407,7 @@ def _run_one(symbol: str, period_days: int, deposit: float,
                     "exit":     round(exit_p, 6),
                     "result":   result,
                     "pnl_pct":  round(pnl_p, 3),
-                    "pnl_usdt": round(pnl_usdt, 2),
+                    "pnl_usdt": round(trade_total_pnl, 2),
                 }
                 if single_mode:
                     entry_data["commission"] = round(comm, 3)
