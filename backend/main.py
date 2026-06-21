@@ -169,6 +169,33 @@ def _trailing(signal, price, atr, current_stop):
     return min(price + atr * 0.8, current_stop)
 
 
+
+def _load_btc_regime_series(period_days: int) -> pd.DataFrame:
+    """
+    Загружает BTC 1h и возвращает серию режимов по timestamp.
+    Кэшируется внутри вызова бэктеста.
+    """
+    cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    raw  = fetch_ohlcv_paginated('BTC/USDT', '1h', period_days + 2)
+    if not raw:
+        return {}
+    df_btc = build_features(pd.DataFrame(raw, columns=cols))
+    # Считаем rolling режим: EMA9 > EMA21 и close > EMA50 = UPTREND
+    result = {}
+    for i in range(len(df_btc)):
+        if i < 20:
+            result[df_btc.iloc[i]['timestamp']] = 'CHOP'
+            continue
+        last = df_btc.iloc[i]
+        if last['ema9'] > last['ema21'] and last['close'] > last['ema50']:
+            result[last['timestamp']] = 'UPTREND'
+        elif last['ema9'] < last['ema21'] and last['close'] < last['ema50']:
+            result[last['timestamp']] = 'DOWNTREND'
+        else:
+            result[last['timestamp']] = 'CHOP'
+    return result
+
+
 def _run_one(symbol: str, period_days: int, deposit: float,
              commission: float, slippage: float, single_mode=False) -> dict:
     """
@@ -188,6 +215,14 @@ def _run_one(symbol: str, period_days: int, deposit: float,
         return None
 
     df_main = build_features(pd.DataFrame(raw, columns=cols))
+
+    # BTC режим фильтр
+    btc_regimes = {}
+    if symbol != 'BTC/USDT':
+        try:
+            btc_regimes = _load_btc_regime_series(period_days)
+        except Exception:
+            pass
 
     in_trade  = False
     t_signal  = t_entry = t_stop = t_tp1 = t_tp2 = t_tp3 = t_pos = 0
@@ -327,14 +362,25 @@ def _run_one(symbol: str, period_days: int, deposit: float,
         elif should_enter(df_slice, 'SHORT'):
             signal = 'SHORT'
 
-        # V8 уровни: get_mults принимает (adx, atr_pct), calc_levels принимает atr_30m + atr_1h
+        if not signal:
+            continue
+
+        # BTC режим фильтр — не входим против рынка
+        if btc_regimes:
+            ts_key = candle['timestamp']
+            # Ищем ближайший BTC режим
+            btc_r = btc_regimes.get(ts_key, 'CHOP')
+            if signal == 'LONG'  and btc_r == 'DOWNTREND':
+                continue
+            if signal == 'SHORT' and btc_r == 'UPTREND':
+                continue
+
         entry   = last['close']
         atr_val = last['atr']
         adx_val = last['adx'] if not pd.isna(last['adx']) else 0
         atr_pct = atr_val / entry if entry > 0 else 0
 
         sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx_val, atr_pct)
-        # В бэктесте нет 1h данных — используем atr_30m для обоих
         stop, tp1, tp2, tp3 = calc_levels(signal, entry, atr_val, atr_val, sl_m, tp1_m, tp2_m, tp3_m)
         pos_usdt = calc_position_size(entry, stop)
         if pos_usdt <= 0:
