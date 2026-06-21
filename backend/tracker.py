@@ -4,12 +4,19 @@ Trade Tracker — TP1/TP2/TP3, стоп, Chandelier Exit trailing.
 """
 
 import pandas as pd
+from datetime import datetime
 import database as db
+import nfi_strategy
 from data_layer import fetch_data_cached, build_features, fetch_ticker
 from nfi_strategy import (
     set_cooldown, record_daily_loss,
     calc_chandelier_exit, calc_supertrend
 )
+
+# Выход по времени — должен совпадать с таймаутом бэктеста (36 свечей 1h).
+# Для momentum это ОСНОВНОЙ механизм выхода (TP недостижимы), без него
+# live расходится с бэктестом.
+TIMEOUT_HOURS = 36
 
 
 def pnl_pct(signal, entry, price):
@@ -150,7 +157,10 @@ def check_trades():
             tp1_hit = bool(trade.get('tp1_hit'))
 
             # ── Потеря потенциала (только до TP1) ─────────────────
-            if not tp1_hit and not trade.get('potential_warned'):
+            # Для momentum отключено: TP1 недостижим (выход по времени/стопу),
+            # этот механизм не моделируется в бэктесте momentum.
+            mom_mode = nfi_strategy.STRATEGY_MODE == 'momentum'
+            if not mom_mode and not tp1_hit and not trade.get('potential_warned'):
                 lost, lines, _ = check_potential_loss(symbol, signal, entry, price)
                 if lost:
                     trade['potential_warned'] = True
@@ -196,6 +206,20 @@ def check_trades():
                 if result == 'sl':
                     set_cooldown(symbol)   # cooldown только после реального стопа
                 continue
+
+            # ── Таймаут по времени (как в бэктесте) ───────────────
+            opened_at = trade.get('opened_at')
+            if opened_at:
+                try:
+                    hours_open = (datetime.now() - datetime.fromisoformat(opened_at)).total_seconds() / 3600
+                except (ValueError, TypeError):
+                    hours_open = 0
+                if hours_open >= TIMEOUT_HOURS:
+                    db.add_event(symbol, 'timeout', f"Закрыто по времени ({TIMEOUT_HOURS}ч, {pnl:+.1f}%)")
+                    record_daily_loss(pnl)
+                    db.add_to_history(symbol, signal, entry, 'timeout', pnl)
+                    db.remove_trade(symbol)
+                    continue
 
             # ── TP1 — фиксируем 50%, стоп в б/у ──────────────────
             if not tp1_hit and _hit(signal, price, tp1, 'tp'):
