@@ -22,7 +22,7 @@ except ImportError:
     print("⚠️ telegram_bot не найден, уведомления отключены")
 
 SCAN_INTERVAL_SECONDS = 2 * 60
-MAX_OPEN_TRADES = 5   # увеличено с 3 до 5 — больше пар, больше возможностей
+MAX_OPEN_TRADES = 3   # 3 позиции одновременно — ~3 сделки в день
 
 
 def register_signal(sig):

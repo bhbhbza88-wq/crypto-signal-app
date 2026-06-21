@@ -21,9 +21,9 @@ TP3_BASE = 6.0
 DEPOSIT  = float(os.environ.get("DEPOSIT",  "1000"))
 RISK_PCT = float(os.environ.get("RISK_PCT", "1.5"))
 
-SCORE_MIN = int(os.environ.get("SCORE_MIN", "15"))
+SCORE_MIN = int(os.environ.get("SCORE_MIN", "18"))
 SCORE_MAX = 20
-ADX_MIN   = 23
+ADX_MIN   = 30
 
 
 def detect_pullback(df, signal):
