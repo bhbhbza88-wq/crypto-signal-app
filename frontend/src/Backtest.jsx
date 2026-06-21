@@ -313,7 +313,7 @@ export default function Backtest() {
       <div className="page-header" style={{ marginBottom: 20 }}>
         <h1 className="page-title">Бэктестинг</h1>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
-          V8 стратегия (MTF 4h+1h+30m, Pullback, Structure, ADX≥23)
+          V8 стратегия (1h основной, Pullback, Structure, ADX≥23)
         </p>
       </div>
 
@@ -392,7 +392,7 @@ export default function Backtest() {
 
       <div className="bt-info">
         <span>📡 Данные: Bybit</span>
-        <span>⚙ Таймфрейм: 1h</span>
+        <span>⚙ Таймфрейм: 30m</span>
         <span>📅 {period.label}</span>
         <span>💸 Комиссия: {commission}% × 2</span>
         <span>⚙ ADX≥23 | Score≥13/20 | 💰 Риск 1.5%</span>
