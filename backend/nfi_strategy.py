@@ -38,6 +38,22 @@ COOLDOWN_HOURS       = 3
 RSI_LONG_MIN,  RSI_LONG_MAX  = 35, 58
 RSI_SHORT_MIN, RSI_SHORT_MAX = 42, 65
 
+# ── Выбор стратегии ──────────────────────────────────────────────
+# "trend"          — трендследящая (вход на откате по тренду)
+# "mean_reversion" — возврат к среднему (вход против движения на экстремуме)
+STRATEGY_MODE = os.environ.get("STRATEGY_MODE", "trend")
+
+# ── Mean-reversion параметры ─────────────────────────────────────
+BB_LENGTH    = 20
+BB_STD       = 2.0
+MR_RSI_LONG  = 30     # покупаем когда RSI < 30 (перепродан)
+MR_RSI_SHORT = 70     # продаём когда RSI > 70 (перекуплен)
+MR_SL_BASE   = 2.0    # стоп за пределами полосы
+MR_TP1_BASE  = 1.5    # цель — возврат к средней (короче чем у тренда)
+MR_TP2_BASE  = 2.5
+MR_TP3_BASE  = 3.5
+MR_ADX_MAX   = 25     # mean-reversion работает в ФЛЭТЕ, не в тренде
+
 
 # ══════════════════════════════════════════════════════════════════
 # ИНДИКАТОРЫ
@@ -385,6 +401,80 @@ def calc_position_size(entry, stop):
 # ══════════════════════════════════════════════════════════════════
 # ЕДИНОЕ ЯДРО СИГНАЛА — используется и лайвом, и бэктестом
 # ══════════════════════════════════════════════════════════════════
+def calc_bollinger(df, length=BB_LENGTH, std=BB_STD):
+    """Bollinger Bands — для mean-reversion."""
+    mid   = df['close'].rolling(length).mean()
+    sd    = df['close'].rolling(length).std()
+    upper = mid + std * sd
+    lower = mid - std * sd
+    return mid, upper, lower
+
+
+def core_signal_mean_reversion(df_1h, signal, df_4h=None):
+    """
+    Mean-reversion вход: цена ушла к краю Bollinger в ФЛЭТЕ, RSI на экстремуме,
+    и появился разворотный признак. Выход — к средней полосе.
+
+    LONG:  close <= lower BB, RSI < 30, бычья свеча (разворот вверх)
+    SHORT: close >= upper BB, RSI > 70, медвежья свеча (разворот вниз)
+    """
+    if len(df_1h) < 50:
+        return False
+
+    last = df_1h.iloc[-1]
+    prev = df_1h.iloc[-2]
+    adx  = last['adx'] if not pd.isna(last['adx']) else 100
+
+    if pd.isna(last['atr']) or last['atr'] <= 0:  return False
+    if pd.isna(last['rsi']):                        return False
+
+    # Mean-reversion работает только в боковике / слабом тренде
+    if adx > MR_ADX_MAX:
+        return False
+
+    mid, upper, lower = calc_bollinger(df_1h)
+    bb_lower = lower.iloc[-1]
+    bb_upper = upper.iloc[-1]
+    if pd.isna(bb_lower) or pd.isna(bb_upper):
+        return False
+
+    if signal == 'LONG':
+        # Цена коснулась/пробила нижнюю полосу
+        touched = last['low'] <= bb_lower
+        # RSI перепродан
+        rsi_ok  = last['rsi'] < MR_RSI_LONG
+        # Разворотная свеча: закрытие выше открытия и выше предыдущего close
+        reversal = last['close'] > last['open'] and last['close'] > prev['close']
+        return bool(touched and rsi_ok and reversal)
+    else:
+        touched = last['high'] >= bb_upper
+        rsi_ok  = last['rsi'] > MR_RSI_SHORT
+        reversal = last['close'] < last['open'] and last['close'] < prev['close']
+        return bool(touched and rsi_ok and reversal)
+
+
+def mr_levels(signal, entry, atr, df):
+    """
+    Уровни для mean-reversion. Цель — средняя полоса BB (TP1),
+    стоп — за крайней полосой.
+    """
+    mid, upper, lower = calc_bollinger(df)
+    bb_mid = mid.iloc[-1]
+    sl  = atr * MR_SL_BASE
+    if signal == 'LONG':
+        stop = entry - sl
+        tp1  = bb_mid if not pd.isna(bb_mid) else entry + atr * MR_TP1_BASE
+        tp2  = entry + atr * MR_TP2_BASE
+        tp3  = entry + atr * MR_TP3_BASE
+        return stop, tp1, tp2, tp3
+    else:
+        stop = entry + sl
+        tp1  = bb_mid if not pd.isna(bb_mid) else entry - atr * MR_TP1_BASE
+        tp2  = entry - atr * MR_TP2_BASE
+        tp3  = entry - atr * MR_TP3_BASE
+        return stop, tp1, tp2, tp3
+
+
 def core_signal(df_1h, signal, df_4h=None):
     """
     Единая проверка входа. df_4h опционален (None в бэктесте).
@@ -531,15 +621,32 @@ def build_nfi_features(df):
 
 def should_enter(df, signal):
     """
-    Бэктест-вход. Использует то же core_signal что и лайв (без 4h MTF).
-    Доп. проверка режима через detect_regime — как в лайве.
+    Бэктест-вход. Переключается по STRATEGY_MODE.
+    trend          — core_signal (вход на откате по тренду, нужен UPTREND/DOWNTREND)
+    mean_reversion — core_signal_mean_reversion (вход на экстремуме во флэте)
     """
     if len(df) < 50:
         return False
-    # Supertrend должен быть посчитан (build_nfi_features в main.py)
+
+    if STRATEGY_MODE == "mean_reversion":
+        # MR не зависит от режима тренда — работает во флэте
+        return core_signal_mean_reversion(df, signal, None)
+
+    # trend (по умолчанию)
     regime, _ = detect_regime(df)
     if regime == 'UPTREND'  and signal == 'LONG':
         return core_signal(df, 'LONG', None)
     if regime == 'DOWNTREND' and signal == 'SHORT':
         return core_signal(df, 'SHORT', None)
     return False
+
+
+def backtest_levels(signal, entry, atr, adx, atr_pct, df):
+    """
+    Возвращает (stop, tp1, tp2, tp3) для бэктеста в зависимости от STRATEGY_MODE.
+    Используется в main.py.
+    """
+    if STRATEGY_MODE == "mean_reversion":
+        return mr_levels(signal, entry, atr, df)
+    sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx, atr_pct)
+    return calc_levels(signal, entry, atr, sl_m, tp1_m, tp2_m, tp3_m)

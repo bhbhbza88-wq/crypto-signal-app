@@ -16,9 +16,11 @@ from pydantic import BaseModel
 import database as db
 from scanner import start_background_scanner
 from data_layer import exchange, api_call, build_features, detect_regime, get_active_symbols, CANDIDATES
+import nfi_strategy
 from nfi_strategy import (
     build_nfi_features, should_enter,
-    get_mults, calc_levels, calc_position_size, volatility_position_size, ADX_MIN
+    get_mults, calc_levels, calc_position_size, volatility_position_size,
+    backtest_levels, ADX_MIN
 )
 
 
@@ -132,6 +134,7 @@ class BacktestRequest(BaseModel):
     period_days: int   = 30
     commission:  float = 0.055
     slippage:    float = 0.05
+    strategy:    str   = "trend"      # "trend" | "mean_reversion"
 
 class MultiBacktestRequest(BaseModel):
     symbols:     list[str] = []
@@ -139,6 +142,7 @@ class MultiBacktestRequest(BaseModel):
     period_days: int   = 30
     commission:  float = 0.055
     slippage:    float = 0.05
+    strategy:    str   = "trend"      # "trend" | "mean_reversion"
 
 
 def fetch_ohlcv_paginated(symbol: str, tf: str, days: int) -> list:
@@ -381,8 +385,7 @@ def _run_one(symbol: str, period_days: int, deposit: float,
         adx_val = last['adx'] if not pd.isna(last['adx']) else 0
         atr_pct = atr_val / entry if entry > 0 else 0
 
-        sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx_val, atr_pct)
-        stop, tp1, tp2, tp3 = calc_levels(signal, entry, atr_val, sl_m, tp1_m, tp2_m, tp3_m)
+        stop, tp1, tp2, tp3 = backtest_levels(signal, entry, atr_val, adx_val, atr_pct, df_slice)
         pos_usdt = volatility_position_size(entry, stop, atr_pct)
         if pos_usdt <= 0:
             continue
@@ -434,7 +437,8 @@ def _run_one(symbol: str, period_days: int, deposit: float,
 
 @app.post("/api/backtest")
 def run_backtest(req: BacktestRequest):
-    """V8 бэктест одной пары с кривой доходности."""
+    """Бэктест одной пары с кривой доходности. strategy: trend | mean_reversion"""
+    nfi_strategy.STRATEGY_MODE = req.strategy
     result = _run_one(
         symbol=req.symbol, period_days=req.period_days,
         deposit=req.deposit, commission=req.commission,
@@ -446,6 +450,7 @@ def run_backtest(req: BacktestRequest):
     # Формат совместимый с фронтендом
     return {
         "symbol":           result["symbol"],
+        "strategy":         req.strategy,
         "timeframe":        "1h",
         "period_days":      req.period_days,
         "candles_used":     0,
@@ -472,7 +477,8 @@ def run_backtest(req: BacktestRequest):
 
 @app.post("/api/backtest/multi")
 def run_multi_backtest(req: MultiBacktestRequest):
-    """V8 мульти-символьный бэктест по всем парам."""
+    """Мульти-символьный бэктест. strategy: trend | mean_reversion"""
+    nfi_strategy.STRATEGY_MODE = req.strategy
     symbols = req.symbols if req.symbols else CANDIDATES
     results, errors = [], []
 
@@ -506,6 +512,7 @@ def run_multi_backtest(req: MultiBacktestRequest):
 
     return {
         "period_days":          req.period_days,
+        "strategy":             req.strategy,
         "symbols_tested":       len(symbols),
         "symbols_with_trades":  len(results),
         "summary": {
