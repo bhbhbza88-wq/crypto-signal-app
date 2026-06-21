@@ -350,23 +350,22 @@ def build_nfi_features(df):
 
 def should_enter(df, signal):
     """
-    Для бэктеста на 1h данных.
-    Та же логика что и в generate_nfi_signal, но без MTF (данные только 1h).
+    Для бэктеста на 1h данных. LONG и SHORT.
     """
-    if len(df) < 50 or signal == 'SHORT':
+    if len(df) < 50:
         return False
     last = df.iloc[-1]
     adx  = last['adx'] if not pd.isna(last.get('adx', float('nan'))) else 0
     if adx < ADX_MIN:
         return False
-    if not entry_conditions(df, 'LONG'):
+    if not entry_conditions(df, signal):
         return False
-    if not detect_trend_stable(df, 'LONG'):
+    if not detect_trend_stable(df, signal):
         return False
-    if is_overextended(df, 'LONG'):
+    if is_overextended(df, signal):
         return False
     if detect_volume_climax(df):
         return False
-    fresh_cross     = detect_ema_cross_fresh(df, 'LONG', max_bars=3)
-    has_pullback, _ = detect_pullback(df, 'LONG')
+    fresh_cross     = detect_ema_cross_fresh(df, signal, max_bars=3)
+    has_pullback, _ = detect_pullback(df, signal)
     return fresh_cross or has_pullback

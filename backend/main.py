@@ -327,9 +327,6 @@ def _run_one(symbol: str, period_days: int, deposit: float,
         elif should_enter(df_slice, 'SHORT'):
             signal = 'SHORT'
 
-        if not signal:
-            continue
-
         # V8 уровни: get_mults принимает (adx, atr_pct), calc_levels принимает atr_30m + atr_1h
         entry   = last['close']
         atr_val = last['atr']
