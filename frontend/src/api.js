@@ -29,4 +29,5 @@ export const api = {
   getXsecRanking: () => get('/xsec/ranking'),
   getTrendStatus: () => get('/trend/status'),
   getTrendHistory: (limit = 100) => get(`/trend/history?limit=${limit}`),
+  getMarketPhase: () => get('/market/phase'),
 }

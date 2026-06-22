@@ -15,16 +15,51 @@ function SignalRow({ s }) {
   )
 }
 
+const PHASE_LABEL = { UPTREND: 'АПТРЕНД', DOWNTREND: 'ДАУНТРЕНД', SIDEWAYS: 'БОКОВИК' }
+const PHASE_CLASS = { UPTREND: 'up', DOWNTREND: 'down', SIDEWAYS: 'side' }
+
+function MarketPhaseBanner({ phase }) {
+  if (!phase || phase.error) return null
+  const cls = PHASE_CLASS[phase.phase] || 'side'
+  return (
+    <div className={`mp-banner ${cls}`}>
+      <div className="mp-left">
+        <span className="mp-dot" />
+        <div>
+          <div className="mp-title">Фаза рынка (BTC): {PHASE_LABEL[phase.phase] || phase.phase}</div>
+          <div className="mp-sub">EMA50 {phase.strength_pct > 0 ? 'выше' : 'ниже'} EMA200 на {Math.abs(phase.strength_pct)}% · цена {phase.btc_close}</div>
+        </div>
+      </div>
+      <div className="mp-note">ℹ️ Только информационно — не переключает стратегии</div>
+      <style>{`
+        .mp-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 18px; border-radius: var(--radius-md); margin-bottom: 18px; border: 1px solid var(--border); background: var(--surface); }
+        .mp-banner.up { border-color: var(--long); background: var(--long-soft); }
+        .mp-banner.down { border-color: var(--short); background: var(--short-soft); }
+        .mp-banner.side { border-color: var(--amber); background: var(--amber-soft); }
+        .mp-left { display: flex; align-items: center; gap: 10px; }
+        .mp-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .mp-banner.up .mp-dot { background: var(--long); }
+        .mp-banner.down .mp-dot { background: var(--short); }
+        .mp-banner.side .mp-dot { background: var(--amber); }
+        .mp-title { font-weight: 800; font-size: 14px; color: var(--text); }
+        .mp-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; font-family: var(--font-mono); }
+        .mp-note { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+      `}</style>
+    </div>
+  )
+}
+
 export default function TrendDashboard() {
   const [status, setStatus] = useState(null)
   const [history, setHistory] = useState([])
+  const [phase, setPhase] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   const load = useCallback(async () => {
     try {
-      const [s, h] = await Promise.all([api.getTrendStatus(), api.getTrendHistory()])
-      setStatus(s); setHistory(h.trades || [])
+      const [s, h, p] = await Promise.all([api.getTrendStatus(), api.getTrendHistory(), api.getMarketPhase()])
+      setStatus(s); setHistory(h.trades || []); setPhase(p)
       setError(null)
     } catch (e) {
       setError(e.message)
@@ -56,6 +91,8 @@ export default function TrendDashboard() {
       </div>
 
       {error && <div className="bt-error animate-in">❌ {error}</div>}
+
+      <MarketPhaseBanner phase={phase} />
 
       <div className="xs-metrics">
         <div className="xs-metric main">
