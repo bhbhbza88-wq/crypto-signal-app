@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Базы данных (создаются приложением в рантайме, не версионируются)
+*.db
+*.sqlite
+*.sqlite3
+
+# Node / frontend
+node_modules/
+dist/
+*.local
+
+# Логи и временное
+*.log
+.DS_Store
+Thumbs.db
+
+# Окружение
+.env
+.env.*
