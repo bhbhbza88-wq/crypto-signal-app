@@ -11,6 +11,7 @@ import SmartTrade from './SmartTrade'
 import DryRunDashboard from './DryRunDashboard'
 import XSecDashboard from './XSecDashboard'
 import TrendDashboard from './TrendDashboard'
+import StrategiesCompare from './StrategiesCompare'
 
 const POLL_INTERVAL = 15000
 const MARKET_POLL_INTERVAL = 60000
@@ -19,6 +20,7 @@ const NAV_SECTIONS = [
   { items: [
     { key: 'ai_assistant', label: 'AI Ассистент', icon: '✦', badge: 'BETA' },
     { key: 'overview',     label: 'Dashboard',     icon: '◈' },
+    { key: 'compare',      label: 'Сравнение',      icon: '⚓', badge: 'LIVE' },
     { key: 'dryrun',       label: 'Дальран',        icon: '🛰', badge: 'LIVE' },
     { key: 'xsec',         label: 'Long-Short',     icon: '⚖', badge: 'NEW' },
     { key: 'trend_ff',     label: 'Trend-Following', icon: '📈', badge: 'NEW' },
@@ -732,6 +734,7 @@ export default function App() {
           {tab === 'market' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Скринер рынка</h1></div><MarketView market={market} /></section>}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} /></section>}
           {tab === 'backtest' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Бэктест <span className="beta-tag">BETA</span></h1></div><Backtest /></section>}
+          {tab === 'compare' && <section className="section animate-in"><StrategiesCompare /></section>}
           {tab === 'dryrun' && <section className="section animate-in"><DryRunDashboard /></section>}
           {tab === 'xsec' && <section className="section animate-in"><XSecDashboard /></section>}
           {tab === 'trend_ff' && <section className="section animate-in"><TrendDashboard /></section>}

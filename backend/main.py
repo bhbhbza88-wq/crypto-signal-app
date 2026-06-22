@@ -103,6 +103,62 @@ def _summarize(trades):
     }
 
 
+@app.get("/api/strategies/summary")
+def get_strategies_summary():
+    """
+    Единое честное сравнение всех бумажных стратегий на живых данных.
+    Метрики у стратегий считаются по-разному (разная механика), поэтому
+    подписаны явно. Все — независимые бумажные (paper), edge не доказан.
+    """
+    import xsec_strategy, trend_strategy
+
+    out = []
+
+    # 1) Momentum (высокочастотный сканер)
+    hist = db.load_history(limit=5000)
+    open_m = db.load_trades()
+    if hist:
+        wins = sum(1 for t in hist if t['pnl'] > 0)
+        out.append({
+            "key": "momentum", "name": "Momentum", "kind": "Высокочастотная",
+            "realized_pnl_pct": round(sum(t['pnl'] for t in hist), 2),
+            "closed_trades": len(hist),
+            "winrate": round(wins / len(hist) * 100, 1),
+            "open_positions": len(open_m),
+            "metric_note": "сумма % по сделкам (позиц. сайзинг)",
+        })
+    else:
+        out.append({"key": "momentum", "name": "Momentum", "kind": "Высокочастотная",
+                    "realized_pnl_pct": 0, "closed_trades": 0, "winrate": 0,
+                    "open_positions": len(open_m), "metric_note": "ещё нет закрытых сделок"})
+
+    # 2) Long-Short (cross-sectional, market-neutral)
+    xst = xsec_strategy.get_status()
+    xlog = db.xsec_load_log(limit=500)
+    out.append({
+        "key": "xsec", "name": "Long-Short", "kind": "Рыночно-нейтральная",
+        "realized_pnl_pct": round((xst.get('equity', 1000) / xsec_strategy.XSEC_DEPOSIT - 1) * 100, 2),
+        "closed_trades": len(xlog),
+        "winrate": None,
+        "open_positions": len(xst.get('positions', [])),
+        "metric_note": "compounded equity (нейтральный портфель)",
+    })
+
+    # 3) Trend-Following
+    tst = trend_strategy.get_status()
+    out.append({
+        "key": "trend", "name": "Trend-Following", "kind": "Защита от просадок",
+        "realized_pnl_pct": tst.get('total_realized_pnl_pct', 0),
+        "closed_trades": tst.get('closed_trades', 0),
+        "winrate": round(tst['wins'] / tst['closed_trades'] * 100, 1) if tst.get('closed_trades') else None,
+        "open_positions": len(tst.get('positions', [])),
+        "metric_note": "сумма % по сделкам (long/cash)",
+    })
+
+    return {"strategies": out,
+            "note": "Бумажные независимые стратегии. Метрики посчитаны по-разному — сравнивать с осторожностью. Edge не доказан, нужен дальран."}
+
+
 @app.get("/api/history")
 def get_history(limit: int = 100):
     return db.load_history(limit=limit)
