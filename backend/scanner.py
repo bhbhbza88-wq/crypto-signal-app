@@ -110,12 +110,24 @@ def scan_once():
         print("⏳ Все сигналы уже открыты")
 
 
+def xsec_tick():
+    """Cross-sectional momentum — независимая стратегия, ребаланс раз в неделю."""
+    try:
+        import xsec_strategy
+        if xsec_strategy.should_rebalance():
+            xsec_strategy.rebalance()
+    except Exception as e:
+        import traceback
+        print(f"❌ xsec: {e}\n{traceback.format_exc()}")
+
+
 def safe_scan():
     try:
         scan_once()
     except Exception as e:
         import traceback
         print(f"❌ scan: {e}\n{traceback.format_exc()}")
+    xsec_tick()
 
 
 def run_scanner_loop():
