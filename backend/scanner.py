@@ -129,6 +129,7 @@ def trend_tick():
         last = st.get('last_check_ts') if st else None
         if not last or (time.time() * 1000 - last) >= 20 * 3600 * 1000:
             trend_strategy.tick()
+            trend_strategy.check_phase_change()  # алерт при смене фазы рынка
     except Exception as e:
         import traceback
         print(f"❌ trend: {e}\n{traceback.format_exc()}")

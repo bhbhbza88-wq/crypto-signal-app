@@ -90,6 +90,50 @@ async def notify_signal_closed(signal: dict, result: str, pnl: float):
 
     await send_telegram(text)
 
+async def notify_market_phase(old_phase: str, new_phase: str, details: dict):
+    """Смена фазы рынка (информационный, редкий и ценный сигнал)."""
+    labels = {'UPTREND': 'АПТРЕНД 📈', 'DOWNTREND': 'ДАУНТРЕНД 📉', 'SIDEWAYS': 'БОКОВИК ↔️'}
+    emoji = {'UPTREND': '🟢', 'DOWNTREND': '🔴', 'SIDEWAYS': '🟡'}.get(new_phase, '🔵')
+    text = (
+        f"{emoji} <b>NWICKI — Смена фазы рынка</b>\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"Было: <b>{labels.get(old_phase, old_phase)}</b>\n"
+        f"Стало: <b>{labels.get(new_phase, new_phase)}</b>\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"📊 BTC: <code>{details.get('btc_close', 0)}</code>\n"
+        f"🌡 Монет в аптренде: <b>{details.get('breadth_pct', 0)}%</b>\n"
+        f"⚡ Моментум 60д: <b>{details.get('momentum_60d_pct', 0)}%</b>\n"
+        f"✅ Risk-on: <b>{details.get('risk_on_score', 0)}/4</b>\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"<i>Информационно — не торговый сигнал</i>"
+    )
+    await send_telegram(text)
+
+
+async def notify_trend_signal(symbol: str, action: str, price: float, pnl: float = None):
+    """Вход/выход Trend-Following по монете (редкие позиционные сделки)."""
+    sym = symbol.replace('/USDT', '')
+    if action == 'enter':
+        text = (
+            f"📈 <b>Trend-Following — ВХОД</b>\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📊 <b>{sym}</b> вошёл в восходящий тренд (EMA50&gt;EMA200)\n"
+            f"💰 Цена: <code>{price:.4f}</code>\n"
+            f"<i>Держим, пока тренд вверх. Выход — пересечение EMA вниз.</i>"
+        )
+    else:
+        pnl_str = f"+{pnl:.1f}%" if (pnl or 0) > 0 else f"{pnl:.1f}%"
+        emoji = "✅" if (pnl or 0) > 0 else "🔻"
+        text = (
+            f"{emoji} <b>Trend-Following — ВЫХОД</b>\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📊 <b>{sym}</b> вышел из тренда → кэш\n"
+            f"💰 Цена: <code>{price:.4f}</code> · PnL: <b>{pnl_str}</b>\n"
+            f"<i>Тренд развернулся (EMA50&lt;EMA200).</i>"
+        )
+    await send_telegram(text)
+
+
 async def send_daily_summary(stats: dict):
     today = stats.get("today", {})
     total = today.get("total", 0)

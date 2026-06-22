@@ -102,6 +102,17 @@ def _now_ms():
     return int(time.time() * 1000)
 
 
+def _tg(coro_factory):
+    """Безопасно отправить Telegram-уведомление из синхронного кода."""
+    try:
+        import asyncio, telegram_bot
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(coro_factory(telegram_bot))
+        loop.close()
+    except Exception as e:
+        print(f"[trend telegram] {e}")
+
+
 def _load_positions():
     st = db.trend_get_state()
     if not st or not st.get('positions_json'):
@@ -126,17 +137,20 @@ def tick():
         if sig['in_trend'] and not has_pos:
             positions[sym] = {'entry': sig['close'], 'opened_at': _now_ms()}
             db.add_event(sym, 'trend_enter', f"Trend-Following: вход (EMA{TREND_EMA_FAST}>{TREND_EMA_SLOW}) @ {sig['close']:.4f}")
+            _tg(lambda tg, s=sym, p=sig['close']: tg.notify_trend_signal(s, 'enter', p))
             changed = True
         elif not sig['in_trend'] and has_pos:
             entry = positions[sym]['entry']
             pnl_pct = (sig['close'] - entry) / entry * 100 - (COMM + SLIP) * 100
             db.trend_add_log(_now_ms(), sym, entry, sig['close'], round(pnl_pct, 3))
             db.add_event(sym, 'trend_exit', f"Trend-Following: выход @ {sig['close']:.4f} ({pnl_pct:+.1f}%)")
+            _tg(lambda tg, s=sym, p=sig['close'], pn=pnl_pct: tg.notify_trend_signal(s, 'exit', p, pn))
             del positions[sym]
             changed = True
 
-    if changed or not db.trend_get_state():
-        db.trend_save_state(_now_ms(), json.dumps(positions))
+    # всегда обновляем last_check_ts (чтобы дневной гейт в scanner работал),
+    # позиции сохраняем актуальные
+    db.trend_save_state(_now_ms(), json.dumps(positions))
 
 
 # Вселенная для расчёта breadth (доля монет в аптренде) — 30 ликвидных монет.
@@ -223,6 +237,27 @@ def get_market_phase():
         'risk_on_score': int(score.iloc[i]),
         'note': 'Только информационно — не переключает стратегии (проверено и отклонено)',
     }
+
+
+def check_phase_change():
+    """
+    Сравнивает текущую фазу с последней зафиксированной (через таблицу events).
+    При смене — пишет событие и шлёт Telegram. Вызывается из scanner раз в день.
+    """
+    cur = get_market_phase()
+    if not cur:
+        return
+    # последняя зафиксированная фаза — из событий kind='phase_change'
+    last_phase = None
+    for ev in db.load_events(limit=200):
+        if ev.get('kind') == 'phase_change':
+            last_phase = (ev.get('message') or '').strip()
+            break
+    if cur['phase'] == last_phase:
+        return  # без изменений
+    db.add_event('BTC/USDT', 'phase_change', cur['phase'])
+    if last_phase is not None:  # не шлём на самый первый запуск (нет "было")
+        _tg(lambda tg, o=last_phase, n=cur['phase'], d=cur: tg.notify_market_phase(o, n, d))
 
 
 def get_status():
