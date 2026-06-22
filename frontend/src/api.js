@@ -30,4 +30,5 @@ export const api = {
   getTrendStatus: () => get('/trend/status'),
   getTrendHistory: (limit = 100) => get(`/trend/history?limit=${limit}`),
   getMarketPhase: () => get('/market/phase'),
+  getStrategiesSummary: () => get('/strategies/summary'),
 }
