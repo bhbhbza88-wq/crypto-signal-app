@@ -9,13 +9,40 @@ function resolveBaseUrl() {
 
 const BASE_URL = resolveBaseUrl()
 
+// ── Токен авторизации (localStorage) ──
+const TOKEN_KEY = 'nwicki_token'
+export function getToken() { return localStorage.getItem(TOKEN_KEY) }
+export function setToken(t) { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY) }
+
+function authHeaders() {
+  const t = getToken()
+  return t ? { Authorization: `Bearer ${t}` } : {}
+}
+
 async function get(path) {
-  const res = await fetch(`${BASE_URL}${path}`)
+  const res = await fetch(`${BASE_URL}${path}`, { headers: { ...authHeaders() } })
   if (!res.ok) throw new Error(`Request failed: ${path}`)
   return res.json()
 }
 
+async function post(path, body) {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || `Request failed: ${path}`)
+  return data
+}
+
 export const api = {
+  // auth / billing
+  register: (email, password) => post('/auth/register', { email, password }),
+  login: (email, password) => post('/auth/login', { email, password }),
+  logout: () => post('/auth/logout'),
+  me: () => get('/auth/me'),
+  upgrade: (tier) => post('/billing/upgrade', { tier }),
   getSignals: () => get('/signals'),
   getHistory: (limit = 100) => get(`/history?limit=${limit}`),
   getEvents: (limit = 50) => get(`/events?limit=${limit}`),

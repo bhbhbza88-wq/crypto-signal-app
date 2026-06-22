@@ -9,11 +9,12 @@ import time as _time
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import database as db
+import auth
 from scanner import start_background_scanner, MAX_OPEN_TRADES
 from data_layer import exchange, api_call, build_features, detect_regime, get_active_symbols, CANDIDATES
 import nfi_strategy
@@ -33,6 +34,91 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Crypto Signal App V8", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+# ── Аутентификация / монетизация ──────────────────────────────────
+class AuthRequest(BaseModel):
+    email: str
+    password: str
+
+class UpgradeRequest(BaseModel):
+    tier: str   # 'premium' | 'vip'
+
+
+def _token_from_header(authorization: str | None) -> str | None:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return None
+
+
+def current_user(authorization: str | None = Header(default=None)):
+    """Возвращает пользователя или None (необязательная авторизация)."""
+    return auth.user_from_token(_token_from_header(authorization))
+
+
+def require_user(authorization: str | None = Header(default=None)):
+    user = auth.user_from_token(_token_from_header(authorization))
+    if not user:
+        raise HTTPException(status_code=401, detail="Требуется вход")
+    return user
+
+
+def require_tier(min_tier: str):
+    def dep(authorization: str | None = Header(default=None)):
+        user = auth.user_from_token(_token_from_header(authorization))
+        if not user:
+            raise HTTPException(status_code=401, detail="Требуется вход")
+        if not auth.tier_allows(user['tier'], min_tier):
+            raise HTTPException(status_code=403, detail=f"Нужен тариф {min_tier} или выше")
+        return user
+    return dep
+
+
+@app.post("/api/auth/register")
+def auth_register(req: AuthRequest):
+    user, token = auth.register(req.email, req.password)
+    if not user:
+        raise HTTPException(status_code=400, detail=token)  # token=сообщение об ошибке
+    return {"token": token, "user": auth.public_user(user)}
+
+
+@app.post("/api/auth/login")
+def auth_login(req: AuthRequest):
+    user, token = auth.login(req.email, req.password)
+    if not user:
+        raise HTTPException(status_code=401, detail=token)
+    return {"token": token, "user": auth.public_user(user)}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(authorization: str | None = Header(default=None)):
+    tok = _token_from_header(authorization)
+    if tok:
+        auth.logout(tok)
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def auth_me(authorization: str | None = Header(default=None)):
+    u = auth.user_from_token(_token_from_header(authorization))
+    if not u:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    return {"user": auth.public_user(u)}
+
+
+@app.post("/api/billing/upgrade")
+def billing_upgrade(req: UpgradeRequest, authorization: str | None = Header(default=None)):
+    """
+    ЗАГЛУШКА оплаты: пока просто меняет тариф (для теста гейтинга).
+    Реальную оплату подключим отдельным шагом (Этап 1.5).
+    """
+    user = auth.user_from_token(_token_from_header(authorization))
+    if not user:
+        raise HTTPException(status_code=401, detail="Требуется вход")
+    if req.tier not in ('free', 'premium', 'vip'):
+        raise HTTPException(status_code=400, detail="Неизвестный тариф")
+    db.set_user_tier(user['id'], req.tier)
+    return {"ok": True, "tier": req.tier, "note": "ЗАГЛУШКА — реальная оплата будет позже"}
 
 
 # ── API endpoints ────────────────────────────────────────────────

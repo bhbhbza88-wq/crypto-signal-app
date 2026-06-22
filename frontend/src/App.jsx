@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from './api'
+import { api, getToken, setToken } from './api'
+import AuthModal from './AuthModal'
+import Pricing from './Pricing'
 import StatsHero from './StatsHero'
 import SignalCard from './SignalCard'
 import HistoryTable from './HistoryTable'
@@ -20,6 +22,7 @@ const NAV_SECTIONS = [
   { items: [
     { key: 'ai_assistant', label: 'AI Ассистент', icon: '✦', badge: 'BETA' },
     { key: 'overview',     label: 'Dashboard',     icon: '◈' },
+    { key: 'pricing',      label: 'Тарифы',         icon: '💎' },
     { key: 'compare',      label: 'Сравнение',      icon: '⚓', badge: 'LIVE' },
     { key: 'dryrun',       label: 'Дальран',        icon: '🛰', badge: 'LIVE' },
     { key: 'xsec',         label: 'Long-Short',     icon: '⚖', badge: 'NEW' },
@@ -554,8 +557,22 @@ export default function App() {
   const [error, setError] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [user, setUser] = useState(null)
+  const [showAuth, setShowAuth] = useState(false)
   const prevRef = useRef([])
   const prices = useLivePrices()
+
+  // восстановление сессии по сохранённому токену
+  useEffect(() => {
+    if (getToken()) {
+      api.me().then(r => setUser(r.user)).catch(() => setToken(null))
+    }
+  }, [])
+
+  const logout = async () => {
+    try { await api.logout() } catch {}
+    setToken(null); setUser(null)
+  }
 
   const [dark, setDark] = useState(() => {
     const s = localStorage.getItem('theme')
@@ -716,7 +733,17 @@ export default function App() {
           <div className="topbar-right">
             <button className="btn-create" onClick={() => setTab('dca_bot')}>+ Новый бот</button>
             <button className="btn-trial" onClick={() => setTab('ai_assistant')}>✦ AI Ассистент</button>
-            <div className="plan-badge">Free plan ▾</div>
+            {user ? (
+              <div className="auth-box">
+                <button className={`plan-badge tier-${user.tier}`} onClick={() => setTab('pricing')} title="Сменить тариф">
+                  {user.tier.toUpperCase()}
+                </button>
+                <span className="auth-email" title={user.email}>{user.email.split('@')[0]}</span>
+                <button className="auth-logout" onClick={logout} title="Выйти">⎋</button>
+              </div>
+            ) : (
+              <button className="auth-login-btn" onClick={() => setShowAuth(true)}>Войти</button>
+            )}
             <button className="theme-toggle-sm" onClick={() => setDark(d => !d)}>{dark ? '☀' : '☾'}</button>
           </div>
         </header>
@@ -734,6 +761,7 @@ export default function App() {
           {tab === 'market' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Скринер рынка</h1></div><MarketView market={market} /></section>}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} /></section>}
           {tab === 'backtest' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Бэктест <span className="beta-tag">BETA</span></h1></div><Backtest /></section>}
+          {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} onUpgraded={(t) => setUser(u => u ? { ...u, tier: t } : u)} onNeedAuth={() => setShowAuth(true)} /></section>}
           {tab === 'compare' && <section className="section animate-in"><StrategiesCompare /></section>}
           {tab === 'dryrun' && <section className="section animate-in"><DryRunDashboard /></section>}
           {tab === 'xsec' && <section className="section animate-in"><XSecDashboard /></section>}
@@ -807,7 +835,16 @@ export default function App() {
         </main>
       </div>
 
+      {showAuth && <AuthModal onClose={() => setShowAuth(false)} onAuth={setUser} />}
+
       <style>{`
+        .auth-box { display: flex; align-items: center; gap: 8px; }
+        .auth-email { font-size: 12px; color: var(--text-secondary); max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .auth-logout { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-tertiary); cursor: pointer; padding: 3px 7px; font-size: 13px; }
+        .auth-login-btn { background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 7px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
+        .plan-badge.tier-free { color: var(--text-secondary); }
+        .plan-badge.tier-premium { color: var(--accent); border-color: var(--accent); }
+        .plan-badge.tier-vip { color: var(--purple); border-color: var(--purple); }
         .layout { display: flex; min-height: 100vh; background: var(--bg); }
         .layout.sidebar-collapsed .sidebar { width: 56px; }
         .layout.sidebar-collapsed .content { max-width: 100%; }

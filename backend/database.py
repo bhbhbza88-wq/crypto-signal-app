@@ -114,6 +114,25 @@ def init_db():
                 pnl_pct REAL
             )
         """)
+        # ── Пользователи и сессии (монетизация) ──
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                tier TEXT NOT NULL DEFAULT 'free',
+                created_at TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at TEXT,
+                expires_at TEXT
+            )
+        """)
 
 
 # ── Open trades ──────────────────────────────────────────
@@ -282,3 +301,55 @@ def trend_load_log(limit=200):
             "SELECT * FROM trend_log ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ── Пользователи / сессии ─────────────────────────────────
+def create_user(email, password_hash, salt, tier='free'):
+    with _lock, get_conn() as conn:
+        cur = conn.execute("""
+            INSERT INTO users (email, password_hash, salt, tier, created_at)
+            VALUES (?,?,?,?,?)
+        """, (email.lower().strip(), password_hash, salt, tier, datetime.now().isoformat()))
+        return cur.lastrowid
+
+
+def get_user_by_email(email):
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM users WHERE email=?", (email.lower().strip(),)).fetchone()
+        return dict(row) if row else None
+
+
+def get_user_by_id(user_id):
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def set_user_tier(user_id, tier):
+    with _lock, get_conn() as conn:
+        conn.execute("UPDATE users SET tier=? WHERE id=?", (tier, user_id))
+
+
+def create_session(token, user_id, expires_at):
+    with _lock, get_conn() as conn:
+        conn.execute("""
+            INSERT INTO sessions (token, user_id, created_at, expires_at)
+            VALUES (?,?,?,?)
+        """, (token, user_id, datetime.now().isoformat(), expires_at))
+
+
+def get_user_by_token(token):
+    """Возвращает пользователя по валидной (не истёкшей) сессии, иначе None."""
+    if not token:
+        return None
+    with get_conn() as conn:
+        row = conn.execute("""
+            SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
+            WHERE s.token=? AND s.expires_at > ?
+        """, (token, datetime.now().isoformat())).fetchone()
+        return dict(row) if row else None
+
+
+def delete_session(token):
+    with _lock, get_conn() as conn:
+        conn.execute("DELETE FROM sessions WHERE token=?", (token,))
