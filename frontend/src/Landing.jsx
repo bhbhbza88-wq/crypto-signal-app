@@ -1,5 +1,23 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts'
+import { api } from './api'
+
+function useLiveStrategies() {
+  const [strategies, setStrategies] = useState(null)
+  const [curve, setCurve] = useState([])
+  useEffect(() => {
+    async function load() {
+      try {
+        const [summary, xh] = await Promise.all([api.getStrategiesSummary(), api.getXsecHistory()])
+        setStrategies(summary.strategies || [])
+        setCurve(xh.equity_curve || [])
+      } catch {}
+    }
+    load(); const id = setInterval(load, 60000); return () => clearInterval(id)
+  }, [])
+  return { strategies, curve }
+}
 
 function useLivePrices() {
   const [prices, setPrices] = useState(null)
@@ -23,16 +41,8 @@ function useLivePrices() {
   return prices
 }
 
-const STRATEGIES = [
-  { name: 'Breakout Strategy', exchange: 'Bybit', dir: 'LONG', roi: 116.6, pnl: 4352, winrate: 73, trades: 22, drawdown: -2.1, fees: 67.49 },
-  { name: 'Swing Trading Strategy', exchange: 'Binance', dir: 'LONG', roi: 41.8, pnl: 2587, winrate: 98.9, trades: 93, drawdown: -18.5, fees: 31.04 },
-  { name: 'Scalping Strategy', exchange: 'Bybit', dir: 'SHORT', roi: 133.1, pnl: 4088, winrate: 67.1, trades: 366, drawdown: -4.5, fees: 81.33 },
-  { name: 'Trend Following', exchange: 'Bybit', dir: 'LONG', roi: 92.4, pnl: 5247, winrate: 100, trades: 13, drawdown: -1.5, fees: 51.44 },
-  { name: 'Day Trading Strategy', exchange: 'Bybit', dir: 'SHORT', roi: 46.2, pnl: 2871, winrate: 81.1, trades: 37, drawdown: -7.2, fees: 23.83 },
-]
-
 const STATS = [
-  { value: '118,000+', label: 'Трейдеров зарегистрировано' },
+  { value: '3', label: 'Независимые бумажные стратегии' },
   { value: '32', label: 'Пар на Bybit' },
   { value: '2 мин', label: 'Интервал сканирования' },
   { value: '24/7', label: 'Работа сканера' },
@@ -64,7 +74,7 @@ const FAQ = [
   { q: 'Насколько точны сигналы NWICKI?', a: 'Сканер использует EMA, RSI, ADX и ATR для анализа. Каждый сигнал имеет Score от 0 до 20 — чем выше, тем сильнее сетап. Историческую статистику смотри в разделе История.' },
   { q: 'Может ли NWICKI торговать автоматически?', a: 'Сейчас NWICKI — это сигнальная платформа. Сканер находит точки входа и уведомляет тебя, ты принимаешь решение о входе. Автоматическое исполнение через API Bybit — в разработке.' },
   { q: 'Безопасно ли использовать NWICKI?', a: 'NWICKI не имеет доступа к твоим средствам. Платформа только анализирует рынок и показывает сигналы. Твои API ключи не требуются для просмотра сигналов.' },
-  { q: 'Сколько стоит NWICKI?', a: 'Сейчас платформа полностью бесплатна. В будущем появятся тарифные планы с расширенными функциями. Ранние пользователи получат специальные условия.' },
+  { q: 'Сколько стоит NWICKI?', a: 'Базовый доступ (обзор рынка, бэктест) бесплатный навсегда. Premium и VIP открывают все стратегии в реальном времени и Telegram-алерты — смотри раздел Тарифы.' },
 ]
 
 function MiniChart({ positive, width = 160, height = 60 }) {
@@ -89,6 +99,8 @@ function MiniChart({ positive, width = 160, height = 60 }) {
 export default function Landing() {
   const navigate = useNavigate()
   const prices = useLivePrices()
+  const { strategies, curve } = useLiveStrategies()
+  const xsecRoi = curve.length > 1 ? ((curve[curve.length - 1].equity / curve[0].equity - 1) * 100) : null
   const [menuOpen, setMenuOpen] = useState(false)
   const [openFaq, setOpenFaq] = useState(null)
   const [dark, setDark] = useState(() => {
@@ -185,38 +197,37 @@ export default function Landing() {
           </div>
 
           <div className="hero-social-proof animate-in">
-            <div className="hsp-avatars">
-              {['A','B','C','D','E'].map((l,i) => (
-                <div key={i} className="hsp-av" style={{background:`hsl(${i*55+200},65%,50%)`}}>{l}</div>
-              ))}
-            </div>
+            <span className="hb-dot" />
             <div className="hsp-text">
-              <span className="hsp-count">118,000+</span> трейдеров уже используют NWICKI
+              Все сделки публичны — <span className="hsp-link" onClick={() => navigate('/app')}>смотри живой трек-рекорд →</span>
             </div>
           </div>
 
-          {/* Strategy cards scroll like 3Commas */}
+          {/* Strategy cards scroll — реальные данные с бэкенда, бумажная торговля */}
           <div className="strategy-scroll animate-in">
-            {STRATEGIES.map((s, i) => (
-              <div key={i} className="strategy-card">
-                <div className="sc-header">
-                  <div className="sc-name">{s.name}</div>
-                  <div className="sc-tags">
-                    <span className={`sc-tag ${s.dir === 'LONG' ? 'long' : 'short'}`}>{s.dir}</span>
-                    <span className="sc-exchange">{s.exchange}</span>
+            {(strategies || []).map((s, i) => {
+              const pos = (s.realized_pnl_pct ?? 0) >= 0
+              return (
+                <div key={i} className="strategy-card">
+                  <div className="sc-header">
+                    <div className="sc-name">{s.name}</div>
+                    <div className="sc-tags">
+                      <span className="sc-exchange">{s.kind}</span>
+                    </div>
                   </div>
+                  <div className="sc-roi">PnL <span className={`sc-roi-val ${pos ? 'pos' : 'neg'}`}>{pos ? '+' : ''}{s.realized_pnl_pct}%</span></div>
+                  <div className="sc-chart"><MiniChart positive={pos} /></div>
+                  <div className="sc-stats">
+                    <div className="sc-stat"><span>Сделок</span><span>{s.closed_trades}</span></div>
+                    <div className="sc-stat"><span>Винрейт</span><span>{s.winrate != null ? `${s.winrate}%` : '—'}</span></div>
+                    <div className="sc-stat"><span>Открыто</span><span>{s.open_positions}</span></div>
+                    <div className="sc-stat"><span>Режим</span><span style={{fontSize:10}}>Paper</span></div>
+                  </div>
+                  <button className="sc-btn" onClick={() => navigate('/app')}>▶ Открыть</button>
                 </div>
-                <div className="sc-roi">ROI <span className="sc-roi-val pos">+{s.roi}%</span></div>
-                <div className="sc-chart"><MiniChart positive={s.roi > 0} /></div>
-                <div className="sc-stats">
-                  <div className="sc-stat"><span>PnL</span><span className="pos">${s.pnl.toLocaleString()}</span></div>
-                  <div className="sc-stat"><span>Винрейт</span><span>{s.winrate}%</span></div>
-                  <div className="sc-stat"><span>Сделок</span><span>{s.trades}</span></div>
-                  <div className="sc-stat"><span>Просадка</span><span className="neg">{s.drawdown}%</span></div>
-                </div>
-                <button className="sc-btn" onClick={() => navigate('/app')}>▶ Открыть</button>
-              </div>
-            ))}
+              )
+            })}
+            {!strategies && <div className="strategy-card" style={{display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text-tertiary)',fontSize:13}}>Загрузка...</div>}
           </div>
         </div>
       </section>
@@ -416,15 +427,26 @@ export default function Landing() {
           </div>
           <div className="benefits-visual">
             <div className="bv-card">
-              <div style={{fontSize:11,color:'var(--text-tertiary)',marginBottom:8}}>БЭКТЕСТ · 182 дня</div>
-              <div style={{fontFamily:'var(--font-mono)',fontSize:32,fontWeight:800,color:'var(--long)'}}>+116.6%</div>
-              <div style={{fontSize:12,color:'var(--text-secondary)',margin:'4px 0 12px'}}>ROI за период</div>
-              <MiniChart positive width={260} height={80} />
+              <div style={{fontSize:11,color:'var(--text-tertiary)',marginBottom:8}}>LONG-SHORT · {curve.length} РЕБАЛАНСОВ · РЕАЛЬНЫЕ ДАННЫЕ</div>
+              <div style={{fontFamily:'var(--font-mono)',fontSize:32,fontWeight:800,color: xsecRoi == null ? 'var(--text-tertiary)' : xsecRoi >= 0 ? 'var(--long)' : 'var(--short)'}}>
+                {xsecRoi != null ? `${xsecRoi >= 0 ? '+' : ''}${xsecRoi.toFixed(1)}%` : '—'}
+              </div>
+              <div style={{fontSize:12,color:'var(--text-secondary)',margin:'4px 0 12px'}}>Изменение бумажного депозита</div>
+              {curve.length > 1 ? (
+                <div style={{width:260,height:80}}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={curve}>
+                      <YAxis hide domain={['auto', 'auto']} />
+                      <Line type="monotone" dataKey="equity" stroke={xsecRoi >= 0 ? 'var(--long)' : 'var(--short)'} strokeWidth={2.5} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : <div style={{fontSize:12,color:'var(--text-tertiary)',height:80,display:'flex',alignItems:'center'}}>Накопление данных...</div>}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:12}}>
-                {[['PnL','$4,352'],['Винрейт','73%'],['Сделок','22'],['Просадка','-2.1%']].map(([l,v],i)=>(
+                {[['Стратегия','Long-Short'],['Тип','Market-neutral'],['Ребалансов', String(curve.length)],['Режим','Paper']].map(([l,v],i)=>(
                   <div key={i} style={{background:'var(--surface-hover)',padding:'8px 12px',borderRadius:8}}>
                     <div style={{fontSize:10,color:'var(--text-tertiary)'}}>{l}</div>
-                    <div style={{fontFamily:'var(--font-mono)',fontSize:14,fontWeight:700,color:l==='Просадка'?'var(--short)':'var(--text)'}}>{v}</div>
+                    <div style={{fontFamily:'var(--font-mono)',fontSize:14,fontWeight:700,color:'var(--text)'}}>{v}</div>
                   </div>
                 ))}
               </div>
@@ -467,7 +489,7 @@ export default function Landing() {
                   <div key={i} className="cv-avatar" style={{background:`hsl(${i*50+200},70%,50%)`}}>{l}</div>
                 ))}
               </div>
-              <div style={{fontSize:13,color:'var(--text-secondary)',marginTop:8}}>118,000+ активных трейдеров</div>
+              <div style={{fontSize:13,color:'var(--text-secondary)',marginTop:8}}>Сообщество растёт каждый день</div>
             </div>
           </div>
         </div>
@@ -615,12 +637,10 @@ export default function Landing() {
         .exchange-chip { padding: 8px 16px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 13px; font-weight: 600; border-radius: 9px; transition: all 0.2s; }
         .exchange-chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
-        .hero-social-proof { display: flex; align-items: center; gap: 12px; }
-        .hsp-avatars { display: flex; }
-        .hsp-av { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; font-weight: 700; border: 2px solid var(--bg); margin-left: -10px; }
-        .hsp-av:first-child { margin-left: 0; }
+        .hero-social-proof { display: flex; align-items: center; gap: 8px; }
         .hsp-text { font-size: 13px; color: var(--text-secondary); }
-        .hsp-count { font-weight: 700; color: var(--text); font-family: var(--font-mono); }
+        .hsp-link { font-weight: 700; color: var(--accent); cursor: pointer; }
+        .hsp-link:hover { text-decoration: underline; }
 
         /* STRATEGY SCROLL */
         .strategy-scroll { width: 100%; overflow-x: auto; display: flex; gap: 14px; padding: 20px 0 10px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
