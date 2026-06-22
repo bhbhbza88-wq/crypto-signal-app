@@ -88,6 +88,11 @@ export default function XSecDashboard() {
           <div className="xs-metric-sub">текущий цикл</div>
         </div>
         <div className="xs-metric">
+          <div className="xs-metric-label">Плечо (vol-managed)</div>
+          <div className="xs-metric-val">x{status?.leverage ?? 1}</div>
+          <div className="xs-metric-sub">target {status?.vol_target ?? 2}% · cap x{status?.vol_cap ?? 2}</div>
+        </div>
+        <div className="xs-metric">
           <div className="xs-metric-label">След. ребаланс</div>
           <div className="xs-metric-val">{status?.next_rebalance_in_days ?? '—'}д</div>
           <div className="xs-metric-sub">lookback {status?.lookback_days}д · N={status?.n_per_side}</div>
