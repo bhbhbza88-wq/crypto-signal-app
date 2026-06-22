@@ -184,6 +184,41 @@ def get_dryrun_breakdown(days: int = 30):
     }
 
 
+@app.get("/api/xsec/status")
+def get_xsec_status():
+    """Cross-sectional momentum — портфель, equity, live-PnL."""
+    import xsec_strategy
+    return xsec_strategy.get_status()
+
+
+@app.get("/api/xsec/history")
+def get_xsec_history(limit: int = 100):
+    """История ребалансов + кривая equity."""
+    log = db.xsec_load_log(limit=limit)
+    log_sorted = sorted(log, key=lambda r: r['id'])
+    return {
+        "rebalances": log,
+        "equity_curve": [{"date": r['date'], "equity": r['equity']} for r in log_sorted],
+    }
+
+
+@app.get("/api/xsec/ranking")
+def get_xsec_ranking():
+    """Текущий рейтинг всей вселенной по momentum (для прозрачности)."""
+    import xsec_strategy
+    r = xsec_strategy.compute_momentum_ranking()
+    if r is None:
+        return {"ranking": []}
+    return {"ranking": [{"symbol": k, "mom_pct": round(float(v), 2)} for k, v in r.items()]}
+
+
+@app.post("/api/xsec/rebalance")
+def force_xsec_rebalance():
+    """Ручной запуск ребаланса (для теста)."""
+    import xsec_strategy
+    return xsec_strategy.rebalance(force=True)
+
+
 @app.get("/api/market")
 def get_market():
     try:

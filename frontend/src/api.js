@@ -24,4 +24,7 @@ export const api = {
   getDryrunStatus: () => get('/dryrun/status'),
   getDryrunOpen: () => get('/dryrun/open'),
   getDryrunBreakdown: (days = 30) => get(`/dryrun/breakdown?days=${days}`),
+  getXsecStatus: () => get('/xsec/status'),
+  getXsecHistory: (limit = 100) => get(`/xsec/history?limit=${limit}`),
+  getXsecRanking: () => get('/xsec/ranking'),
 }

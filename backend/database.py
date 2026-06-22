@@ -75,6 +75,26 @@ def init_db():
                 created_at TEXT
             )
         """)
+        # ── Cross-sectional momentum (отдельная стратегия) ──
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS xsec_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                equity REAL,
+                last_rebalance_ts INTEGER,
+                positions_json TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS xsec_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER,
+                date TEXT,
+                equity REAL,
+                period_return_pct REAL,
+                longs_json TEXT,
+                shorts_json TEXT
+            )
+        """)
 
 
 # ── Open trades ──────────────────────────────────────────
@@ -170,5 +190,41 @@ def load_events(limit=50):
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ── Cross-sectional momentum state ────────────────────────
+def xsec_get_state():
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM xsec_state WHERE id=1").fetchone()
+        return dict(row) if row else None
+
+
+def xsec_save_state(equity, last_rebalance_ts, positions_json):
+    with _lock, get_conn() as conn:
+        conn.execute("""
+            INSERT INTO xsec_state (id, equity, last_rebalance_ts, positions_json)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                equity=excluded.equity,
+                last_rebalance_ts=excluded.last_rebalance_ts,
+                positions_json=excluded.positions_json
+        """, (equity, last_rebalance_ts, positions_json))
+
+
+def xsec_add_log(ts, equity, period_return_pct, longs_json, shorts_json):
+    dt = datetime.fromtimestamp(ts / 1000) if ts > 1e12 else datetime.fromtimestamp(ts)
+    with _lock, get_conn() as conn:
+        conn.execute("""
+            INSERT INTO xsec_log (ts, date, equity, period_return_pct, longs_json, shorts_json)
+            VALUES (?,?,?,?,?,?)
+        """, (ts, dt.strftime('%Y-%m-%d %H:%M'), equity, period_return_pct, longs_json, shorts_json))
+
+
+def xsec_load_log(limit=200):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM xsec_log ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
