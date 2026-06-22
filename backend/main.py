@@ -138,9 +138,16 @@ def get_dryrun_open():
         signal = t['signal']
         pnl_pct = ((price - t['entry']) / t['entry'] * 100) if signal == 'LONG' \
             else ((t['entry'] - price) / t['entry'] * 100)
+        regime = t.get('regime')
+        is_time_exit = regime == 'MOMENTUM'  # TP недостижимы по дизайну — выход по таймауту
         out.append({
             "symbol": symbol, "signal": signal, "entry": t['entry'], "price": price,
-            "stop": t['stop'], "tp1": t['tp1'], "tp2": t['tp2'], "tp3": t['tp3'],
+            "stop": t['stop'],
+            "tp1": None if is_time_exit else t['tp1'],
+            "tp2": None if is_time_exit else t['tp2'],
+            "tp3": None if is_time_exit else t['tp3'],
+            "time_exit": is_time_exit,
+            "regime": regime,
             "tp1_hit": bool(t.get('tp1_hit')), "be_hit": bool(t.get('be_hit')),
             "pnl_pct": round(pnl_pct, 2),
             "opened_at": t.get('opened_at'),

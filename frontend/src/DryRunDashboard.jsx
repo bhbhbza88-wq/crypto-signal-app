@@ -83,12 +83,20 @@ function OpenTrades({ trades }) {
               <span>Вход {t.entry}</span>
               <span>Сейчас {t.price}</span>
               <span style={{ color: 'var(--short)' }}>SL {t.stop}</span>
-              <span style={{ color: 'var(--long)' }}>TP1 {t.tp1}{t.tp1_hit ? ' ✓' : ''}</span>
+              {t.time_exit ? (
+                <span style={{ color: 'var(--text-tertiary)' }}>⏱ выход по времени (~36ч)</span>
+              ) : (
+                <span style={{ color: 'var(--long)' }}>TP1 {t.tp1}{t.tp1_hit ? ' ✓' : ''}</span>
+              )}
             </div>
             <div className="dr-open-meta">
               <span>{t.position_size?.toFixed(0)}$</span>
               {t.score != null && <span>score {t.score}</span>}
               {t.opened_at && <span>{new Date(t.opened_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>}
+              {t.opened_at && t.time_exit && (() => {
+                const hoursLeft = 36 - (Date.now() - new Date(t.opened_at).getTime()) / 3600000
+                return <span>{hoursLeft > 0 ? `до выхода ~${hoursLeft.toFixed(0)}ч` : 'пора закрыться'}</span>
+              })()}
             </div>
           </div>
         )
