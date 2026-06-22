@@ -26,11 +26,15 @@ function MarketPhaseBanner({ phase }) {
       <div className="mp-left">
         <span className="mp-dot" />
         <div>
-          <div className="mp-title">Фаза рынка (BTC): {PHASE_LABEL[phase.phase] || phase.phase}</div>
-          <div className="mp-sub">EMA50 {phase.strength_pct > 0 ? 'выше' : 'ниже'} EMA200 на {Math.abs(phase.strength_pct)}% · цена {phase.btc_close}</div>
+          <div className="mp-title">Фаза рынка: {PHASE_LABEL[phase.phase] || phase.phase}
+            <span className="mp-score">risk-on {phase.risk_on_score}/4</span>
+          </div>
+          <div className="mp-sub">
+            Монет в аптренде: {phase.breadth_pct}% · моментум 60д: {phase.momentum_60d_pct > 0 ? '+' : ''}{phase.momentum_60d_pct}% · BTC {phase.btc_close}
+          </div>
         </div>
       </div>
-      <div className="mp-note">ℹ️ Только информационно — не переключает стратегии</div>
+      <div className="mp-note">ℹ️ Консенсус 4 сигналов + подтверждение 5д · информационно, не управляет деньгами</div>
       <style>{`
         .mp-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 18px; border-radius: var(--radius-md); margin-bottom: 18px; border: 1px solid var(--border); background: var(--surface); }
         .mp-banner.up { border-color: var(--long); background: var(--long-soft); }
@@ -41,7 +45,8 @@ function MarketPhaseBanner({ phase }) {
         .mp-banner.up .mp-dot { background: var(--long); }
         .mp-banner.down .mp-dot { background: var(--short); }
         .mp-banner.side .mp-dot { background: var(--amber); }
-        .mp-title { font-weight: 800; font-size: 14px; color: var(--text); }
+        .mp-title { font-weight: 800; font-size: 14px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+        .mp-score { font-size: 11px; font-weight: 700; font-family: var(--font-mono); padding: 1px 7px; border-radius: 6px; background: var(--surface-2); color: var(--text-secondary); }
         .mp-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; font-family: var(--font-mono); }
         .mp-note { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
       `}</style>
