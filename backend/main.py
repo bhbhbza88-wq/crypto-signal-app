@@ -516,13 +516,22 @@ def _run_one(symbol: str, period_days: int, deposit: float,
 
 @app.post("/api/backtest")
 def run_backtest(req: BacktestRequest):
-    """Бэктест одной пары с кривой доходности. strategy: trend | mean_reversion"""
-    nfi_strategy.STRATEGY_MODE = req.strategy
-    result = _run_one(
-        symbol=req.symbol, period_days=req.period_days,
-        deposit=req.deposit, commission=req.commission,
-        slippage=req.slippage, single_mode=True,
-    )
+    """
+    Бэктест одной пары с кривой доходности. strategy: trend | mean_reversion | breakout | momentum
+    ВАЖНО: STRATEGY_MODE — общая переменная с живым сканером в этом же процессе.
+    Сохраняем и восстанавливаем исходное значение, чтобы вызов бэктеста
+    не подменял боевой режим живой торговли.
+    """
+    live_mode = nfi_strategy.STRATEGY_MODE
+    try:
+        nfi_strategy.STRATEGY_MODE = req.strategy
+        result = _run_one(
+            symbol=req.symbol, period_days=req.period_days,
+            deposit=req.deposit, commission=req.commission,
+            slippage=req.slippage, single_mode=True,
+        )
+    finally:
+        nfi_strategy.STRATEGY_MODE = live_mode
     if not result:
         return {"error": "Нет сделок или данных"}
 
@@ -556,20 +565,28 @@ def run_backtest(req: BacktestRequest):
 
 @app.post("/api/backtest/multi")
 def run_multi_backtest(req: MultiBacktestRequest):
-    """Мульти-символьный бэктест. strategy: trend | mean_reversion"""
-    nfi_strategy.STRATEGY_MODE = req.strategy
+    """
+    Мульти-символьный бэктест. strategy: trend | mean_reversion | breakout | momentum
+    ВАЖНО: см. комментарий в run_backtest — сохраняем/восстанавливаем live-режим,
+    чтобы бэктест не подменял боевую стратегию сканера.
+    """
+    live_mode = nfi_strategy.STRATEGY_MODE
     symbols = req.symbols if req.symbols else CANDIDATES
     results, errors = [], []
 
-    for symbol in symbols:
-        try:
-            res = _run_one(symbol=symbol, period_days=req.period_days,
-                           deposit=req.deposit, commission=req.commission,
-                           slippage=req.slippage, single_mode=False)
-            if res: results.append(res)
-            else:   errors.append({"symbol": symbol, "reason": "нет данных или сделок"})
-        except Exception as e:
-            errors.append({"symbol": symbol, "reason": str(e)})
+    try:
+        nfi_strategy.STRATEGY_MODE = req.strategy
+        for symbol in symbols:
+            try:
+                res = _run_one(symbol=symbol, period_days=req.period_days,
+                               deposit=req.deposit, commission=req.commission,
+                               slippage=req.slippage, single_mode=False)
+                if res: results.append(res)
+                else:   errors.append({"symbol": symbol, "reason": "нет данных или сделок"})
+            except Exception as e:
+                errors.append({"symbol": symbol, "reason": str(e)})
+    finally:
+        nfi_strategy.STRATEGY_MODE = live_mode
 
     if not results:
         return {"error": "Ни одна пара не дала сделок", "errors": errors}
