@@ -27,4 +27,6 @@ export const api = {
   getXsecStatus: () => get('/xsec/status'),
   getXsecHistory: (limit = 100) => get(`/xsec/history?limit=${limit}`),
   getXsecRanking: () => get('/xsec/ranking'),
+  getTrendStatus: () => get('/trend/status'),
+  getTrendHistory: (limit = 100) => get(`/trend/history?limit=${limit}`),
 }

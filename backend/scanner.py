@@ -121,6 +121,19 @@ def xsec_tick():
         print(f"❌ xsec: {e}\n{traceback.format_exc()}")
 
 
+def trend_tick():
+    """Trend-Following — независимая стратегия, проверка раз в день (тренд не меняется внутри дня)."""
+    try:
+        import trend_strategy, database as _db
+        st = _db.trend_get_state()
+        last = st.get('last_check_ts') if st else None
+        if not last or (time.time() * 1000 - last) >= 20 * 3600 * 1000:
+            trend_strategy.tick()
+    except Exception as e:
+        import traceback
+        print(f"❌ trend: {e}\n{traceback.format_exc()}")
+
+
 def safe_scan():
     try:
         scan_once()
@@ -128,6 +141,7 @@ def safe_scan():
         import traceback
         print(f"❌ scan: {e}\n{traceback.format_exc()}")
     xsec_tick()
+    trend_tick()
 
 
 def run_scanner_loop():

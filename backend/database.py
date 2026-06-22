@@ -95,6 +95,25 @@ def init_db():
                 shorts_json TEXT
             )
         """)
+        # ── Trend-Following (отдельная стратегия) ──
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS trend_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                last_check_ts INTEGER,
+                positions_json TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS trend_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER,
+                date TEXT,
+                symbol TEXT,
+                entry REAL,
+                exit REAL,
+                pnl_pct REAL
+            )
+        """)
 
 
 # ── Open trades ──────────────────────────────────────────
@@ -226,5 +245,40 @@ def xsec_load_log(limit=200):
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM xsec_log ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ── Trend-Following state ─────────────────────────────────
+def trend_get_state():
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM trend_state WHERE id=1").fetchone()
+        return dict(row) if row else None
+
+
+def trend_save_state(last_check_ts, positions_json):
+    with _lock, get_conn() as conn:
+        conn.execute("""
+            INSERT INTO trend_state (id, last_check_ts, positions_json)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                last_check_ts=excluded.last_check_ts,
+                positions_json=excluded.positions_json
+        """, (last_check_ts, positions_json))
+
+
+def trend_add_log(ts, symbol, entry, exit_price, pnl_pct):
+    dt = datetime.fromtimestamp(ts / 1000) if ts > 1e12 else datetime.fromtimestamp(ts)
+    with _lock, get_conn() as conn:
+        conn.execute("""
+            INSERT INTO trend_log (ts, date, symbol, entry, exit, pnl_pct)
+            VALUES (?,?,?,?,?,?)
+        """, (ts, dt.strftime('%Y-%m-%d %H:%M'), symbol, entry, exit_price, pnl_pct))
+
+
+def trend_load_log(limit=200):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM trend_log ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
