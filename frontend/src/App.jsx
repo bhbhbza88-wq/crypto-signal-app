@@ -10,6 +10,7 @@ import Backtest from './Backtest'
 import SmartTrade from './SmartTrade'
 import DryRunDashboard from './DryRunDashboard'
 import XSecDashboard from './XSecDashboard'
+import TrendDashboard from './TrendDashboard'
 
 const POLL_INTERVAL = 15000
 const MARKET_POLL_INTERVAL = 60000
@@ -20,6 +21,7 @@ const NAV_SECTIONS = [
     { key: 'overview',     label: 'Dashboard',     icon: '◈' },
     { key: 'dryrun',       label: 'Дальран',        icon: '🛰', badge: 'LIVE' },
     { key: 'xsec',         label: 'Long-Short',     icon: '⚖', badge: 'NEW' },
+    { key: 'trend_ff',     label: 'Trend-Following', icon: '📈', badge: 'NEW' },
     { key: 'portfolio',    label: 'Мой портфель',  icon: '◉' },
     { key: 'strategies',   label: 'Стратегии',     icon: '★', badge: 'HOT' },
     { key: 'dca_bot',      label: 'DCA Bot',        icon: '⟳' },
@@ -732,6 +734,7 @@ export default function App() {
           {tab === 'backtest' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Бэктест <span className="beta-tag">BETA</span></h1></div><Backtest /></section>}
           {tab === 'dryrun' && <section className="section animate-in"><DryRunDashboard /></section>}
           {tab === 'xsec' && <section className="section animate-in"><XSecDashboard /></section>}
+          {tab === 'trend_ff' && <section className="section animate-in"><TrendDashboard /></section>}
           {tab === 'smarttrade_calc' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Smart Trade <span className="hot-tag">NEW</span></h1></div><SmartTrade /></section>}
           {tab === 'scanner' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Сканер <span className="hot-tag">AI</span></h1></div><MarketView market={market} /></section>}
           {tab === 'ai' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat signals={signals} stats={stats} market={market} /></section>}

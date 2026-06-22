@@ -219,6 +219,27 @@ def force_xsec_rebalance():
     return xsec_strategy.rebalance(force=True)
 
 
+@app.get("/api/trend/status")
+def get_trend_status():
+    """Trend-Following — позиции, live-PnL, текущие сигналы по всей вселенной."""
+    import trend_strategy
+    return trend_strategy.get_status()
+
+
+@app.get("/api/trend/history")
+def get_trend_history(limit: int = 100):
+    """История закрытых trend-following сделок."""
+    return {"trades": db.trend_load_log(limit=limit)}
+
+
+@app.post("/api/trend/check")
+def force_trend_check():
+    """Ручная проверка сигналов (для теста)."""
+    import trend_strategy
+    trend_strategy.tick()
+    return trend_strategy.get_status()
+
+
 @app.get("/api/market")
 def get_market():
     try:
