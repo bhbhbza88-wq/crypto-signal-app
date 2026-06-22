@@ -39,6 +39,13 @@ XSEC_N             = 3    # монет в каждую сторону (топ-3 
 XSEC_REBAL_DAYS    = 7    # ребаланс раз в неделю
 XSEC_DEPOSIT       = 1000 # стартовый бумажный депозит
 
+# Volatility-managed momentum (Barroso-Santa-Clara): экспозиция ~ 1/недавняя_vol.
+# Валидировано: Sharpe 0.38->0.43, медиана по фазам 0.18->0.30, просадка -36%->-30%.
+# Мягкий target=2% выбран как самый консервативный (наименьшая просадка).
+XSEC_VOL_TARGET = 2.0   # целевая волатильность периода, %
+XSEC_VOL_CAP    = 2.0   # макс. плечо на нейтральный портфель
+XSEC_VOL_WINDOW = 8     # окно оценки волатильности (периодов)
+
 _daily_cache = {'ts': 0.0, 'data': None}
 _CACHE_TTL = 1800  # 30 мин
 
@@ -138,6 +145,31 @@ def _position_pnl_pct(side, entry, price):
     return chg if side == 'long' else -chg
 
 
+def _parse_positions_field(raw):
+    """
+    Разбирает positions_json. Поддерживает оба формата:
+      - старый: список позиций (до vol-management)
+      - новый: {positions: [...], vol_window: [...], scale: X}
+    Возвращает (positions, vol_window, scale).
+    """
+    if not raw:
+        return [], [], 1.0
+    data = json.loads(raw)
+    if isinstance(data, list):
+        return data, [], 1.0
+    return data.get('positions', []), data.get('vol_window', []), data.get('scale', 1.0)
+
+
+def _compute_scale(vol_window):
+    """Экспозиция = min(CAP, TARGET / недавняя_волатильность). Без истории — 1.0."""
+    if len(vol_window) < XSEC_VOL_WINDOW:
+        return 1.0
+    v = float(np.std(vol_window[-XSEC_VOL_WINDOW:]))
+    if v <= 1e-6:
+        return XSEC_VOL_CAP
+    return float(min(XSEC_VOL_CAP, XSEC_VOL_TARGET / v))
+
+
 def rebalance(force=False):
     """
     Выполняет бумажный ребаланс:
@@ -155,10 +187,12 @@ def rebalance(force=False):
 
     st = db.xsec_get_state()
     equity = st['equity'] if st else float(XSEC_DEPOSIT)
-    old_positions = json.loads(st['positions_json']) if st and st.get('positions_json') else []
+    old_positions, vol_window, old_scale = _parse_positions_field(
+        st['positions_json'] if st else None)
 
-    # 1) период-доходность по старым позициям
-    period_ret = 0.0
+    # 1) сырая (без плеча) доходность периода по старым позициям + издержки оборота
+    raw_gross = 0.0
+    period_ret = 0.0  # фактическая (с учётом плеча), идёт в equity
     if old_positions:
         prices = get_current_prices([p['symbol'] for p in old_positions])
         long_rets, short_rets = [], []
@@ -167,14 +201,23 @@ def rebalance(force=False):
             (long_rets if p['side'] == 'long' else short_rets).append(pnl)
         rl = np.mean(long_rets) if long_rets else 0.0
         rs_dir = np.mean(short_rets) if short_rets else 0.0
-        # short_rets уже со знаком позиции; нога = среднее, веса 50/50
-        period_ret = 0.5 * rl + 0.5 * rs_dir
-        # издержки на разворот: грубо весь портфель проворачивается
-        turnover_cost = (COMM + SLIP) * 100  # % на полный оборот обеих ног
-        period_ret -= turnover_cost
+        raw_gross = 0.5 * rl + 0.5 * rs_dir   # сырая доходность нейтрального портфеля
+        # издержки оборота (как в валидированном бэктесте)
+        old_longs  = {p['symbol'] for p in old_positions if p['side'] == 'long'}
+        old_shorts = {p['symbol'] for p in old_positions if p['side'] == 'short'}
+        turn = (len(set(target['longs']).symmetric_difference(old_longs)) +
+                len(set(target['shorts']).symmetric_difference(old_shorts)))
+        turnover_cost = turn * (1.0 / XSEC_N) * (COMM + SLIP) * 100
+        # плечо периода было задано на ПРОШЛОМ ребалансе (old_scale)
+        period_ret = old_scale * (raw_gross - turnover_cost)
         equity *= (1 + period_ret / 100)
+        # обновляем окно волатильности СЫРЫМИ доходностями (vol-management)
+        vol_window = (vol_window + [raw_gross])[-(XSEC_VOL_WINDOW * 2):]
 
-    # 2) новый портфель по текущим ценам
+    # 2) плечо на новый период — по недавней волатильности
+    new_scale = _compute_scale(vol_window)
+
+    # 3) новый портфель по текущим ценам
     new_symbols = target['longs'] + target['shorts']
     entry_prices = get_current_prices(new_symbols)
     new_positions = []
@@ -186,14 +229,15 @@ def rebalance(force=False):
                               'mom': target['ranking'].get(s)})
 
     ts = _now_ms()
-    db.xsec_save_state(round(equity, 2), ts, json.dumps(new_positions))
+    state_blob = json.dumps({'positions': new_positions, 'vol_window': vol_window, 'scale': new_scale})
+    db.xsec_save_state(round(equity, 2), ts, state_blob)
     db.xsec_add_log(ts, round(equity, 2), round(period_ret, 3),
                     json.dumps(target['longs']), json.dumps(target['shorts']))
-    print(f"🔄 XSEC ребаланс | equity={equity:.1f} | период={period_ret:+.2f}% | "
+    print(f"🔄 XSEC ребаланс | equity={equity:.1f} | период={period_ret:+.2f}% | плечо x{new_scale:.2f} | "
           f"L:{[s.replace('/USDT','') for s in target['longs']]} "
           f"S:{[s.replace('/USDT','') for s in target['shorts']]}")
     return {'rebalanced': True, 'equity': round(equity, 2), 'period_return_pct': round(period_ret, 3),
-            'longs': target['longs'], 'shorts': target['shorts']}
+            'scale': round(new_scale, 2), 'longs': target['longs'], 'shorts': target['shorts']}
 
 
 def get_status():
@@ -205,7 +249,7 @@ def get_status():
             'positions': [], 'last_rebalance_ts': None, 'next_rebalance_in_days': 0,
             'lookback_days': XSEC_LOOKBACK_DAYS, 'n_per_side': XSEC_N, 'rebal_days': XSEC_REBAL_DAYS,
         }
-    positions = json.loads(st['positions_json']) if st.get('positions_json') else []
+    positions, _vw, scale = _parse_positions_field(st.get('positions_json'))
     prices = get_current_prices([p['symbol'] for p in positions]) if positions else {}
     pos_out, long_pnls, short_pnls = [], [], []
     for p in positions:
@@ -213,16 +257,18 @@ def get_status():
         pnl = _position_pnl_pct(p['side'], p['entry'], price)
         (long_pnls if p['side'] == 'long' else short_pnls).append(pnl)
         pos_out.append({**p, 'price': price, 'pnl_pct': round(pnl, 2)})
-    unreal = 0.5 * (np.mean(long_pnls) if long_pnls else 0) + 0.5 * (np.mean(short_pnls) if short_pnls else 0)
+    raw_unreal = 0.5 * (np.mean(long_pnls) if long_pnls else 0) + 0.5 * (np.mean(short_pnls) if short_pnls else 0)
     last_ts = st.get('last_rebalance_ts')
     next_in = max(0, XSEC_REBAL_DAYS - (_now_ms() - last_ts) / 86400000) if last_ts else 0
     return {
         'initialized': True,
         'equity': st['equity'],
         'deposit': XSEC_DEPOSIT,
-        'unrealized_pct': round(unreal, 2),
+        'unrealized_pct': round(raw_unreal * scale, 2),  # с учётом текущего плеча
+        'leverage': round(scale, 2),
         'positions': pos_out,
         'last_rebalance_ts': last_ts,
         'next_rebalance_in_days': round(next_in, 1),
         'lookback_days': XSEC_LOOKBACK_DAYS, 'n_per_side': XSEC_N, 'rebal_days': XSEC_REBAL_DAYS,
+        'vol_target': XSEC_VOL_TARGET, 'vol_cap': XSEC_VOL_CAP,
     }
