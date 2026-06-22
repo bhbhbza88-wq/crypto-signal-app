@@ -240,6 +240,19 @@ def force_trend_check():
     return trend_strategy.get_status()
 
 
+@app.get("/api/market/phase")
+def get_market_phase():
+    """
+    Индикатор фазы рынка (Up/Down/Боковик) по BTC — информационный.
+    Не управляет ни одной стратегией (авто-переключение протестировано и отклонено).
+    """
+    import trend_strategy
+    phase = trend_strategy.get_market_phase()
+    if not phase:
+        return {"error": "Нет данных"}
+    return phase
+
+
 @app.get("/api/market")
 def get_market():
     try:

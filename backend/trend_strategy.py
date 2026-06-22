@@ -139,6 +139,39 @@ def tick():
         db.trend_save_state(_now_ms(), json.dumps(positions))
 
 
+def get_market_phase():
+    """
+    Информационный индикатор фазы рынка (по BTC, дневные свечи).
+    ТОЛЬКО для отображения — не управляет капиталом ни в одной стратегии.
+    Авто-переключение стратегий по фазе было честно протестировано и
+    отклонено (long-short в любой фазе ухудшает результат относительно
+    простого правила "в тренде — держим, нет тренда — кэш").
+    """
+    SIDEWAYS_THR = 0.05  # та же граница, что валидировали — для контекста, не для решений
+    df = fetch_daily_history('BTC/USDT')
+    if df is None or len(df) < TREND_EMA_SLOW + 2:
+        return None
+    close = df['close']
+    ef = close.ewm(span=TREND_EMA_FAST, adjust=False).mean()
+    es = close.ewm(span=TREND_EMA_SLOW, adjust=False).mean()
+    i = -2 if len(df) >= TREND_EMA_SLOW + 3 else -1
+    strength = float((ef.iloc[i] - es.iloc[i]) / es.iloc[i])
+    if abs(strength) <= SIDEWAYS_THR:
+        phase = 'SIDEWAYS'
+    elif strength > 0:
+        phase = 'UPTREND'
+    else:
+        phase = 'DOWNTREND'
+    return {
+        'phase': phase,
+        'strength_pct': round(strength * 100, 2),
+        'btc_close': float(close.iloc[i]),
+        'ema_fast': round(float(ef.iloc[i]), 2),
+        'ema_slow': round(float(es.iloc[i]), 2),
+        'note': 'Только информационно — не переключает стратегии (проверено и отклонено)',
+    }
+
+
 def get_status():
     """Снимок для дашборда: открытые позиции с live-PnL + сигналы по всей вселенной."""
     positions = _load_positions()
