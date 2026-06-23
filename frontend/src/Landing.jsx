@@ -19,6 +19,19 @@ function useLiveStrategies() {
   return { strategies, curve }
 }
 
+const CHART_PERIODS = [
+  { key: 'week', label: '7д', days: 7 },
+  { key: 'month', label: '30д', days: 30 },
+  { key: 'all', label: 'Всё время', days: null },
+]
+
+function filterCurveByPeriod(curve, days) {
+  if (!days) return curve
+  const cutoff = new Date(Date.now() - days * 86400000)
+  const filtered = curve.filter(c => new Date(c.date) >= cutoff)
+  return filtered.length > 1 ? filtered : curve.slice(-2)
+}
+
 function useLivePrices() {
   const [prices, setPrices] = useState(null)
   useEffect(() => {
@@ -46,6 +59,14 @@ const STATS = [
   { value: '32', label: 'Пар на Bybit' },
   { value: '2 мин', label: 'Интервал сканирования' },
   { value: '24/7', label: 'Работа сканера' },
+]
+
+const EXCHANGES = [
+  { name: 'Bybit', active: true },
+  { name: 'Binance', active: false },
+  { name: 'OKX', active: false },
+  { name: 'KuCoin', active: false },
+  { name: 'Bitget', active: false },
 ]
 
 const TOOLS = [
@@ -100,7 +121,10 @@ export default function Landing() {
   const navigate = useNavigate()
   const prices = useLivePrices()
   const { strategies, curve } = useLiveStrategies()
-  const xsecRoi = curve.length > 1 ? ((curve[curve.length - 1].equity / curve[0].equity - 1) * 100) : null
+  const [chartPeriod, setChartPeriod] = useState('all')
+  const periodDays = CHART_PERIODS.find(p => p.key === chartPeriod)?.days
+  const visibleCurve = filterCurveByPeriod(curve, periodDays)
+  const xsecRoi = visibleCurve.length > 1 ? ((visibleCurve[visibleCurve.length - 1].equity / visibleCurve[0].equity - 1) * 100) : null
   const [menuOpen, setMenuOpen] = useState(false)
   const [openFaq, setOpenFaq] = useState(null)
   const [dark, setDark] = useState(() => {
@@ -241,6 +265,21 @@ export default function Landing() {
               <div key={i} className="stat-card animate-in">
                 <div className="stat-val gradient-text">{s.value}</div>
                 <div className="stat-label">{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── EXCHANGES ── */}
+      <section className="exchanges-section">
+        <div className="section-inner">
+          <p className="stats-eyebrow">Биржи</p>
+          <div className="exchanges-grid">
+            {EXCHANGES.map((e, i) => (
+              <div key={i} className={`exchange-badge ${e.active ? 'active' : 'soon'}`}>
+                <span>{e.name}</span>
+                {!e.active && <span className="exchange-soon-tag">скоро</span>}
               </div>
             ))}
           </div>
@@ -427,15 +466,22 @@ export default function Landing() {
           </div>
           <div className="benefits-visual">
             <div className="bv-card">
-              <div style={{fontSize:11,color:'var(--text-tertiary)',marginBottom:8}}>LONG-SHORT · {curve.length} РЕБАЛАНСОВ · РЕАЛЬНЫЕ ДАННЫЕ</div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                <div style={{fontSize:11,color:'var(--text-tertiary)'}}>LONG-SHORT · РЕАЛЬНЫЕ ДАННЫЕ</div>
+                <div className="bv-period-switch">
+                  {CHART_PERIODS.map(p => (
+                    <button key={p.key} className={`bv-period-btn ${chartPeriod === p.key ? 'active' : ''}`} onClick={() => setChartPeriod(p.key)}>{p.label}</button>
+                  ))}
+                </div>
+              </div>
               <div style={{fontFamily:'var(--font-mono)',fontSize:32,fontWeight:800,color: xsecRoi == null ? 'var(--text-tertiary)' : xsecRoi >= 0 ? 'var(--long)' : 'var(--short)'}}>
                 {xsecRoi != null ? `${xsecRoi >= 0 ? '+' : ''}${xsecRoi.toFixed(1)}%` : '—'}
               </div>
               <div style={{fontSize:12,color:'var(--text-secondary)',margin:'4px 0 12px'}}>Изменение бумажного депозита</div>
-              {curve.length > 1 ? (
+              {visibleCurve.length > 1 ? (
                 <div style={{width:260,height:80}}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={curve}>
+                    <LineChart data={visibleCurve}>
                       <YAxis hide domain={['auto', 'auto']} />
                       <Line type="monotone" dataKey="equity" stroke={xsecRoi >= 0 ? 'var(--long)' : 'var(--short)'} strokeWidth={2.5} dot={false} />
                     </LineChart>
@@ -443,7 +489,7 @@ export default function Landing() {
                 </div>
               ) : <div style={{fontSize:12,color:'var(--text-tertiary)',height:80,display:'flex',alignItems:'center'}}>Накопление данных...</div>}
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:12}}>
-                {[['Стратегия','Long-Short'],['Тип','Market-neutral'],['Ребалансов', String(curve.length)],['Режим','Paper']].map(([l,v],i)=>(
+                {[['Стратегия','Long-Short'],['Тип','Market-neutral'],['Ребалансов', String(visibleCurve.length)],['Режим','Paper']].map(([l,v],i)=>(
                   <div key={i} style={{background:'var(--surface-hover)',padding:'8px 12px',borderRadius:8}}>
                     <div style={{fontSize:10,color:'var(--text-tertiary)'}}>{l}</div>
                     <div style={{fontFamily:'var(--font-mono)',fontSize:14,fontWeight:700,color:'var(--text)'}}>{v}</div>
@@ -674,6 +720,14 @@ export default function Landing() {
         .stat-val { font-size: 44px; font-weight: 900; font-family: var(--font-mono); line-height: 1; margin-bottom: 10px; position: relative; }
         .stat-label { font-size: 14px; color: var(--text-secondary); position: relative; }
 
+        /* EXCHANGES */
+        .exchanges-section { padding: 36px 0; border-bottom: 1px solid var(--border); }
+        .exchanges-grid { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+        .exchange-badge { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 10px; border: 1px solid var(--border); font-size: 14px; font-weight: 700; }
+        .exchange-badge.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-card); }
+        .exchange-badge.soon { background: transparent; color: var(--text-tertiary); opacity: 0.55; }
+        .exchange-soon-tag { font-size: 9px; font-weight: 700; text-transform: uppercase; background: var(--surface-hover); color: var(--text-tertiary); padding: 2px 6px; border-radius: 4px; }
+
         /* REASONS */
         .reasons-section { padding: 80px 0; }
         .reasons-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }
@@ -762,6 +816,9 @@ export default function Landing() {
         .benefit-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
         .benefit-desc { font-size: 13px; color: var(--text-secondary); }
         .bv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; box-shadow: var(--shadow-lg); }
+        .bv-period-switch { display: flex; gap: 2px; background: var(--surface-hover); border-radius: 7px; padding: 2px; }
+        .bv-period-btn { border: none; background: transparent; color: var(--text-tertiary); font-size: 10px; font-weight: 600; padding: 4px 8px; border-radius: 5px; }
+        .bv-period-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 
         /* SECURITY */
         .security-section { padding: 80px 0; background: var(--surface-hover); }
