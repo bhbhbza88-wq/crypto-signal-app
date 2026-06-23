@@ -85,7 +85,7 @@ export default function Pricing({ user, onUpgraded, onNeedAuth }) {
 
       <div className="pr-grid">
         {TIERS.map(t => {
-          const current = user?.tier === t.key
+          const current = (user?.base_tier ?? user?.tier) === t.key
           const { amount, suffix } = priceFor(t)
           return (
             <div key={t.key} className={`pr-card ${t.popular ? 'popular' : ''}`} style={{ borderColor: current ? t.accent : undefined }}>

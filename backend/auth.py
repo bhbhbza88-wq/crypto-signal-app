@@ -12,10 +12,35 @@ import database as db
 
 PBKDF2_ITERATIONS = 200_000
 SESSION_DAYS = 30
+TRIAL_DAYS = 3          # бесплатный Premium-триал при регистрации
+TRIAL_TIER = 'premium'  # что даёт триал
 
 # Тарифы по возрастанию прав
 TIERS = ['free', 'premium', 'vip']
 TIER_RANK = {t: i for i, t in enumerate(TIERS)}
+
+
+def _trial_active(user: dict) -> bool:
+    ends = user.get('trial_ends_at') if user else None
+    if not ends:
+        return False
+    try:
+        return datetime.now() < datetime.fromisoformat(ends)
+    except (ValueError, TypeError):
+        return False
+
+
+def effective_tier(user: dict) -> str:
+    """Фактический тариф с учётом активного триала.
+    Платный тариф (premium/vip) всегда побеждает; иначе — триал даёт TRIAL_TIER."""
+    if not user:
+        return 'free'
+    base = user.get('tier', 'free')
+    if TIER_RANK.get(base, 0) >= TIER_RANK.get(TRIAL_TIER, 0):
+        return base
+    if _trial_active(user):
+        return TRIAL_TIER
+    return base
 
 
 def hash_password(password: str, salt: str = None):
@@ -45,7 +70,8 @@ def register(email: str, password: str):
     if db.get_user_by_email(email):
         return None, 'Email уже зарегистрирован'
     h, salt = hash_password(password)
-    uid = db.create_user(email, h, salt, tier='free')
+    trial_ends = (datetime.now() + timedelta(days=TRIAL_DAYS)).isoformat()
+    uid = db.create_user(email, h, salt, tier='free', trial_ends_at=trial_ends)
     user = db.get_user_by_id(uid)
     token = _issue_session(uid)
     return user, token
@@ -79,7 +105,25 @@ def tier_allows(user_tier: str, required_tier: str) -> bool:
 
 
 def public_user(user: dict) -> dict:
-    """Безопасное представление пользователя (без хеша/соли)."""
+    """Безопасное представление пользователя (без хеша/соли).
+    tier — фактический (с учётом триала); base_tier — оплаченный."""
     if not user:
         return None
-    return {'id': user['id'], 'email': user['email'], 'tier': user['tier']}
+    eff = effective_tier(user)
+    active = _trial_active(user) and eff == TRIAL_TIER and TIER_RANK.get(user.get('tier', 'free'), 0) < TIER_RANK.get(TRIAL_TIER, 0)
+    days_left = None
+    if active:
+        try:
+            delta = datetime.fromisoformat(user['trial_ends_at']) - datetime.now()
+            days_left = max(0, delta.days + (1 if delta.seconds else 0))
+        except (ValueError, TypeError):
+            days_left = None
+    return {
+        'id': user['id'],
+        'email': user['email'],
+        'tier': eff,
+        'base_tier': user.get('tier', 'free'),
+        'on_trial': active,
+        'trial_days_left': days_left,
+        'trial_ends_at': user.get('trial_ends_at'),
+    }

@@ -133,6 +133,10 @@ def init_db():
                 expires_at TEXT
             )
         """)
+        # Миграция: free-триал Premium при регистрации (колонка могла отсутствовать)
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+        if 'trial_ends_at' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN trial_ends_at TEXT")
 
 
 # ── Open trades ──────────────────────────────────────────
@@ -304,12 +308,12 @@ def trend_load_log(limit=200):
 
 
 # ── Пользователи / сессии ─────────────────────────────────
-def create_user(email, password_hash, salt, tier='free'):
+def create_user(email, password_hash, salt, tier='free', trial_ends_at=None):
     with _lock, get_conn() as conn:
         cur = conn.execute("""
-            INSERT INTO users (email, password_hash, salt, tier, created_at)
-            VALUES (?,?,?,?,?)
-        """, (email.lower().strip(), password_hash, salt, tier, datetime.now().isoformat()))
+            INSERT INTO users (email, password_hash, salt, tier, created_at, trial_ends_at)
+            VALUES (?,?,?,?,?,?)
+        """, (email.lower().strip(), password_hash, salt, tier, datetime.now().isoformat(), trial_ends_at))
         return cur.lastrowid
 
 

@@ -44,6 +44,10 @@ const NAV_SECTIONS = [
 // маршрут открытия дашборда конкретной стратегии с главной
 const STRATEGY_TAB = { momentum: 'dryrun', xsec: 'xsec', trend: 'trend_ff' }
 
+// вкладки, закрытые за Premium
+const GATED = new Set(['compare', 'dryrun', 'xsec', 'trend_ff'])
+const GATED_TITLES = { compare: 'Сравнение стратегий', dryrun: 'Дальран', xsec: 'Long-Short', trend_ff: 'Trend-Following' }
+
 function useLivePrices() {
   const [prices, setPrices] = useState(null)
   useEffect(() => {
@@ -123,6 +127,29 @@ function ComingSoonPage({ tab }) {
       <div className="cs-title">{labels[tab] || tab}</div>
       <div className="cs-desc">{descs[tab] || 'Этот раздел в разработке. Следи за обновлениями!'}</div>
       <div className="cs-badge">Скоро</div>
+    </div>
+  )
+}
+
+function UpgradeLock({ tab, user, onUpgrade, onLogin }) {
+  return (
+    <div className="lock-card animate-in">
+      <div className="lock-icon">🔒</div>
+      <span className="lock-badge">Premium</span>
+      <div className="lock-title">{GATED_TITLES[tab] || 'Premium-раздел'}</div>
+      <div className="lock-desc">
+        {user
+          ? 'Этот раздел доступен на тарифе Premium. Открой все live-стратегии и дашборды в реальном времени.'
+          : 'Live-стратегии доступны на Premium. Зарегистрируйся — первые 3 дня Premium бесплатно, карта не нужна.'}
+      </div>
+      {user
+        ? <button className="lock-btn" onClick={onUpgrade}>Перейти на Premium →</button>
+        : <button className="lock-btn" onClick={onLogin}>Начать 3 дня бесплатно →</button>}
+      <div className="lock-feats">
+        {['Сравнение всех стратегий', 'Дальран в реальном времени', 'Long-Short и Trend-Following', 'Telegram-алерты'].map((f, i) => (
+          <span key={i} className="lock-feat">✓ {f}</span>
+        ))}
+      </div>
     </div>
   )
 }
@@ -210,6 +237,11 @@ export default function App() {
     fetchMarket(); const id = setInterval(fetchMarket, MARKET_POLL_INTERVAL); return () => clearInterval(id)
   }, [tab, fetchMarket])
 
+  const isPremium = !!user && (user.tier === 'premium' || user.tier === 'vip')
+  const gate = (node) => isPremium
+    ? node
+    : <UpgradeLock tab={tab} user={user} onUpgrade={() => setTab('pricing')} onLogin={() => setShowAuth(true)} />
+
   return (
     <div className={`layout ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
 
@@ -262,6 +294,7 @@ export default function App() {
                   {!sidebarCollapsed && <span className="nav-label">{t.label}</span>}
                   {!sidebarCollapsed && (
                     <div className="nav-right">
+                      {GATED.has(t.key) && !isPremium && <span className="nav-lock" title="Premium">🔒</span>}
                       {t.badge && <span className={`nav-badge ${t.badge==='HOT'?'hot':t.badge==='AI'?'ai':'beta'}`}>{t.badge}</span>}
                       {tab === t.key && <span className="nav-pip" />}
                     </div>
@@ -331,15 +364,22 @@ export default function App() {
         <main className="content">
           {error && <div className="error-banner animate-in">{error}</div>}
 
+          {user?.on_trial && (
+            <div className="trial-banner animate-in">
+              <span>✦ <strong>Premium-триал активен</strong> — осталось {user.trial_days_left} {user.trial_days_left === 1 ? 'день' : 'дн.'}. Все стратегии открыты.</span>
+              <button onClick={() => setTab('pricing')}>Оформить Premium</button>
+            </div>
+          )}
+
           {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat signals={signals} stats={stats} market={market} /></section>}
           {tab === 'market' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Скринер рынка</h1></div><MarketView market={market} /></section>}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} /></section>}
           {tab === 'backtest' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Бэктест <span className="beta-tag">BETA</span></h1></div><Backtest /></section>}
           {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} onUpgraded={(t) => setUser(u => u ? { ...u, tier: t } : u)} onNeedAuth={() => setShowAuth(true)} /></section>}
-          {tab === 'compare' && <section className="section animate-in"><StrategiesCompare /></section>}
-          {tab === 'dryrun' && <section className="section animate-in"><DryRunDashboard /></section>}
-          {tab === 'xsec' && <section className="section animate-in"><XSecDashboard /></section>}
-          {tab === 'trend_ff' && <section className="section animate-in"><TrendDashboard /></section>}
+          {tab === 'compare' && gate(<section className="section animate-in"><StrategiesCompare /></section>)}
+          {tab === 'dryrun' && gate(<section className="section animate-in"><DryRunDashboard /></section>)}
+          {tab === 'xsec' && gate(<section className="section animate-in"><XSecDashboard /></section>)}
+          {tab === 'trend_ff' && gate(<section className="section animate-in"><TrendDashboard /></section>)}
           {tab === 'smarttrade_calc' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Smart Trade <span className="hot-tag">NEW</span></h1></div><SmartTrade /></section>}
           {tab === 'invite' && <ComingSoonPage tab="invite" />}
 
@@ -539,6 +579,24 @@ export default function App() {
         .ts-stat-val { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text); }
         .ts-btn { width: 100%; padding: 10px; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
         .ts-btn:hover { opacity: 0.88; }
+
+        .nav-lock { font-size: 10px; opacity: 0.6; }
+
+        /* TRIAL BANNER */
+        .trial-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: linear-gradient(135deg, var(--accent-soft), var(--purple-soft)); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: 10px 16px; font-size: 13px; color: var(--text); margin-bottom: 20px; }
+        .trial-banner button { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; border-radius: 7px; padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+
+        /* UPGRADE LOCK */
+        .lock-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 56px 32px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; box-shadow: var(--shadow-card); position: relative; overflow: hidden; }
+        .lock-card::before { content: ''; position: absolute; top: -120px; left: 50%; transform: translateX(-50%); width: 500px; height: 360px; background: radial-gradient(circle, var(--accent-soft) 0%, transparent 65%); pointer-events: none; }
+        .lock-icon { font-size: 44px; position: relative; }
+        .lock-badge { position: relative; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #fff; background: linear-gradient(135deg, var(--accent), var(--purple)); padding: 4px 12px; border-radius: 20px; }
+        .lock-title { font-size: 22px; font-weight: 800; color: var(--text); position: relative; }
+        .lock-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; max-width: 440px; position: relative; }
+        .lock-btn { position: relative; margin-top: 6px; padding: 12px 28px; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 24px rgba(77,140,245,0.35); }
+        .lock-btn:hover { opacity: 0.9; }
+        .lock-feats { display: flex; flex-wrap: wrap; gap: 8px 18px; justify-content: center; margin-top: 12px; position: relative; }
+        .lock-feat { font-size: 12px; color: var(--text-secondary); }
 
         /* COMING SOON */
         .coming-soon-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 64px 32px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }

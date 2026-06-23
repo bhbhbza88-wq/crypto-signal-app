@@ -68,7 +68,7 @@ def require_tier(min_tier: str):
         user = auth.user_from_token(_token_from_header(authorization))
         if not user:
             raise HTTPException(status_code=401, detail="Требуется вход")
-        if not auth.tier_allows(user['tier'], min_tier):
+        if not auth.tier_allows(auth.effective_tier(user), min_tier):
             raise HTTPException(status_code=403, detail=f"Нужен тариф {min_tier} или выше")
         return user
     return dep
