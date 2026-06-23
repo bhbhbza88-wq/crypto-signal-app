@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts'
 import { api } from './api'
 
+/* ─────────────────────────── DATA HOOKS ─────────────────────────── */
 function useLiveStrategies() {
   const [strategies, setStrategies] = useState(null)
   const [curve, setCurve] = useState([])
@@ -54,11 +55,59 @@ function useLivePrices() {
   return prices
 }
 
+/* Scroll-reveal: добавляет .in элементам с классом .reveal при появлении */
+function useReveal(deps = []) {
+  useEffect(() => {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target) } })
+    }, { threshold: 0.12 })
+    document.querySelectorAll('.reveal:not(.in)').forEach(el => io.observe(el))
+    return () => io.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+}
+
+/* Анимация числа при попадании в зону видимости */
+function CountUp({ value, className }) {
+  const numeric = /^\d+$/.test(value)
+  const ref = useRef(null)
+  const [disp, setDisp] = useState(numeric ? '0' : value)
+  useEffect(() => {
+    if (!numeric) { setDisp(value); return }
+    const target = parseInt(value, 10)
+    let done = false
+    const io = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && !done) {
+        done = true
+        const dur = 1300, t0 = performance.now()
+        const tick = (t) => {
+          const p = Math.min(1, (t - t0) / dur)
+          const eased = 1 - Math.pow(1 - p, 3)
+          setDisp(String(Math.round(target * eased)))
+          if (p < 1) requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      }
+    }, { threshold: 0.6 })
+    if (ref.current) io.observe(ref.current)
+    return () => io.disconnect()
+  }, [value, numeric])
+  return <span ref={ref} className={className}>{disp}</span>
+}
+
+/* Курсор-spotlight на карточке */
+function onSpot(e) {
+  const r = e.currentTarget.getBoundingClientRect()
+  e.currentTarget.style.setProperty('--mx', `${((e.clientX - r.left) / r.width) * 100}%`)
+  e.currentTarget.style.setProperty('--my', `${((e.clientY - r.top) / r.height) * 100}%`)
+}
+
+/* ─────────────────────────── STATIC CONTENT ─────────────────────────── */
 const STATS = [
   { value: '3', label: 'Независимые бумажные стратегии' },
   { value: '32', label: 'Пар на Bybit' },
-  { value: '2 мин', label: 'Интервал сканирования' },
-  { value: '24/7', label: 'Работа сканера' },
+  { value: '2', suffix: ' мин', label: 'Интервал сканирования' },
+  { value: '24/7', label: 'Сканер без выходных' },
 ]
 
 const EXCHANGES = [
@@ -69,34 +118,33 @@ const EXCHANGES = [
   { name: 'Bitget', active: false },
 ]
 
-const TOOLS = [
-  { icon: '◈', title: 'Сигнал-сканер', desc: 'Самый гибкий инструмент NWICKI. Сканирует 32 пары на Bybit каждые 2 минуты по EMA, RSI, ADX и ATR. Находит лучший сетап автоматически.' },
-  { icon: '✦', title: 'AI Ассистент', desc: 'GPT-4o знает текущие сигналы и рынок. Спроси "почему вошли в сделку?" или "какие риски?" — получи ответ за секунду. Как иметь личного аналитика 24/7.' },
-  { icon: '⬡', title: 'Скринер рынка', desc: 'Тепловая карта всех 32 пар с режимами (Аптренд/Даунтренд/Флэт), ADX индикатором и TradingView графиком по клику на монету.' },
-  { icon: '≡', title: 'История & Аналитика', desc: 'Полная история с PnL по дням, винрейтом, разбивкой по TP1/TP2/TP3 и стопам. Публичный трек-рекорд всех сигналов.' },
-  { icon: '⚡', title: 'Терминал', desc: 'Быстрое исполнение сделок через API Bybit с продвинутым управлением ордерами. Трейлинг стоп, частичное закрытие, несколько тейков.' },
+// Возможности (Toolkit + Benefits, отобрано сильнейшее)
+const FEATURES = [
+  { icon: '◈', title: 'Сигнал-сканер', desc: 'Сканирует 32 пары на Bybit каждые 2 минуты по EMA, RSI, ADX и ATR и сам находит лучший сетап. Сердце платформы.', wide: true },
+  { icon: '✦', title: 'AI Ассистент', desc: 'GPT-4o знает текущие сигналы. Спроси «почему вошли?» — получи ответ за секунду.', badge: 'AI' },
+  { icon: '⬡', title: 'Скринер рынка', desc: 'Тепловая карта 32 пар с режимами и ADX. TradingView-график по клику.' },
+  { icon: '≡', title: 'История & аналитика', desc: 'Публичный трек-рекорд: PnL по дням, винрейт, разбивка TP/SL.' },
+  { icon: '📊', title: 'Бэктест на полной истории', desc: 'Проверяй любую стратегию на исторических данных перед запуском.' },
+  { icon: '⚡', title: 'Терминал', desc: 'Исполнение через API Bybit: трейлинг-стоп, частичное закрытие, мульти-тейк.', badge: 'NEW' },
 ]
 
-const BENEFITS = [
-  { icon: '📊', title: 'Бэктест и оптимизация стратегии', desc: 'Проверяй стратегию на исторических данных перед запуском' },
-  { icon: '🧠', title: 'Торгуй без эмоций', desc: 'Сканер не паникует и не жадничает — только алгоритм' },
-  { icon: '🔗', title: 'TradingView интеграция', desc: 'Все графики через TradingView виджеты прямо в платформе' },
-  { icon: '💱', title: 'Все инструменты в одном месте', desc: 'Сигналы, аналитика, AI и история в одном интерфейсе' },
-]
-
-const SECURITY = [
-  { icon: '🛡️', title: 'Безопасная архитектура', desc: 'Мы постоянно усиливаем защиту от новых угроз.' },
-  { icon: '🔒', title: 'Твои средства только у тебя', desc: 'NWICKI не имеет доступа к твоему аккаунту на бирже и не может вывести средства.' },
-  { icon: '📋', title: 'Прозрачная статистика', desc: 'Все результаты сигналов публичны — ничего не скрываем.' },
+// Почему мы честнее (Reasons + Security, слитые в один блок доверия)
+const HONEST = [
+  'Все сделки публичны — реальный трек-рекорд, а не красивые скриншоты.',
+  'Метрики (PF, винрейт, equity) показываем как есть, без приукрашивания.',
+  'NWICKI не имеет доступа к твоим средствам — только анализ рынка.',
+  'Каждая стратегия проходит бэктест на полной истории перед запуском.',
 ]
 
 const FAQ = [
-  { q: 'Что такое бэктестинг и зачем он нужен?', a: 'Бэктестинг симулирует сделки на исторических данных. Это показывает как стратегия работала бы в прошлом — лучший способ проверить идею перед реальными деньгами.' },
-  { q: 'Насколько точны сигналы NWICKI?', a: 'Сканер использует EMA, RSI, ADX и ATR для анализа. Каждый сигнал имеет Score от 0 до 20 — чем выше, тем сильнее сетап. Историческую статистику смотри в разделе История.' },
-  { q: 'Может ли NWICKI торговать автоматически?', a: 'Сейчас NWICKI — это сигнальная платформа. Сканер находит точки входа и уведомляет тебя, ты принимаешь решение о входе. Автоматическое исполнение через API Bybit — в разработке.' },
-  { q: 'Безопасно ли использовать NWICKI?', a: 'NWICKI не имеет доступа к твоим средствам. Платформа только анализирует рынок и показывает сигналы. Твои API ключи не требуются для просмотра сигналов.' },
+  { q: 'Это реальная торговля или бэктест?', a: 'Стратегии работают в режиме бумажной торговли на живых данных Bybit — реальные цены, виртуальный депозит. Это честный дальран перед реальными деньгами.' },
+  { q: 'Насколько точны сигналы NWICKI?', a: 'Сканер использует EMA, RSI, ADX и ATR. Каждый сигнал имеет Score от 0 до 20 — чем выше, тем сильнее сетап. Полная статистика — в разделе История.' },
+  { q: 'Может ли NWICKI торговать автоматически?', a: 'Сейчас NWICKI находит точки входа и уведомляет тебя — решение принимаешь ты. Автоисполнение через API Bybit в разработке.' },
+  { q: 'Безопасно ли использовать NWICKI?', a: 'NWICKI не имеет доступа к твоим средствам. Для просмотра сигналов API-ключи не нужны.' },
   { q: 'Сколько стоит NWICKI?', a: 'Базовый доступ (обзор рынка, бэктест) бесплатный навсегда. Premium и VIP открывают все стратегии в реальном времени и Telegram-алерты — смотри раздел Тарифы.' },
 ]
+
+const SCAN_COINS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK']
 
 function MiniChart({ positive, width = 160, height = 60 }) {
   const pts = positive
@@ -117,6 +165,83 @@ function MiniChart({ positive, width = 160, height = 60 }) {
   )
 }
 
+/* Живой showcase — центр сцены: радар-сканер + реальная equity-кривая */
+function LiveShowcase({ prices, curve, visibleCurve, xsecRoi, chartPeriod, setChartPeriod, navigate }) {
+  const [scanIdx, setScanIdx] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setScanIdx(i => (i + 1) % SCAN_COINS.length), 1100)
+    return () => clearInterval(id)
+  }, [])
+  const up = xsecRoi == null ? null : xsecRoi >= 0
+  return (
+    <div className="showcase reveal">
+      <div className="sh-chrome">
+        <span className="sh-dot r" /><span className="sh-dot a" /><span className="sh-dot g" />
+        <span className="sh-url">nwicki.app/strategies</span>
+        <span className="sh-live"><span className="scan-dot-sm" />LIVE</span>
+        {prices && (
+          <span className="sh-prices">
+            <span>BTC <b>${prices.btc.price}</b> <i className={prices.btc.positive ? 'pos' : 'neg'}>{prices.btc.positive ? '▲' : '▼'}{Math.abs(prices.btc.change)}%</i></span>
+            <span>ETH <b>${prices.eth.price}</b> <i className={prices.eth.positive ? 'pos' : 'neg'}>{prices.eth.positive ? '▲' : '▼'}{Math.abs(prices.eth.change)}%</i></span>
+          </span>
+        )}
+      </div>
+
+      <div className="sh-body">
+        {/* Радар-сканер */}
+        <div className="sh-scanner">
+          <div className="radar">
+            <div className="radar-ring" />
+            <div className="radar-ring r2" />
+            <div className="radar-ring r3" />
+            <div className="radar-sweep" />
+            <div className="radar-core">{SCAN_COINS[scanIdx]}</div>
+            {SCAN_COINS.map((c, i) => {
+              const ang = (i / SCAN_COINS.length) * Math.PI * 2
+              const rad = 38 + (i % 3) * 14
+              const x = 50 + Math.cos(ang) * rad
+              const y = 50 + Math.sin(ang) * rad
+              return <span key={c} className={`radar-blip ${i === scanIdx ? 'on' : ''}`} style={{ left: `${x}%`, top: `${y}%` }} />
+            })}
+          </div>
+          <div className="sh-scan-text">
+            <div className="sh-scan-now"><span className="scan-dot-sm" />Сканирую <b>{SCAN_COINS[scanIdx]}/USDT</b></div>
+            <div className="sh-scan-sub">32 пары · EMA · RSI · ADX · ATR · каждые 2 мин</div>
+          </div>
+        </div>
+
+        {/* Реальная equity-кривая */}
+        <div className="sh-equity">
+          <div className="sh-eq-top">
+            <span className="sh-eq-label">Long-Short · реальные данные</span>
+            <div className="bv-period-switch">
+              {CHART_PERIODS.map(p => (
+                <button key={p.key} className={`bv-period-btn ${chartPeriod === p.key ? 'active' : ''}`} onClick={() => setChartPeriod(p.key)}>{p.label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="sh-eq-roi" style={{ color: up == null ? 'var(--text-tertiary)' : up ? 'var(--long)' : 'var(--short)' }}>
+            {xsecRoi != null ? `${up ? '+' : ''}${xsecRoi.toFixed(1)}%` : '—'}
+          </div>
+          <div className="sh-eq-cap">изменение бумажного депозита</div>
+          <div className="sh-eq-chart">
+            {visibleCurve.length > 1 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={visibleCurve}>
+                  <YAxis hide domain={['auto', 'auto']} />
+                  <Line type="monotone" dataKey="equity" stroke={up ? 'var(--long)' : 'var(--short)'} strokeWidth={2.5} dot={false} animationDuration={1400} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : <div className="sh-eq-empty">Накопление данных...</div>}
+          </div>
+          <button className="sh-eq-btn" onClick={() => navigate('/app')}>Открыть дашборд →</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────── PAGE ─────────────────────────── */
 export default function Landing() {
   const navigate = useNavigate()
   const prices = useLivePrices()
@@ -133,10 +258,23 @@ export default function Landing() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches
   })
 
+  useReveal([strategies])
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
     localStorage.setItem('theme', dark ? 'dark' : 'light')
   }, [dark])
+
+  const NAV = [
+    { label: 'Стратегии', href: '#strategies' },
+    { label: 'Возможности', href: '#features' },
+    { label: 'Честность', href: '#honest' },
+    { label: 'Тарифы', href: '#faq' },
+  ]
+  const goAnchor = (e, href) => {
+    e.preventDefault(); setMenuOpen(false)
+    document.querySelector(href)?.scrollIntoView({ behavior: 'smooth' })
+  }
 
   return (
     <div className="lp">
@@ -144,21 +282,21 @@ export default function Landing() {
       {/* ── ANNOUNCEMENT BAR ── */}
       <div className="announce-bar">
         <span className="announce-dot" />
-        <span>✦ NWICKI AI — первая платформа где AI сканирует рынок и объясняет каждый сигнал в реальном времени</span>
+        <span>✦ NWICKI — AI сканирует рынок и объясняет каждый сигнал в реальном времени</span>
         <button className="announce-btn" onClick={() => navigate('/app')}>Попробовать бесплатно →</button>
       </div>
 
       {/* ── NAVBAR ── */}
       <nav className="navbar glass">
         <div className="nav-inner">
-          <div className="nav-logo" onClick={() => window.scrollTo(0,0)}>
+          <div className="nav-logo" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
             <div className="nav-logo-icon">N</div>
             <span className="nav-logo-text gradient-text">NWICKI</span>
           </div>
 
           <div className={`nav-links ${menuOpen ? 'open' : ''}`}>
-            {['Боты', 'Стратегии', 'Функции', 'Тарифы', 'Блог', 'Компания'].map(l => (
-              <a key={l} className="nav-link" href="#" onClick={e => { e.preventDefault(); setMenuOpen(false) }}>{l}</a>
+            {NAV.map(l => (
+              <a key={l.label} className="nav-link" href={l.href} onClick={e => goAnchor(e, l.href)}>{l.label}</a>
             ))}
           </div>
 
@@ -175,39 +313,24 @@ export default function Landing() {
 
       {/* ── HERO ── */}
       <section className="hero">
-        <div className="hero-bg-mesh" />
+        <div className="aurora">
+          <span className="aurora-blob b1" />
+          <span className="aurora-blob b2" />
+          <span className="aurora-blob b3" />
+        </div>
+        <div className="hero-grid-overlay" />
         <div className="hero-inner">
-          {prices && (
-            <div className="hero-ticker animate-in">
-              <span className="ht-live"><span className="scan-dot-sm" />LIVE</span>
-              <span className="ht-div" />
-              <span className="ht-item">
-                <span className="ht-sym">BTC</span>
-                <span className="ht-val">${prices.btc.price}</span>
-                <span className={`ht-chg ${prices.btc.positive ? 'pos' : 'neg'}`}>{prices.btc.positive ? '▲' : '▼'}{Math.abs(prices.btc.change)}%</span>
-              </span>
-              <span className="ht-div" />
-              <span className="ht-item">
-                <span className="ht-sym">ETH</span>
-                <span className="ht-val">${prices.eth.price}</span>
-                <span className={`ht-chg ${prices.eth.positive ? 'pos' : 'neg'}`}>{prices.eth.positive ? '▲' : '▼'}{Math.abs(prices.eth.change)}%</span>
-              </span>
-              <span className="ht-div" />
-              <span style={{fontSize:11,color:'var(--text-tertiary)'}}>32 пары · обновление каждые 2 мин</span>
-            </div>
-          )}
-
           <div className="hero-badge animate-in">
             <span className="hb-dot" />
-            <span>Новое: Telegram уведомления о сигналах</span>
+            <span>Новое: Telegram-уведомления о сигналах</span>
           </div>
 
           <h1 className="hero-title animate-in">
-            Торгуй крипто<br/>
-            <span className="gradient-text">умнее с AI</span>
+            Видишь рынок<br/>
+            <span className="gradient-text">так, как видит алгоритм</span>
           </h1>
           <p className="hero-sub animate-in">
-            Сканер анализирует 32 пары на Bybit каждые 2 минуты. AI объясняет каждый сигнал. Ты просто торгуешь.
+            Сканер анализирует 32 пары на Bybit каждые 2 минуты, 3 стратегии торгуют вживую на бумаге, AI объясняет каждый сигнал. Всё публично — без обещаний «иксов».
           </p>
 
           <div className="hero-actions animate-in">
@@ -215,8 +338,8 @@ export default function Landing() {
               <span>Начать бесплатно</span>
               <span className="btn-arrow">→</span>
             </button>
-            <button className="btn-hero-secondary" onClick={() => navigate('/app')}>
-              Смотреть демо
+            <button className="btn-hero-secondary" onClick={() => document.querySelector('#strategies')?.scrollIntoView({ behavior: 'smooth' })}>
+              Смотреть стратегии
             </button>
           </div>
 
@@ -227,17 +350,52 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* Strategy cards scroll — реальные данные с бэкенда, бумажная торговля */}
-          <div className="strategy-scroll animate-in">
+          <LiveShowcase
+            prices={prices} curve={curve} visibleCurve={visibleCurve} xsecRoi={xsecRoi}
+            chartPeriod={chartPeriod} setChartPeriod={setChartPeriod} navigate={navigate}
+          />
+        </div>
+      </section>
+
+      {/* ── STATS + EXCHANGES (trust band) ── */}
+      <section className="stats-section">
+        <div className="section-inner">
+          <div className="stats-grid">
+            {STATS.map((s, i) => (
+              <div key={i} className="stat-card reveal" style={{ transitionDelay: `${i * 80}ms` }}>
+                <div className="stat-val gradient-text"><CountUp value={s.value} />{s.suffix || ''}</div>
+                <div className="stat-label">{s.label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="exchanges-row reveal">
+            <span className="exchanges-eyebrow">Биржи:</span>
+            {EXCHANGES.map((e, i) => (
+              <div key={i} className={`exchange-badge ${e.active ? 'active' : 'soon'}`}>
+                <span>{e.name}</span>
+                {!e.active && <span className="exchange-soon-tag">скоро</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── STRATEGIES (real data) ── */}
+      <section id="strategies" className="strategies-section">
+        <div className="section-inner">
+          <div className="sec-head reveal">
+            <div className="section-label">Живые стратегии</div>
+            <h2 className="section-heading center">3 стратегии торгуют прямо сейчас</h2>
+            <p className="section-sub center">Реальные данные с Bybit, бумажное исполнение. Цифры обновляются в реальном времени — ничего не нарисовано.</p>
+          </div>
+          <div className="strategy-scroll reveal">
             {(strategies || []).map((s, i) => {
               const pos = (s.realized_pnl_pct ?? 0) >= 0
               return (
-                <div key={i} className="strategy-card">
+                <div key={i} className="strategy-card spot" onMouseMove={onSpot}>
                   <div className="sc-header">
                     <div className="sc-name">{s.name}</div>
-                    <div className="sc-tags">
-                      <span className="sc-exchange">{s.kind}</span>
-                    </div>
+                    <div className="sc-tags"><span className="sc-exchange">{s.kind}</span></div>
                   </div>
                   <div className="sc-roi">PnL <span className={`sc-roi-val ${pos ? 'pos' : 'neg'}`}>{pos ? '+' : ''}{s.realized_pnl_pct}%</span></div>
                   <div className="sc-chart"><MiniChart positive={pos} /></div>
@@ -256,243 +414,72 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ── STATS ── */}
-      <section className="stats-section">
+      {/* ── FEATURES (bento) ── */}
+      <section id="features" className="features-section">
         <div className="section-inner">
-          <p className="stats-eyebrow">Доверяют трейдеры по всему миру</p>
-          <div className="stats-grid">
-            {STATS.map((s, i) => (
-              <div key={i} className="stat-card animate-in">
-                <div className="stat-val gradient-text">{s.value}</div>
-                <div className="stat-label">{s.label}</div>
+          <div className="sec-head reveal">
+            <div className="section-label">Возможности</div>
+            <h2 className="section-heading center">Всё для умной торговли<br/>в одном интерфейсе</h2>
+          </div>
+          <div className="bento reveal">
+            {FEATURES.map((f, i) => (
+              <div key={i} className={`bento-card spot ${f.wide ? 'wide' : ''}`} onMouseMove={onSpot}>
+                {f.badge && <span className={`bento-badge ${f.badge === 'NEW' ? 'new' : ''}`}>{f.badge}</span>}
+                <div className="bento-icon">{f.icon}</div>
+                <h3 className="bento-title">{f.title}</h3>
+                <p className="bento-desc">{f.desc}</p>
+                <button className="bento-link" onClick={() => navigate('/app')}>Открыть →</button>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── EXCHANGES ── */}
-      <section className="exchanges-section">
-        <div className="section-inner">
-          <p className="stats-eyebrow">Биржи</p>
-          <div className="exchanges-grid">
-            {EXCHANGES.map((e, i) => (
-              <div key={i} className={`exchange-badge ${e.active ? 'active' : 'soon'}`}>
-                <span>{e.name}</span>
-                {!e.active && <span className="exchange-soon-tag">скоро</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── 3 REASONS ── */}
-      <section className="reasons-section">
-        <div className="section-inner reasons-inner">
-          <div className="reasons-text">
+      {/* ── HONEST (Reasons + Security merged) ── */}
+      <section id="honest" className="honest-section">
+        <div className="section-inner honest-inner">
+          <div className="honest-text reveal">
             <div className="section-label">Почему NWICKI</div>
-            <h2 className="section-heading">Три причины начать<br/>прямо сегодня</h2>
-            <ul className="reasons-list">
-              <li><span className="check">✓</span> Автоматизируй анализ рынка и избавься от стресса и эмоциональных ошибок.</li>
-              <li><span className="check">✓</span> Настрой сканер под свою стратегию — от скальпинга до свинг-трейдинга.</li>
-              <li><span className="check">✓</span> Бэктестинг на полных исторических данных перед входом в рынок.</li>
+            <h2 className="section-heading">Честность вместо<br/>обещаний «иксов»</h2>
+            <p className="section-sub" style={{ margin: '14px 0 24px' }}>
+              Большинство сигнальных сервисов скрывают реальную доходность. Мы делаем наоборот — показываем всё как есть.
+            </p>
+            <ul className="honest-list">
+              {HONEST.map((h, i) => <li key={i}><span className="check">✓</span> {h}</li>)}
             </ul>
             <button className="btn-hero-primary" onClick={() => navigate('/app')}>
-              <span>Начать бесплатно</span><span className="btn-arrow">→</span>
+              <span>Открыть трек-рекорд</span><span className="btn-arrow">→</span>
             </button>
           </div>
-          <div className="reasons-visual">
-            <div className="rv-card">
-              <div className="rv-header">
-                <div className="rv-dot" /><div className="rv-dot amber" /><div className="rv-dot green" />
-                <span className="rv-url">nwicki.app</span>
-              </div>
-              <div className="rv-content">
-                <div className="rv-sidebar">
-                  <div className="rv-logo">N</div>
-                  {['Dashboard','Скринер','История','AI'].map((l,i) => (
-                    <div key={i} className={`rv-nav ${i===0?'active':''}`}>{l}</div>
-                  ))}
-                </div>
-                <div className="rv-main">
-                  <div className="rv-signal">
-                    <div className="rv-signal-header">
-                      <span className="rv-sym">ETC</span>
-                      <span className="rv-badge long">LONG</span>
-                    </div>
-                    <div className="rv-conf">
-                      <div className="rv-conf-bar"><div className="rv-conf-fill" style={{width:'80%'}} /></div>
-                      <span className="rv-conf-val" style={{color:'var(--long)'}}>80%</span>
-                    </div>
-                    <div className="rv-levels">
-                      <span style={{color:'var(--accent)'}}>Вход 26.40</span>
-                      <span style={{color:'var(--long)'}}>TP1 27.10</span>
-                      <span style={{color:'var(--short)'}}>SL 25.90</span>
-                    </div>
-                  </div>
-                  <div className="rv-scan">
-                    <span className="scan-dot-sm" />
-                    Сканирую рынок каждые 2 минуты...
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── 3 STEPS ── */}
-      <section className="steps-section">
-        <div className="section-inner">
-          <div style={{textAlign:'center'}}><div className="section-label">Как начать</div></div>
-          <h2 className="section-heading center">За 3 простых шага</h2>
-          <div className="steps-grid">
-            <div className="step">
-              <div className="step-num">1</div>
-              <h3 className="step-title">Открой платформу</h3>
-              <p className="step-desc">Зайди на NWICKI — регистрация не нужна. Платформа работает прямо в браузере.</p>
-              <button className="step-link" onClick={() => navigate('/app')}>🔗 Открыть NWICKI</button>
-              <div className="step-img step-img-1">
-                <div className="si-card">
-                  <div className="si-logo">N</div>
-                  <div>
-                    <div style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>NWICKI</div>
-                    <div style={{fontSize:10,color:'var(--text-tertiary)'}}>Crypto Scanner</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="step">
-              <div className="step-num">2</div>
-              <h3 className="step-title">Следи за сигналами</h3>
-              <p className="step-desc">Сканер анализирует 32 пары и показывает точки входа с уровнями TP и SL.</p>
-              <div className="step-img step-img-2">
-                <div className="si-signal">
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
-                    <span style={{fontFamily:'var(--font-mono)',fontWeight:700,fontSize:16}}>ETC</span>
-                    <span style={{background:'var(--long-soft)',color:'var(--long)',fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:5}}>LONG</span>
-                    <span style={{marginLeft:'auto',fontFamily:'var(--font-mono)',fontSize:11,color:'var(--long)'}}>80%</span>
-                  </div>
-                  <div style={{height:4,background:'var(--surface-hover)',borderRadius:2,marginBottom:8,overflow:'hidden'}}>
-                    <div style={{width:'80%',height:'100%',background:'var(--long)',borderRadius:2}} />
-                  </div>
-                  <div style={{display:'flex',gap:10,fontSize:10}}>
-                    <span style={{color:'var(--accent)'}}>Вход 26.40</span>
-                    <span style={{color:'var(--long)'}}>TP1 27.10</span>
-                    <span style={{color:'var(--short)'}}>SL 25.90</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="step">
-              <div className="step-num">3</div>
-              <h3 className="step-title">Спроси AI</h3>
-              <p className="step-desc">AI ассистент объяснит каждый сигнал — почему вошли, какие риски, что делать дальше.</p>
-              <div className="step-img step-img-3">
-                <div className="si-chat">
-                  <div className="si-msg ai">👋 Сигнал ETC LONG — Score 16/20. RSI перепродан, ADX &gt; 25, тренд восходящий.</div>
-                  <div className="si-msg user">Какой стоп-лосс?</div>
-                  <div className="si-msg ai">🛡 Стоп на 25.90 — риск 1.9% от входа.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── AUDIENCE ── */}
-      <section className="audience-section">
-        <div className="section-inner">
-          <div style={{textAlign:'center'}}><div className="section-label">Для кого</div></div>
-          <h2 className="section-heading center">Для любого уровня трейдера</h2>
-          <div className="audience-grid">
-            <div className="audience-card">
-              <div className="audience-icon">🚀</div>
-              <h3>Новички</h3>
-              <p>Начни быстро с готовыми сигналами, гайдами и шаблонами стратегий. Не нужно знать код.</p>
-            </div>
-            <div className="audience-card">
-              <div className="audience-icon">📊</div>
-              <h3>Опытные трейдеры</h3>
-              <p>Настраивай параметры сканера, используй продвинутый риск-менеджмент и историческую аналитику.</p>
-            </div>
-            <div className="audience-card">
-              <div className="audience-icon">🤖</div>
-              <h3>AI-энтузиасты</h3>
-              <p>Используй GPT-4o для анализа сигналов, рынка и построения стратегий через натуральный язык.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── TOOLKIT ── */}
-      <section className="toolkit-section">
-        <div className="section-inner">
-          <div className="section-label">Инструменты</div>
-          <h2 className="section-heading center">Всё что нужно<br/>для умной торговли</h2>
-          <p className="section-sub center" style={{marginTop:12}}>Строй своё финансовое будущее с инструментами которые работают на любом рынке</p>
-          <div className="toolkit-grid">
-            {TOOLS.map((t, i) => (
-              <div key={i} className={`toolkit-card animate-in ${i === 0 ? 'featured' : ''}`}>
-                {i === 1 && <span className="tk-badge">AI</span>}
-                {i === 4 && <span className="tk-badge new">NEW</span>}
-                <div className="tk-icon">{t.icon}</div>
-                <h3 className="tk-title">{t.title}</h3>
-                <p className="tk-desc">{t.desc}</p>
-                <button className="tk-link" onClick={() => navigate('/app')}>Открыть →</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── BENEFITS ── */}
-      <section className="benefits-section">
-        <div className="section-inner benefits-inner">
-          <div className="benefits-text">
-            <div className="section-label">Преимущества</div>
-            <h2 className="section-heading">Как NWICKI<br/>помогает тебе</h2>
-            <div className="benefits-list">
-              {BENEFITS.map((b, i) => (
-                <div key={i} className="benefit-item">
-                  <span className="benefit-icon">{b.icon}</span>
-                  <div>
-                    <div className="benefit-title">{b.title}</div>
-                    <div className="benefit-desc">{b.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="benefits-visual">
-            <div className="bv-card">
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-                <div style={{fontSize:11,color:'var(--text-tertiary)'}}>LONG-SHORT · РЕАЛЬНЫЕ ДАННЫЕ</div>
+          <div className="honest-visual reveal">
+            <div className="bv-card spot" onMouseMove={onSpot}>
+              <div className="bv-top">
+                <span className="bv-eyebrow">LONG-SHORT · РЕАЛЬНЫЕ ДАННЫЕ</span>
                 <div className="bv-period-switch">
                   {CHART_PERIODS.map(p => (
                     <button key={p.key} className={`bv-period-btn ${chartPeriod === p.key ? 'active' : ''}`} onClick={() => setChartPeriod(p.key)}>{p.label}</button>
                   ))}
                 </div>
               </div>
-              <div style={{fontFamily:'var(--font-mono)',fontSize:32,fontWeight:800,color: xsecRoi == null ? 'var(--text-tertiary)' : xsecRoi >= 0 ? 'var(--long)' : 'var(--short)'}}>
+              <div className="bv-roi" style={{ color: xsecRoi == null ? 'var(--text-tertiary)' : xsecRoi >= 0 ? 'var(--long)' : 'var(--short)' }}>
                 {xsecRoi != null ? `${xsecRoi >= 0 ? '+' : ''}${xsecRoi.toFixed(1)}%` : '—'}
               </div>
-              <div style={{fontSize:12,color:'var(--text-secondary)',margin:'4px 0 12px'}}>Изменение бумажного депозита</div>
+              <div className="bv-cap">Изменение бумажного депозита</div>
               {visibleCurve.length > 1 ? (
-                <div style={{width:260,height:80}}>
+                <div style={{ width: '100%', height: 90 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={visibleCurve}>
                       <YAxis hide domain={['auto', 'auto']} />
-                      <Line type="monotone" dataKey="equity" stroke={xsecRoi >= 0 ? 'var(--long)' : 'var(--short)'} strokeWidth={2.5} dot={false} />
+                      <Line type="monotone" dataKey="equity" stroke={xsecRoi >= 0 ? 'var(--long)' : 'var(--short)'} strokeWidth={2.5} dot={false} animationDuration={1400} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
-              ) : <div style={{fontSize:12,color:'var(--text-tertiary)',height:80,display:'flex',alignItems:'center'}}>Накопление данных...</div>}
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:12}}>
+              ) : <div style={{ fontSize: 12, color: 'var(--text-tertiary)', height: 90, display: 'flex', alignItems: 'center' }}>Накопление данных...</div>}
+              <div className="bv-mini-grid">
                 {[['Стратегия','Long-Short'],['Тип','Market-neutral'],['Ребалансов', String(visibleCurve.length)],['Режим','Paper']].map(([l,v],i)=>(
-                  <div key={i} style={{background:'var(--surface-hover)',padding:'8px 12px',borderRadius:8}}>
-                    <div style={{fontSize:10,color:'var(--text-tertiary)'}}>{l}</div>
-                    <div style={{fontFamily:'var(--font-mono)',fontSize:14,fontWeight:700,color:'var(--text)'}}>{v}</div>
+                  <div key={i} className="bv-mini">
+                    <div className="bv-mini-l">{l}</div>
+                    <div className="bv-mini-v">{v}</div>
                   </div>
                 ))}
               </div>
@@ -501,16 +488,20 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ── SECURITY ── */}
-      <section className="security-section">
+      {/* ── STEPS ── */}
+      <section className="steps-section">
         <div className="section-inner">
-          <h2 className="section-heading center">Безопасно. Надёжно. Прозрачно.</h2>
-          <div className="security-grid">
-            {SECURITY.map((s, i) => (
-              <div key={i} className="security-card">
-                <div className="security-icon">{s.icon}</div>
-                <h3 className="security-title">{s.title}</h3>
-                <p className="security-desc">{s.desc}</p>
+          <div className="sec-head reveal"><div className="section-label">Как начать</div><h2 className="section-heading center">За 3 простых шага</h2></div>
+          <div className="steps-grid">
+            {[
+              { n: 1, t: 'Открой платформу', d: 'Зайди на NWICKI — работает прямо в браузере, регистрация для просмотра не нужна.' },
+              { n: 2, t: 'Следи за сигналами', d: 'Сканер анализирует 32 пары и показывает точки входа с уровнями TP и SL.' },
+              { n: 3, t: 'Спроси AI', d: 'AI объяснит каждый сигнал — почему вошли, какие риски, что делать дальше.' },
+            ].map((s, i) => (
+              <div key={i} className="step reveal spot" onMouseMove={onSpot} style={{ transitionDelay: `${i * 90}ms` }}>
+                <div className="step-num">{s.n}</div>
+                <h3 className="step-title">{s.t}</h3>
+                <p className="step-desc">{s.d}</p>
               </div>
             ))}
           </div>
@@ -520,32 +511,28 @@ export default function Landing() {
       {/* ── COMMUNITY ── */}
       <section className="community-section">
         <div className="section-inner">
-          <div className="community-card">
+          <div className="community-card reveal">
             <div className="community-text">
-              <h2 className="section-heading">Присоединись к сообществу<br/>NWICKI трейдеров!</h2>
-              <p className="community-sub">Делись стратегиями, получай экспертные советы и поддержку в своём крипто-пути.</p>
+              <h2 className="section-heading">Присоединяйся к сообществу<br/>NWICKI</h2>
+              <p className="community-sub">Сигналы, разборы стратегий и поддержка — в Telegram и Discord.</p>
               <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
                 <button className="community-btn tg">✈ Telegram</button>
                 <button className="community-btn dc">Discord</button>
               </div>
             </div>
             <div className="community-visual">
-              <div className="cv-avatars">
-                {['A','B','C','D','E','F'].map((l,i) => (
-                  <div key={i} className="cv-avatar" style={{background:`hsl(${i*50+200},70%,50%)`}}>{l}</div>
-                ))}
-              </div>
-              <div style={{fontSize:13,color:'var(--text-secondary)',marginTop:8}}>Сообщество растёт каждый день</div>
+              <div className="cv-pulse"><span /><span /><span /></div>
+              <div style={{fontSize:13,color:'var(--text-secondary)',marginTop:12}}>Сообщество растёт каждый день</div>
             </div>
           </div>
         </div>
       </section>
 
       {/* ── FAQ ── */}
-      <section className="faq-section">
+      <section id="faq" className="faq-section">
         <div className="section-inner">
-          <h2 className="section-heading center">Часто задаваемые вопросы</h2>
-          <div className="faq-list">
+          <div className="sec-head reveal"><h2 className="section-heading center">Частые вопросы</h2></div>
+          <div className="faq-list reveal">
             {FAQ.map((f, i) => (
               <div key={i} className={`faq-item ${openFaq === i ? 'open' : ''}`}>
                 <button className="faq-q" onClick={() => setOpenFaq(openFaq === i ? null : i)}>
@@ -562,7 +549,7 @@ export default function Landing() {
       {/* ── CTA ── */}
       <section className="cta-section">
         <div className="section-inner">
-          <div className="cta-card">
+          <div className="cta-card reveal">
             <div className="cta-glow" />
             <div className="cta-glow-2" />
             <div className="cta-eyebrow">🚀 Бесплатно · Без регистрации</div>
@@ -574,7 +561,7 @@ export default function Landing() {
             <div className="cta-notes">
               <span>✓ Без обязательств</span>
               <span>✓ Без скрытых комиссий</span>
-              <span>✓ Без регистрации</span>
+              <span>✓ Прозрачная статистика</span>
               <span>✓ Работает 24/7</span>
             </div>
           </div>
@@ -597,32 +584,43 @@ export default function Landing() {
             </div>
             <div className="footer-cols">
               {[
-                { title: 'Платформа', links: ['Dashboard','Скринер','AI Ассистент','История','Стратегии','Тарифы'] },
-                { title: 'Инструменты', links: ['Сигнал-сканер','Бэктестинг','Терминал','TradingView'] },
-                { title: 'Стратегии', links: ['Скальпинг','Свинг-трейдинг','Следование тренду','Дей-трейдинг'] },
-                { title: 'Компания', links: ['О нас','Блог','Партнёрская программа','FAQ','Безопасность'] },
+                { title: 'Платформа', links: [['Стратегии','#strategies'],['Возможности','#features'],['Честность','#honest'],['FAQ','#faq']] },
+                { title: 'Продукт', links: [['Открыть приложение','app'],['Тарифы','app'],['История','app'],['AI Ассистент','app']] },
+                { title: 'Компания', links: [['О нас','app'],['Безопасность','#honest'],['Поддержка','app']] },
               ].map((col, i) => (
                 <div key={i} className="footer-col">
                   <div className="footer-col-title">{col.title}</div>
-                  {col.links.map(l => <a key={l} className="footer-link" onClick={() => navigate('/app')}>{l}</a>)}
+                  {col.links.map(([label, target]) => (
+                    <a key={label} className="footer-link" onClick={() => target === 'app' ? navigate('/app') : document.querySelector(target)?.scrollIntoView({ behavior: 'smooth' })}>{label}</a>
+                  ))}
                 </div>
               ))}
             </div>
           </div>
           <div className="footer-bottom">
             <span>© 2026 NWICKI. Не является финансовой рекомендацией.</span>
-            <span>Служба поддержки · Живой чат 24/7</span>
+            <span>Поддержка · Живой чат 24/7</span>
             <button className="theme-btn" onClick={() => setDark(d => !d)}>{dark ? '☀ Светлая' : '☾ Тёмная'}</button>
           </div>
         </div>
       </footer>
 
       <style>{`
-        .lp { min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
+        .lp { min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font-ui); overflow-x: hidden; }
+
+        /* REVEAL */
+        .reveal { opacity: 0; transform: translateY(26px); transition: opacity 0.7s cubic-bezier(.2,.7,.2,1), transform 0.7s cubic-bezier(.2,.7,.2,1); }
+        .reveal.in { opacity: 1; transform: none; }
+
+        /* SPOTLIGHT */
+        .spot { position: relative; }
+        .spot::after { content: ''; position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(420px circle at var(--mx,50%) var(--my,50%), var(--accent-soft), transparent 55%); opacity: 0; transition: opacity 0.35s; pointer-events: none; z-index: 0; }
+        .spot:hover::after { opacity: 1; }
+        .spot > * { position: relative; z-index: 1; }
 
         /* ANNOUNCE */
         .announce-bar { background: linear-gradient(135deg, var(--accent), var(--purple)); padding: 10px 24px; display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 13px; color: #fff; font-weight: 500; flex-wrap: wrap; text-align: center; }
-        .announce-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; opacity: 0.8; flex-shrink: 0; }
+        .announce-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; opacity: 0.8; flex-shrink: 0; animation: pulse 2s infinite; }
         .announce-btn { border: 1px solid rgba(255,255,255,0.5); background: rgba(255,255,255,0.15); color: #fff; font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 6px; white-space: nowrap; }
 
         /* NAVBAR */
@@ -644,206 +642,170 @@ export default function Landing() {
         .burger-btn span { display: block; width: 22px; height: 2px; background: var(--text); border-radius: 2px; }
 
         /* HERO */
-        .hero { padding: 60px 0 0; overflow: hidden; position: relative; }
-        .hero-bg-mesh {
-          position: absolute; inset: 0; pointer-events: none; z-index: 0;
-          background:
-            radial-gradient(ellipse 80% 50% at 50% -10%, var(--accent-soft) 0%, transparent 60%),
-            radial-gradient(ellipse 40% 30% at 80% 20%, var(--purple-soft) 0%, transparent 50%);
-        }
-        [data-theme="dark"] .hero-bg-mesh {
-          background:
-            radial-gradient(ellipse 80% 50% at 50% -10%, rgba(77,140,245,0.12) 0%, transparent 60%),
-            radial-gradient(ellipse 40% 30% at 80% 20%, rgba(157,110,248,0.08) 0%, transparent 50%);
-        }
+        .hero { padding: 72px 0 80px; overflow: hidden; position: relative; }
+        .aurora { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+        .aurora-blob { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.55; will-change: transform; }
+        .aurora-blob.b1 { width: 520px; height: 520px; top: -160px; left: 50%; margin-left: -380px; background: radial-gradient(circle, var(--accent) 0%, transparent 70%); animation: floatA 18s ease-in-out infinite; }
+        .aurora-blob.b2 { width: 460px; height: 460px; top: -120px; right: 8%; background: radial-gradient(circle, var(--purple) 0%, transparent 70%); animation: floatB 22s ease-in-out infinite; }
+        .aurora-blob.b3 { width: 380px; height: 380px; top: 180px; left: 6%; background: radial-gradient(circle, var(--long) 0%, transparent 70%); opacity: 0.3; animation: floatA 26s ease-in-out infinite reverse; }
+        [data-theme="dark"] .aurora-blob { opacity: 0.22; }
+        [data-theme="dark"] .aurora-blob.b3 { opacity: 0.14; }
+        .hero-grid-overlay { position: absolute; inset: 0; z-index: 0; pointer-events: none; background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(ellipse 70% 50% at 50% 0%, #000 0%, transparent 70%); -webkit-mask-image: radial-gradient(ellipse 70% 50% at 50% 0%, #000 0%, transparent 70%); opacity: 0.4; }
         .hero-inner { max-width: 1100px; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 20px; position: relative; z-index: 1; }
         .hero-badge { display: inline-flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 50px; padding: 6px 14px; font-size: 12px; font-weight: 600; color: var(--text-secondary); box-shadow: var(--shadow-card); }
         .hb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--long); animation: pulse 2s infinite; flex-shrink: 0; }
-        .hero-ticker { display: flex; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 50px; padding: 8px 20px; box-shadow: var(--shadow-card); flex-wrap: wrap; justify-content: center; }
-        .ht-live { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 800; color: var(--long); text-transform: uppercase; letter-spacing: 0.06em; }
-        .ht-item { display: flex; align-items: center; gap: 7px; }
-        .ht-sym { font-size: 11px; color: var(--text-tertiary); font-weight: 600; }
-        .ht-val { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--text); }
-        .ht-chg { font-family: var(--font-mono); font-size: 12px; font-weight: 600; }
-        .ht-chg.pos { color: var(--long); } .ht-chg.neg { color: var(--short); }
-        .ht-div { width: 1px; height: 16px; background: var(--border); }
         .scan-dot-sm { width: 7px; height: 7px; border-radius: 50%; background: var(--long); display: inline-block; animation: pulse 2s infinite; }
 
-        .hero-title { font-size: clamp(40px, 6.5vw, 76px); font-weight: 900; line-height: 1.05; letter-spacing: -0.04em; color: var(--text); max-width: 800px; }
-        .hero-sub { font-size: 18px; color: var(--text-secondary); line-height: 1.7; max-width: 500px; }
+        .hero-title { font-size: clamp(42px, 7vw, 82px); font-weight: 900; line-height: 1.03; letter-spacing: -0.045em; color: var(--text); max-width: 900px; }
+        .hero-sub { font-size: 18px; color: var(--text-secondary); line-height: 1.7; max-width: 620px; }
         .hero-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; }
-        .btn-hero-primary { padding: 14px 28px; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; font-size: 15px; font-weight: 700; border: none; border-radius: 12px; box-shadow: 0 8px 24px rgba(77,140,245,0.4); transition: all 0.2s; display: flex; align-items: center; gap: 8px; }
-        .btn-hero-primary:hover { opacity: 0.88; transform: translateY(-2px); box-shadow: 0 12px 32px rgba(77,140,245,0.5); }
+        .btn-hero-primary { padding: 14px 28px; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; font-size: 15px; font-weight: 700; border: none; border-radius: 12px; box-shadow: 0 8px 24px rgba(77,140,245,0.4); transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-hero-primary:hover { opacity: 0.92; transform: translateY(-2px); box-shadow: 0 12px 32px rgba(77,140,245,0.5); }
         .btn-arrow { transition: transform 0.2s; }
         .btn-hero-primary:hover .btn-arrow { transform: translateX(4px); }
         .btn-hero-secondary { padding: 14px 24px; background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 15px; font-weight: 600; border-radius: 12px; transition: all 0.2s; }
         .btn-hero-secondary:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-        .hero-or { font-size: 13px; color: var(--text-tertiary); }
-        .exchange-chips { display: flex; gap: 8px; }
-        .exchange-chip { padding: 8px 16px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 13px; font-weight: 600; border-radius: 9px; transition: all 0.2s; }
-        .exchange-chip:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-
         .hero-social-proof { display: flex; align-items: center; gap: 8px; }
         .hsp-text { font-size: 13px; color: var(--text-secondary); }
         .hsp-link { font-weight: 700; color: var(--accent); cursor: pointer; }
         .hsp-link:hover { text-decoration: underline; }
 
-        /* STRATEGY SCROLL */
-        .strategy-scroll { width: 100%; overflow-x: auto; display: flex; gap: 14px; padding: 20px 0 10px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
-        .strategy-card { flex-shrink: 0; width: 220px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; box-shadow: var(--shadow-card); transition: all 0.2s; }
-        .strategy-card:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: var(--shadow-lg); }
-        .sc-header { margin-bottom: 8px; }
-        .sc-name { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
-        .sc-tags { display: flex; gap: 6px; align-items: center; }
-        .sc-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; font-family: var(--font-mono); }
-        .sc-tag.long { background: var(--long-soft); color: var(--long); }
-        .sc-tag.short { background: var(--short-soft); color: var(--short); }
-        .sc-exchange { font-size: 10px; color: var(--text-tertiary); }
-        .sc-roi { font-size: 11px; color: var(--text-tertiary); margin-bottom: 4px; }
-        .sc-roi-val { font-family: var(--font-mono); font-size: 18px; font-weight: 800; margin-left: 4px; }
-        .sc-chart { margin: 0 -4px 8px; }
-        .sc-stats { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 8px; margin-bottom: 12px; }
-        .sc-stat { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); }
-        .sc-stat span:last-child { font-family: var(--font-mono); font-weight: 600; color: var(--text); }
-        .sc-btn { width: 100%; padding: 9px; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; border-radius: 9px; font-size: 12px; font-weight: 600; transition: opacity 0.2s; }
-        .sc-btn:hover { opacity: 0.85; }
+        /* LIVE SHOWCASE */
+        .showcase { width: 100%; max-width: 920px; margin-top: 28px; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-lg); overflow: hidden; }
+        .sh-chrome { display: flex; align-items: center; gap: 8px; padding: 11px 16px; background: var(--surface-hover); border-bottom: 1px solid var(--border); }
+        .sh-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .sh-dot.r { background: var(--short); } .sh-dot.a { background: var(--amber); } .sh-dot.g { background: var(--long); }
+        .sh-url { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); margin-left: 6px; }
+        .sh-live { display: flex; align-items: center; gap: 5px; font-size: 9px; font-weight: 800; color: var(--long); text-transform: uppercase; letter-spacing: 0.06em; margin-left: auto; }
+        .sh-prices { display: flex; gap: 14px; font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+        .sh-prices b { color: var(--text); font-weight: 700; }
+        .sh-prices i { font-style: normal; font-weight: 600; }
+        .sh-prices .pos { color: var(--long); } .sh-prices .neg { color: var(--short); }
+        .sh-body { display: grid; grid-template-columns: 1fr 1.2fr; gap: 0; }
+        .sh-scanner { padding: 28px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; border-right: 1px solid var(--border); background: var(--bg); }
+        .radar { position: relative; width: 170px; height: 170px; }
+        .radar-ring { position: absolute; inset: 0; border: 1px solid var(--border-strong); border-radius: 50%; opacity: 0.6; }
+        .radar-ring.r2 { inset: 28px; } .radar-ring.r3 { inset: 56px; }
+        .radar-sweep { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0deg, var(--accent) 55deg, transparent 90deg); animation: spin 3.2s linear infinite; opacity: 0.35; }
+        .radar-core { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 54px; height: 54px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 13px; font-weight: 800; box-shadow: 0 4px 16px rgba(77,140,245,0.5); }
+        .radar-blip { position: absolute; width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary); transform: translate(-50%,-50%); transition: all 0.4s; }
+        .radar-blip.on { background: var(--long); box-shadow: 0 0 0 4px rgba(0,229,168,0.25); width: 9px; height: 9px; }
+        .sh-scan-text { text-align: center; }
+        .sh-scan-now { font-size: 13px; color: var(--text); font-weight: 600; display: flex; align-items: center; gap: 7px; justify-content: center; }
+        .sh-scan-now b { font-family: var(--font-mono); color: var(--accent); }
+        .sh-scan-sub { font-size: 10px; color: var(--text-tertiary); margin-top: 6px; letter-spacing: 0.02em; }
+        .sh-equity { padding: 22px 24px; display: flex; flex-direction: column; }
+        .sh-eq-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
+        .sh-eq-label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
+        .sh-eq-roi { font-family: var(--font-mono); font-size: 38px; font-weight: 800; line-height: 1; }
+        .sh-eq-cap { font-size: 12px; color: var(--text-secondary); margin: 4px 0 10px; }
+        .sh-eq-chart { width: 100%; height: 92px; }
+        .sh-eq-empty { font-size: 12px; color: var(--text-tertiary); height: 92px; display: flex; align-items: center; }
+        .sh-eq-btn { margin-top: 14px; align-self: flex-start; padding: 9px 16px; background: var(--accent-soft); color: var(--accent); border: none; border-radius: 9px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+        .sh-eq-btn:hover { background: var(--accent); color: #fff; }
+        .bv-period-switch { display: flex; gap: 2px; background: var(--surface-hover); border-radius: 7px; padding: 2px; }
+        .bv-period-btn { border: none; background: transparent; color: var(--text-tertiary); font-size: 10px; font-weight: 600; padding: 4px 8px; border-radius: 5px; cursor: pointer; }
+        .bv-period-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+        /* SHARED HEAD */
+        .section-inner { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+        .sec-head { text-align: center; margin-bottom: 8px; }
+        .section-label { display: inline-block; font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; background: var(--accent-soft); padding: 4px 12px; border-radius: 20px; margin-bottom: 14px; }
+        .section-heading { font-size: clamp(26px, 3.6vw, 42px); font-weight: 800; line-height: 1.18; letter-spacing: -0.02em; color: var(--text); }
+        .section-heading.center { text-align: center; }
+        .section-sub { font-size: 16px; color: var(--text-secondary); line-height: 1.6; }
+        .section-sub.center { text-align: center; max-width: 620px; margin: 12px auto 0; }
+        .pos { color: var(--long) !important; } .neg { color: var(--short) !important; }
 
         /* STATS */
-        .stats-section { padding: 60px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface); }
-        .stats-eyebrow { font-size: 12px; font-weight: 600; color: var(--text-tertiary); text-align: center; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 28px; }
-        .stats-title { font-size: 22px; font-weight: 700; color: var(--text); text-align: center; margin-bottom: 32px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 20px; }
-        .stat-card { text-align: center; padding: 32px 20px; background: var(--bg); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-card); transition: all 0.25s; position: relative; overflow: hidden; }
-        .stat-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, var(--accent-soft), var(--purple-soft)); opacity: 0; transition: opacity 0.25s; }
+        .stats-section { padding: 56px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface); }
+        .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 18px; }
+        .stat-card { text-align: center; padding: 30px 18px; background: var(--bg); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-card); transition: transform 0.25s, box-shadow 0.25s, border-color 0.25s, opacity 0.7s; }
         .stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--accent); }
-        .stat-card:hover::before { opacity: 1; }
-        .stat-val { font-size: 44px; font-weight: 900; font-family: var(--font-mono); line-height: 1; margin-bottom: 10px; position: relative; }
-        .stat-label { font-size: 14px; color: var(--text-secondary); position: relative; }
-
-        /* EXCHANGES */
-        .exchanges-section { padding: 36px 0; border-bottom: 1px solid var(--border); }
-        .exchanges-grid { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-        .exchange-badge { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 10px; border: 1px solid var(--border); font-size: 14px; font-weight: 700; }
-        .exchange-badge.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-card); }
+        .stat-val { font-size: 44px; font-weight: 900; font-family: var(--font-mono); line-height: 1; margin-bottom: 10px; }
+        .stat-label { font-size: 13px; color: var(--text-secondary); }
+        .exchanges-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; align-items: center; margin-top: 28px; }
+        .exchanges-eyebrow { font-size: 12px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.08em; margin-right: 4px; }
+        .exchange-badge { display: flex; align-items: center; gap: 8px; padding: 9px 18px; border-radius: 10px; border: 1px solid var(--border); font-size: 13px; font-weight: 700; }
+        .exchange-badge.active { background: var(--bg); color: var(--text); box-shadow: var(--shadow-card); }
         .exchange-badge.soon { background: transparent; color: var(--text-tertiary); opacity: 0.55; }
         .exchange-soon-tag { font-size: 9px; font-weight: 700; text-transform: uppercase; background: var(--surface-hover); color: var(--text-tertiary); padding: 2px 6px; border-radius: 4px; }
 
-        /* REASONS */
-        .reasons-section { padding: 80px 0; }
-        .reasons-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }
-        .section-heading { font-size: clamp(24px, 3.5vw, 40px); font-weight: 800; line-height: 1.2; letter-spacing: -0.02em; color: var(--text); }
-        .section-heading.center { text-align: center; }
-        .section-sub { font-size: 16px; color: var(--text-secondary); }
-        .section-sub.center { text-align: center; }
-        .reasons-list { list-style: none; display: flex; flex-direction: column; gap: 16px; margin: 24px 0 32px; }
-        .reasons-list li { display: flex; align-items: flex-start; gap: 12px; font-size: 15px; color: var(--text-secondary); line-height: 1.6; }
-        .check { width: 22px; height: 22px; border-radius: 50%; background: var(--long); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; margin-top: 2px; }
+        /* STRATEGIES */
+        .strategies-section { padding: 80px 0; }
+        .strategy-scroll { width: 100%; overflow-x: auto; display: flex; gap: 16px; padding: 32px 0 12px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+        .strategy-card { flex-shrink: 0; width: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 18px; box-shadow: var(--shadow-card); transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s; }
+        .strategy-card:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+        .sc-header { margin-bottom: 8px; }
+        .sc-name { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+        .sc-tags { display: flex; gap: 6px; align-items: center; }
+        .sc-exchange { font-size: 10px; color: var(--text-tertiary); background: var(--surface-hover); padding: 2px 8px; border-radius: 5px; }
+        .sc-roi { font-size: 11px; color: var(--text-tertiary); margin-bottom: 4px; }
+        .sc-roi-val { font-family: var(--font-mono); font-size: 20px; font-weight: 800; margin-left: 4px; }
+        .sc-chart { margin: 0 -4px 8px; }
+        .sc-stats { display: flex; flex-direction: column; gap: 5px; border-top: 1px solid var(--border); padding-top: 10px; margin-bottom: 12px; }
+        .sc-stat { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); }
+        .sc-stat span:last-child { font-family: var(--font-mono); font-weight: 600; color: var(--text); }
+        .sc-btn { width: 100%; padding: 10px; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; border-radius: 9px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+        .sc-btn:hover { opacity: 0.85; }
 
-        /* PREVIEW */
-        .rv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; box-shadow: var(--shadow-lg); }
-        .rv-header { background: var(--surface-hover); padding: 10px 16px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); }
-        .rv-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--short); }
-        .rv-dot.amber { background: var(--amber); }
-        .rv-dot.green { background: var(--long); }
-        .rv-url { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); margin-left: 4px; }
-        .rv-content { display: flex; height: 200px; }
-        .rv-sidebar { width: 80px; background: var(--sidebar-bg); border-right: 1px solid var(--border); padding: 12px 8px; display: flex; flex-direction: column; gap: 8px; align-items: center; }
-        .rv-logo { width: 28px; height: 28px; border-radius: 7px; background: linear-gradient(135deg, var(--accent), var(--purple)); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 900; margin-bottom: 4px; }
-        .rv-nav { font-size: 9px; color: var(--text-tertiary); padding: 4px 6px; border-radius: 5px; text-align: center; width: 100%; }
-        .rv-nav.active { background: var(--sidebar-active); color: var(--sidebar-active-text); font-weight: 600; }
-        .rv-main { flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-        .rv-signal { background: var(--surface-hover); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
-        .rv-signal-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-        .rv-sym { font-family: var(--font-mono); font-size: 16px; font-weight: 700; color: var(--text); }
-        .rv-badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
-        .rv-badge.long { background: var(--long-soft); color: var(--long); }
-        .rv-conf { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-        .rv-conf-bar { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
-        .rv-conf-fill { height: 100%; background: var(--long); border-radius: 2px; }
-        .rv-conf-val { font-family: var(--font-mono); font-size: 12px; font-weight: 700; flex-shrink: 0; }
-        .rv-levels { display: flex; gap: 10px; font-size: 10px; }
-        .rv-scan { font-size: 10px; color: var(--text-tertiary); display: flex; align-items: center; gap: 6px; }
+        /* FEATURES BENTO */
+        .features-section { padding: 80px 0; background: var(--surface-hover); }
+        .bento { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 40px; }
+        .bento-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 28px; box-shadow: var(--shadow-card); transition: transform 0.25s, box-shadow 0.25s, border-color 0.25s, opacity 0.7s; overflow: hidden; }
+        .bento-card.wide { grid-column: span 2; display: flex; flex-direction: column; justify-content: center; background: linear-gradient(135deg, var(--surface), var(--accent-soft)); }
+        .bento-card:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: 0 20px 40px rgba(77,140,245,0.12); }
+        .bento-badge { position: absolute; top: 16px; right: 16px; z-index: 2; font-size: 9px; font-weight: 800; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; }
+        .bento-badge.new { background: linear-gradient(135deg, var(--long), #00a875); }
+        .bento-icon { font-size: 30px; margin-bottom: 14px; }
+        .bento-card.wide .bento-icon { font-size: 40px; }
+        .bento-title { font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+        .bento-card.wide .bento-title { font-size: 24px; }
+        .bento-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 16px; }
+        .bento-link { border: none; background: transparent; color: var(--accent); font-size: 13px; font-weight: 700; padding: 0; cursor: pointer; }
+
+        /* HONEST */
+        .honest-section { padding: 80px 0; }
+        .honest-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }
+        .honest-list { list-style: none; display: flex; flex-direction: column; gap: 16px; margin: 0 0 32px; }
+        .honest-list li { display: flex; align-items: flex-start; gap: 12px; font-size: 15px; color: var(--text-secondary); line-height: 1.55; }
+        .check { width: 22px; height: 22px; border-radius: 50%; background: var(--long); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+        .bv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 24px; box-shadow: var(--shadow-lg); }
+        .bv-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .bv-eyebrow { font-size: 11px; color: var(--text-tertiary); letter-spacing: 0.03em; }
+        .bv-roi { font-family: var(--font-mono); font-size: 36px; font-weight: 800; line-height: 1; }
+        .bv-cap { font-size: 12px; color: var(--text-secondary); margin: 4px 0 12px; }
+        .bv-mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+        .bv-mini { background: var(--surface-hover); padding: 8px 12px; border-radius: 8px; }
+        .bv-mini-l { font-size: 10px; color: var(--text-tertiary); }
+        .bv-mini-v { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--text); }
 
         /* STEPS */
         .steps-section { padding: 80px 0; background: var(--surface-hover); }
-        .steps-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 32px; margin-top: 48px; }
-        .step { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-card); transition: all 0.25s; }
-        .step:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--border-strong); }
-        .step-num { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; font-size: 18px; font-weight: 800; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; box-shadow: 0 4px 14px rgba(77,140,245,0.35); }
+        .steps-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 24px; margin-top: 44px; }
+        .step { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 30px; box-shadow: var(--shadow-card); transition: transform 0.25s, box-shadow 0.25s, border-color 0.25s, opacity 0.7s; }
+        .step:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); border-color: var(--accent); }
+        .step-num { width: 42px; height: 42px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; font-size: 18px; font-weight: 800; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; box-shadow: 0 4px 14px rgba(77,140,245,0.35); }
         .step-title { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
-        .step-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px; }
-        .step-link { border: none; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 8px; margin-bottom: 16px; display: inline-block; }
-        .step-img { margin-top: 12px; }
-        .si-card { background: var(--surface-hover); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: flex; align-items: center; gap: 12px; }
-        .si-logo { width: 36px; height: 36px; border-radius: 9px; background: linear-gradient(135deg, var(--accent), var(--purple)); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: 900; }
-        .si-signal { background: var(--surface-hover); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
-        .si-chat { display: flex; flex-direction: column; gap: 8px; }
-        .si-msg { padding: 8px 12px; border-radius: 10px; font-size: 12px; line-height: 1.5; max-width: 90%; }
-        .si-msg.ai { background: var(--surface-hover); color: var(--text); border-radius: 4px 10px 10px 10px; }
-        .si-msg.user { background: var(--accent); color: #fff; align-self: flex-end; border-radius: 10px 4px 10px 10px; }
-
-        /* AUDIENCE */
-        .audience-section { padding: 80px 0; }
-        .audience-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; margin-top: 40px; }
-        .audience-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 32px 28px; box-shadow: var(--shadow-card); text-align: center; transition: all 0.25s; position: relative; overflow: hidden; }
-        .audience-card::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: linear-gradient(135deg, var(--accent), var(--purple)); opacity: 0; transition: opacity 0.25s; }
-        .audience-card:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: 0 20px 40px rgba(77,140,245,0.1); }
-        .audience-card:hover::after { opacity: 1; }
-        .audience-icon { font-size: 40px; margin-bottom: 16px; }
-        .audience-card h3 { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
-        .audience-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
-
-        /* TOOLKIT */
-        .toolkit-section { padding: 80px 0; background: var(--surface-hover); }
-        .section-label { display: inline-block; font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; background: var(--accent-soft); padding: 4px 12px; border-radius: 20px; margin-bottom: 14px; }
-        .toolkit-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; margin-top: 40px; }
-        .toolkit-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-card); transition: all 0.25s; position: relative; overflow: hidden; }
-        .toolkit-card.featured { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft), var(--shadow-card); }
-        .toolkit-card:hover { border-color: var(--accent); transform: translateY(-4px); box-shadow: 0 20px 40px rgba(77,140,245,0.12); }
-        .tk-badge { position: absolute; top: 16px; right: 16px; font-size: 9px; font-weight: 800; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; }
-        .tk-badge.new { background: linear-gradient(135deg, var(--long), #00a875); }
-        .tk-icon { font-size: 28px; margin-bottom: 14px; }
-        .tk-title { font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
-        .tk-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 16px; }
-        .tk-link { border: none; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; padding: 0; transition: gap 0.2s; }
-
-        /* BENEFITS */
-        .benefits-section { padding: 80px 0; }
-        .benefits-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }
-        .benefits-list { display: flex; flex-direction: column; gap: 20px; margin-top: 28px; }
-        .benefit-item { display: flex; align-items: flex-start; gap: 16px; }
-        .benefit-icon { font-size: 24px; flex-shrink: 0; margin-top: 2px; }
-        .benefit-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
-        .benefit-desc { font-size: 13px; color: var(--text-secondary); }
-        .bv-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; box-shadow: var(--shadow-lg); }
-        .bv-period-switch { display: flex; gap: 2px; background: var(--surface-hover); border-radius: 7px; padding: 2px; }
-        .bv-period-btn { border: none; background: transparent; color: var(--text-tertiary); font-size: 10px; font-weight: 600; padding: 4px 8px; border-radius: 5px; }
-        .bv-period-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-
-        /* SECURITY */
-        .security-section { padding: 80px 0; background: var(--surface-hover); }
-        .security-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 24px; margin-top: 40px; }
-        .security-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-card); text-align: center; }
-        .security-icon { font-size: 36px; margin-bottom: 16px; }
-        .security-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
-        .security-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
+        .step-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
 
         /* COMMUNITY */
         .community-section { padding: 80px 0; }
         .community-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 48px; box-shadow: var(--shadow-lg); display: flex; justify-content: space-between; align-items: center; gap: 40px; flex-wrap: wrap; }
         .community-sub { font-size: 15px; color: var(--text-secondary); margin: 14px 0 24px; line-height: 1.6; }
-        .community-btn { padding: 12px 24px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; transition: all 0.2s; }
+        .community-btn { padding: 12px 24px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
         .community-btn.tg { background: #229ED9; color: #fff; }
         .community-btn.dc { background: #5865F2; color: #fff; }
         .community-btn:hover { opacity: 0.85; }
         .community-visual { text-align: center; }
-        .cv-avatars { display: flex; gap: -8px; }
-        .cv-avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 700; border: 2px solid var(--surface); margin-left: -8px; }
-        .cv-avatar:first-child { margin-left: 0; }
+        .cv-pulse { position: relative; width: 80px; height: 80px; margin: 0 auto; }
+        .cv-pulse span { position: absolute; inset: 0; margin: auto; width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--purple)); }
+        .cv-pulse span:nth-child(2) { width: 100%; height: 100%; background: var(--accent); opacity: 0.15; animation: ripple 2.2s ease-out infinite; }
+        .cv-pulse span:nth-child(3) { width: 100%; height: 100%; background: var(--purple); opacity: 0.12; animation: ripple 2.2s ease-out infinite 1.1s; }
 
         /* FAQ */
         .faq-section { padding: 80px 0; background: var(--surface-hover); }
-        .faq-list { max-width: 760px; margin: 40px auto 0; display: flex; flex-direction: column; gap: 0; }
+        .faq-list { max-width: 760px; margin: 36px auto 0; }
         .faq-item { border-bottom: 1px solid var(--border); }
         .faq-q { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 0; background: transparent; border: none; color: var(--text); font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; transition: color 0.2s; }
         .faq-q:hover { color: var(--accent); }
@@ -866,7 +828,7 @@ export default function Landing() {
         .footer-brand { max-width: 260px; }
         .footer-desc { font-size: 13px; color: var(--text-tertiary); line-height: 1.6; margin: 12px 0 16px; }
         .footer-socials { display: flex; gap: 8px; }
-        .social-btn { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); font-size: 16px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+        .social-btn { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); font-size: 16px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
         .social-btn:hover { background: var(--surface-hover); transform: translateY(-1px); }
         .footer-cols { display: flex; gap: 40px; flex-wrap: wrap; }
         .footer-col { display: flex; flex-direction: column; gap: 10px; }
@@ -875,39 +837,40 @@ export default function Landing() {
         .footer-link:hover { color: var(--text); }
         .footer-bottom { display: flex; justify-content: space-between; align-items: center; padding-top: 24px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-tertiary); flex-wrap: wrap; gap: 12px; }
 
-        /* SHARED */
-        .section-inner { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
-        .pos { color: var(--long) !important; }
-        .neg { color: var(--short) !important; }
-
+        /* KEYFRAMES */
         @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(0,229,168,0.4)} 70%{box-shadow:0 0 0 6px rgba(0,229,168,0)} 100%{box-shadow:0 0 0 0 rgba(0,229,168,0)} }
-        @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-        .animate-in { animation: fadeIn 0.5s ease forwards; }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes floatA { 0%,100%{ transform: translate(0,0) scale(1); } 50%{ transform: translate(40px,30px) scale(1.1); } }
+        @keyframes floatB { 0%,100%{ transform: translate(0,0) scale(1); } 50%{ transform: translate(-50px,40px) scale(1.08); } }
+        @keyframes ripple { 0%{ transform: scale(0.4); opacity: 0.4; } 100%{ transform: scale(1.4); opacity: 0; } }
+        .animate-in { animation: fadeIn 0.55s ease forwards; }
 
         /* RESPONSIVE */
         @media (max-width: 1024px) {
           .stats-grid { grid-template-columns: repeat(2,1fr); }
-          .toolkit-grid { grid-template-columns: repeat(2,1fr); }
+          .bento { grid-template-columns: repeat(2,1fr); }
+          .bento-card.wide { grid-column: span 2; }
           .steps-grid { grid-template-columns: 1fr; }
-          .reasons-inner, .benefits-inner { grid-template-columns: 1fr; }
-          .reasons-visual, .benefits-visual { display: none; }
+          .honest-inner { grid-template-columns: 1fr; gap: 40px; }
         }
         @media (max-width: 768px) {
           .nav-links { display: none; position: absolute; top: 64px; left: 0; right: 0; background: var(--sidebar-bg); padding: 16px; border-bottom: 1px solid var(--border); z-index: 99; flex-direction: column; }
           .nav-links.open { display: flex; }
           .burger-btn { display: flex; }
           .btn-login { display: none; }
-          .audience-grid, .security-grid { grid-template-columns: 1fr; }
+          .sh-body { grid-template-columns: 1fr; }
+          .sh-scanner { border-right: none; border-bottom: 1px solid var(--border); }
+          .sh-prices { display: none; }
+          .bento { grid-template-columns: 1fr; }
+          .bento-card.wide { grid-column: span 1; }
           .community-card { flex-direction: column; padding: 32px 24px; }
-          .cta-card { padding: 40px 20px; }
+          .cta-card { padding: 48px 22px; }
           .footer-cols { gap: 24px; }
-          .hero-title { font-size: 32px; }
-          .toolkit-grid { grid-template-columns: 1fr; }
         }
         @media (max-width: 480px) {
           .stats-grid { grid-template-columns: 1fr 1fr; }
-          .hero { padding: 32px 0 0; }
-          .exchange-chips { flex-wrap: wrap; justify-content: center; }
+          .hero { padding: 40px 0 56px; }
         }
       `}</style>
     </div>

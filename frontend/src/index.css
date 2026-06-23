@@ -94,30 +94,6 @@ body {
   cursor: auto;
 }
 
-/* ─── CUSTOM CURSOR ──────────────────────────────────────────── */
-.cursor-dot {
-  width: 8px; height: 8px;
-  background: var(--accent);
-  border-radius: 50%;
-  position: fixed; top: 0; left: 0;
-  pointer-events: none; z-index: 99999;
-  transform: translate(-50%, -50%);
-  transition: transform 0.1s ease, background 0.2s ease, width 0.2s ease, height 0.2s ease;
-  mix-blend-mode: normal;
-}
-.cursor-ring {
-  width: 32px; height: 32px;
-  border: 1.5px solid var(--accent);
-  border-radius: 50%;
-  position: fixed; top: 0; left: 0;
-  pointer-events: none; z-index: 99998;
-  transform: translate(-50%, -50%);
-  transition: transform 0.15s ease, width 0.2s ease, height 0.2s ease, opacity 0.2s ease;
-  opacity: 0.5;
-}
-.cursor-dot.hovering { width: 12px; height: 12px; background: var(--purple); }
-.cursor-ring.hovering { width: 44px; height: 44px; opacity: 0.3; border-color: var(--purple); }
-
 /* ─── SCROLLBAR ──────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
@@ -151,10 +127,6 @@ body {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-@keyframes gradientShift {
-  0%,100% { background-position: 0% 50%; }
-  50%      { background-position: 100% 50%; }
 }
 
 .animate-in { animation: fadeIn 0.4s ease forwards; }
@@ -199,11 +171,6 @@ a { color: inherit; text-decoration: none; cursor: auto; }
   padding: 1px 5px;
   font-size: 10px;
 }
-
-/* ─── GLOW EFFECTS ───────────────────────────────────────────── */
-.glow-green { box-shadow: 0 0 20px rgba(0,229,168,0.15); }
-.glow-blue  { box-shadow: 0 0 20px rgba(77,140,245,0.15); }
-.glow-red   { box-shadow: 0 0 20px rgba(255,79,96,0.15); }
 
 /* ─── GRADIENT TEXT ──────────────────────────────────────────── */
 .gradient-text {
