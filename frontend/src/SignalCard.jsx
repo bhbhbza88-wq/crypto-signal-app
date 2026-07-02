@@ -1,4 +1,5 @@
-import { ComposedChart, Line, ReferenceLine, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { useEffect, useRef, useState } from 'react'
+import { createChart, ColorType, LineStyle, CrosshairMode } from 'lightweight-charts'
 
 function ConfidenceBar({ score, maxScore = 20 }) {
   const pct = Math.round((score / maxScore) * 100)
@@ -42,20 +43,137 @@ function ConfidenceBar({ score, maxScore = 20 }) {
   )
 }
 
+// читает текущее значение CSS-переменной темы (реагирует на смену light/dark)
+function cssVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || fallback
+}
+
+function useThemeTick() {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const obs = new MutationObserver(() => setTick(t => t + 1))
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => obs.disconnect()
+  }, [])
+  return tick
+}
+
+// свечной график в стиле TradingView с разметкой Вход/SL/TP1-3
+function CandleChart({ signal }) {
+  const containerRef = useRef(null)
+  const chartRef = useRef(null)
+  const seriesRef = useRef(null)
+  const themeTick = useThemeTick()
+
+  const candles = signal.candles || []
+
+  // создание графика (один раз)
+  useEffect(() => {
+    if (!containerRef.current) return
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: 'transparent' },
+        textColor: cssVar('--text-tertiary', '#9aa0ad'),
+        fontFamily: cssVar('--font-mono', 'monospace'),
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: cssVar('--border', '#e2e6ed') },
+        horzLines: { color: cssVar('--border', '#e2e6ed') },
+      },
+      crosshair: { mode: CrosshairMode.Normal },
+      rightPriceScale: { borderColor: cssVar('--border', '#e2e6ed') },
+      timeScale: { borderColor: cssVar('--border', '#e2e6ed'), timeVisible: true, secondsVisible: false },
+      handleScroll: false,
+      handleScale: false,
+    })
+    chartRef.current = chart
+    seriesRef.current = chart.addCandlestickSeries({
+      upColor: cssVar('--long', '#00c896'),
+      downColor: cssVar('--short', '#f04a59'),
+      borderVisible: false,
+      wickUpColor: cssVar('--long', '#00c896'),
+      wickDownColor: cssVar('--short', '#f04a59'),
+    })
+
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect
+      if (width > 0 && height > 0) chart.resize(width, height)
+    })
+    ro.observe(containerRef.current)
+
+    return () => { ro.disconnect(); chart.remove(); chartRef.current = null; seriesRef.current = null }
+  }, [])
+
+  // перекраска при смене темы
+  useEffect(() => {
+    if (!chartRef.current) return
+    chartRef.current.applyOptions({
+      layout: { textColor: cssVar('--text-tertiary', '#9aa0ad') },
+      grid: {
+        vertLines: { color: cssVar('--border', '#e2e6ed') },
+        horzLines: { color: cssVar('--border', '#e2e6ed') },
+      },
+      rightPriceScale: { borderColor: cssVar('--border', '#e2e6ed') },
+      timeScale: { borderColor: cssVar('--border', '#e2e6ed') },
+    })
+    seriesRef.current?.applyOptions({
+      upColor: cssVar('--long', '#00c896'),
+      downColor: cssVar('--short', '#f04a59'),
+      wickUpColor: cssVar('--long', '#00c896'),
+      wickDownColor: cssVar('--short', '#f04a59'),
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [themeTick])
+
+  // данные + линии уровней
+  useEffect(() => {
+    const series = seriesRef.current
+    if (!series || candles.length === 0) return
+
+    const seen = new Set()
+    const data = candles
+      .map(c => ({ time: Math.floor(c.timestamp / 1000), open: c.open, high: c.high, low: c.low, close: c.close }))
+      .filter(d => { if (seen.has(d.time)) return false; seen.add(d.time); return true })
+      .sort((a, b) => a.time - b.time)
+    series.setData(data)
+
+    const lines = []
+    const addLine = (price, color, title, dashed) => {
+      if (price == null) return
+      lines.push(series.createPriceLine({
+        price, color, title,
+        lineWidth: dashed ? 1 : 2,
+        lineStyle: dashed ? LineStyle.Dashed : LineStyle.Solid,
+        axisLabelVisible: true,
+      }))
+    }
+    addLine(signal.entry, cssVar('--accent', '#3b7cf4'), 'ВХОД')
+    addLine(signal.stop, cssVar('--short', '#f04a59'), 'SL')
+    addLine(signal.tp1, cssVar('--long', '#00c896'), 'TP1')
+    addLine(signal.tp2, cssVar('--long', '#00c896'), 'TP2', true)
+    addLine(signal.tp3, cssVar('--long', '#00c896'), 'TP3', true)
+
+    chartRef.current?.timeScale().fitContent()
+    return () => { lines.forEach(l => series.removePriceLine(l)) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(candles), signal.entry, signal.stop, signal.tp1, signal.tp2, signal.tp3])
+
+  return <div ref={containerRef} className="tv-chart-canvas" />
+}
+
 export default function SignalCard({ signal }) {
   const isLong = signal.signal === 'LONG'
   const tone = isLong ? 'var(--long)' : 'var(--short)'
   const toneSoft = isLong ? 'var(--long-soft)' : 'var(--short-soft)'
   const sym = signal.symbol.replace('/USDT', '')
 
-  const chartData = (signal.candles || []).map((c) => ({
-    time: new Date(c.timestamp).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-    close: c.close,
-  }))
-
-  const allLevels = [signal.entry, signal.stop, signal.tp1, signal.tp2, signal.tp3]
-  const yMin = Math.min(...allLevels, ...chartData.map((d) => d.close)) * 0.998
-  const yMax = Math.max(...allLevels, ...chartData.map((d) => d.close)) * 1.002
+  const candles = signal.candles || []
+  const lastClose = candles.length ? candles[candles.length - 1].close : null
+  const livePnlPct = lastClose != null
+    ? (isLong ? (lastClose - signal.entry) / signal.entry * 100 : (signal.entry - lastClose) / signal.entry * 100)
+    : null
 
   const stage = signal.tp2_hit ? 'TP2 достигнут' : signal.tp1_hit ? 'TP1 достигнут' : 'Открыта'
   const pct = Math.round((signal.score / 20) * 100)
@@ -94,32 +212,35 @@ export default function SignalCard({ signal }) {
         <ConfidenceBar score={signal.score} maxScore={20} />
       </div>
 
-      <div className="chart-wrap">
-        <ResponsiveContainer width="100%" height={200}>
-          <ComposedChart data={chartData} margin={{ top: 8, right: 50, bottom: 0, left: 0 }}>
-            <XAxis dataKey="time" tick={{ fill: 'var(--text-tertiary)', fontSize: 10, fontFamily: 'var(--font-mono)' }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} minTickGap={40} />
-            <YAxis domain={[yMin, yMax]} tick={{ fill: 'var(--text-tertiary)', fontSize: 10, fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} width={0} />
-            <Tooltip
-              contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, fontFamily: 'var(--font-mono)', fontSize: 12, boxShadow: 'var(--shadow-card)' }}
-              labelStyle={{ color: 'var(--text-secondary)' }}
-              formatter={(v) => [v.toFixed(4), 'Цена']}
-            />
-            <ReferenceLine y={signal.entry} stroke="var(--accent)" strokeDasharray="4 4" label={{ value: 'Вход', position: 'right', fill: 'var(--accent)', fontSize: 10, fontFamily: 'var(--font-mono)' }} />
-            <ReferenceLine y={signal.stop} stroke="var(--short)" label={{ value: 'SL', position: 'right', fill: 'var(--short)', fontSize: 10, fontFamily: 'var(--font-mono)' }} />
-            <ReferenceLine y={signal.tp1} stroke="var(--long)" label={{ value: 'TP1', position: 'right', fill: 'var(--long)', fontSize: 10, fontFamily: 'var(--font-mono)' }} />
-            <ReferenceLine y={signal.tp2} stroke="var(--long)" strokeDasharray="4 4" strokeOpacity={0.55} label={{ value: 'TP2', position: 'right', fill: 'var(--long)', fontSize: 10, fontFamily: 'var(--font-mono)' }} />
-            <ReferenceLine y={signal.tp3} stroke="var(--long)" strokeDasharray="2 4" strokeOpacity={0.4} label={{ value: 'TP3', position: 'right', fill: 'var(--long)', fontSize: 10, fontFamily: 'var(--font-mono)' }} />
-            <Line type="monotone" dataKey="close" stroke="var(--text)" strokeWidth={1.8} dot={false} />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="levels-row">
-        <Level label="Вход" value={signal.entry} />
-        <Level label="Стоп" value={signal.stop} tone="short" />
-        <Level label="TP1" value={signal.tp1} tone="long" />
-        <Level label="TP2" value={signal.tp2} tone="long" />
-        <Level label="TP3" value={signal.tp3} tone="long" />
+      {/* TradingView-style свечной график */}
+      <div className="tv-card">
+        <div className="tv-chrome">
+          <span className="tv-dot r" /><span className="tv-dot a" /><span className="tv-dot g" />
+          <span className="tv-pair">{sym}/USDT</span>
+          <span className="tv-live"><span className="tv-live-dot" />LIVE</span>
+          {lastClose != null && (
+            <span className="tv-price">
+              ${lastClose < 1 ? lastClose.toFixed(5) : lastClose.toFixed(2)}
+              {livePnlPct != null && (
+                <span className={`tv-pnl ${livePnlPct >= 0 ? 'pos' : 'neg'}`}>
+                  {livePnlPct >= 0 ? '▲' : '▼'}{Math.abs(livePnlPct).toFixed(2)}%
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+        {candles.length > 0 ? (
+          <CandleChart signal={signal} />
+        ) : (
+          <div className="tv-empty">Загрузка графика...</div>
+        )}
+        <div className="tv-legend">
+          <LegendChip color="var(--accent)" label="Вход" value={signal.entry} />
+          <LegendChip color="var(--short)" label="SL" value={signal.stop} />
+          <LegendChip color="var(--long)" label="TP1" value={signal.tp1} />
+          <LegendChip color="var(--long)" label="TP2" value={signal.tp2} dashed />
+          <LegendChip color="var(--long)" label="TP3" value={signal.tp3} dashed />
+        </div>
       </div>
 
       {signal.position_size != null && (
@@ -177,22 +298,31 @@ export default function SignalCard({ signal }) {
           margin-bottom: 4px;
         }
 
-        .chart-wrap { padding: 0 6px; margin-bottom: 8px; }
-        .levels-row {
-          display: flex; gap: 20px; flex-wrap: wrap;
-          padding: 16px 22px;
-          border-top: 1px solid var(--border);
-        }
+        /* TRADINGVIEW CARD */
+        .tv-card { margin: 14px 22px 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
+        .tv-chrome { display: flex; align-items: center; gap: 7px; padding: 9px 12px; background: var(--surface-hover); border-bottom: 1px solid var(--border); }
+        .tv-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .tv-dot.r { background: var(--short); } .tv-dot.a { background: var(--amber); } .tv-dot.g { background: var(--long); }
+        .tv-pair { font-size: 11px; font-family: var(--font-mono); font-weight: 700; color: var(--text-secondary); margin-left: 4px; }
+        .tv-live { display: flex; align-items: center; gap: 4px; font-size: 9px; font-weight: 800; color: var(--long); text-transform: uppercase; letter-spacing: 0.06em; margin-left: 10px; }
+        .tv-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--long); animation: pulse 2s infinite; }
+        .tv-price { margin-left: auto; font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 7px; }
+        .tv-pnl { font-size: 11px; font-weight: 700; }
+        .tv-pnl.pos { color: var(--long); } .tv-pnl.neg { color: var(--short); }
+        .tv-chart-canvas { width: 100%; height: 280px; }
+        .tv-empty { height: 280px; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); font-size: 12px; }
+        .tv-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-hover); }
+
         .position-row {
           display: flex; justify-content: space-between; align-items: center;
-          margin: 0 22px 16px;
+          margin: 14px 22px 0;
           padding: 12px 14px;
           background: var(--accent-soft); border-radius: 10px;
         }
         .position-label { font-size: 12px; color: var(--text-secondary); }
         .position-value { font-family: var(--font-mono); font-weight: 700; color: var(--accent); font-size: 14px; }
         .reasons-block {
-          margin: 0 22px 20px;
+          margin: 16px 22px 20px;
           padding-top: 14px;
           border-top: 1px solid var(--border);
         }
@@ -205,6 +335,8 @@ export default function SignalCard({ signal }) {
           display: flex; flex-direction: column; gap: 6px;
         }
         .reasons-list li { font-size: 13px; color: var(--text); line-height: 1.4; }
+
+        @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(0,229,168,0.4)} 70%{box-shadow:0 0 0 5px rgba(0,229,168,0)} 100%{box-shadow:0 0 0 0 rgba(0,229,168,0)} }
       `}</style>
     </div>
   )
@@ -224,16 +356,18 @@ function MetaTag({ label, value, highlight }) {
   )
 }
 
-function Level({ label, value, tone }) {
-  const color = tone === 'long' ? 'var(--long)' : tone === 'short' ? 'var(--short)' : 'var(--text)'
+function LegendChip({ color, label, value, dashed }) {
+  if (value == null) return null
   return (
-    <div className="level">
-      <span className="level-label">{label}</span>
-      <span className="level-value" style={{ color }}>{value?.toFixed(4)}</span>
+    <div className="legend-chip">
+      <span className="legend-swatch" style={{ background: dashed ? 'transparent' : color, border: dashed ? `1.5px dashed ${color}` : 'none' }} />
+      <span className="legend-label">{label}</span>
+      <span className="legend-value" style={{ color }}>{value.toFixed(4)}</span>
       <style>{`
-        .level { display: flex; flex-direction: column; gap: 3px; }
-        .level-label { font-size: 11px; color: var(--text-tertiary); }
-        .level-value { font-size: 14px; font-weight: 600; font-family: var(--font-mono); }
+        .legend-chip { display: flex; align-items: center; gap: 5px; }
+        .legend-swatch { width: 10px; height: 3px; border-radius: 2px; flex-shrink: 0; }
+        .legend-label { font-size: 10px; color: var(--text-tertiary); }
+        .legend-value { font-size: 11px; font-weight: 700; font-family: var(--font-mono); }
       `}</style>
     </div>
   )
