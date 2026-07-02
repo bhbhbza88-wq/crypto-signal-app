@@ -3,7 +3,10 @@ FastAPI backend — V8 стратегия.
 Бэктест использует should_enter() + get_mults() + calc_levels() из nfi_strategy (V8).
 """
 
+import os
 import json
+import urllib.request
+import urllib.error
 import pandas as pd
 import time as _time
 from datetime import datetime, timedelta
@@ -16,6 +19,7 @@ from pydantic import BaseModel
 import database as db
 import auth
 from scanner import start_background_scanner, MAX_OPEN_TRADES
+import data_layer
 from data_layer import exchange, api_call, build_features, detect_regime, get_active_symbols, CANDIDATES
 import nfi_strategy
 from nfi_strategy import (
@@ -119,6 +123,72 @@ def billing_upgrade(req: UpgradeRequest, authorization: str | None = Header(defa
         raise HTTPException(status_code=400, detail="Неизвестный тариф")
     db.set_user_tier(user['id'], req.tier)
     return {"ok": True, "tier": req.tier, "note": "ЗАГЛУШКА — реальная оплата будет позже"}
+
+
+# ── AI Ассистент (серверный ключ) ────────────────────────────────
+# Ключ живёт в env OPENAI_API_KEY (как и телеграм-токен — никогда в коде).
+# Лимиты в памяти процесса: при рестарте сбрасываются — для Этапа 1 достаточно.
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+AI_MODEL = "gpt-4o-mini"
+AI_DAILY_LIMITS = {'free': 5, 'premium': 50, 'vip': 200}
+_ai_usage: dict[int, dict] = {}   # user_id -> {'date': 'YYYY-MM-DD', 'count': int}
+
+class AIChatRequest(BaseModel):
+    messages: list[dict]
+
+
+@app.post("/api/ai/chat")
+def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)):
+    user = auth.user_from_token(_token_from_header(authorization))
+    if not user:
+        raise HTTPException(status_code=401, detail="Войди в аккаунт, чтобы пользоваться AI-ассистентом")
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="AI-ассистент временно недоступен")
+
+    tier = auth.effective_tier(user)
+    limit = AI_DAILY_LIMITS.get(tier, AI_DAILY_LIMITS['free'])
+    today = datetime.now().strftime('%Y-%m-%d')
+    usage = _ai_usage.get(user['id'])
+    if not usage or usage['date'] != today:
+        usage = {'date': today, 'count': 0}
+    if usage['count'] >= limit:
+        raise HTTPException(status_code=429,
+                            detail=f"Дневной лимит AI-запросов исчерпан ({limit}/день на тарифе {tier}). "
+                                   f"Лимит обновится завтра.")
+
+    # Санитизация: только role/content, хвост диалога, обрезка длинных сообщений
+    msgs = []
+    for m in req.messages[-20:]:
+        role = m.get('role')
+        content = m.get('content')
+        if role in ('system', 'user', 'assistant') and isinstance(content, str):
+            msgs.append({'role': role, 'content': content[:6000]})
+    if not msgs or msgs[-1]['role'] != 'user':
+        raise HTTPException(status_code=400, detail="Некорректный формат сообщений")
+
+    payload = json.dumps({'model': AI_MODEL, 'max_tokens': 800, 'messages': msgs}).encode()
+    request = urllib.request.Request(
+        'https://api.openai.com/v1/chat/completions',
+        data=payload,
+        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {OPENAI_API_KEY}'},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        try:
+            err = json.loads(e.read()).get('error', {}).get('message', str(e))
+        except Exception:
+            err = str(e)
+        raise HTTPException(status_code=502, detail=f"Ошибка AI-провайдера: {err}")
+    except Exception:
+        raise HTTPException(status_code=502, detail="AI-провайдер не отвечает, попробуй позже")
+
+    reply = (data.get('choices') or [{}])[0].get('message', {}).get('content') or 'Не удалось получить ответ'
+    usage['count'] += 1
+    _ai_usage[user['id']] = usage
+    return {"reply": reply, "used": usage['count'], "limit": limit}
 
 
 # ── API endpoints ────────────────────────────────────────────────
@@ -400,9 +470,14 @@ def get_market():
     try:
         btc = api_call(exchange.fetch_ticker, 'BTC/USDT') or {}
         eth = api_call(exchange.fetch_ticker, 'ETH/USDT') or {}
+        overview = data_layer.get_market_overview()
         return {
             "btc": {"price": btc.get('last', 0), "change": btc.get('percentage', 0)},
             "eth": {"price": eth.get('last', 0), "change": eth.get('percentage', 0)},
+            # Скринер: пока фоновый снапшот не готов — loading, фронт покажет заглушку
+            **(overview or {"symbols": [], "btc_regime": "НЕТ ДАННЫХ",
+                            "uptrend_count": 0, "downtrend_count": 0, "chop_count": 0,
+                            "loading": True}),
         }
     except Exception as e:
         return {"error": str(e)}

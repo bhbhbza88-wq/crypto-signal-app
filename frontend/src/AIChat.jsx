@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { api } from './api'
 
 const SUGGESTIONS = [
   'Почему сканер вошёл в эту сделку?',
@@ -8,8 +9,6 @@ const SUGGESTIONS = [
   'Что такое ADX и зачем он нужен?',
   'Когда лучше не торговать?',
 ]
-
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ''
 
 function buildSystemPrompt(signals, stats, market) {
   const activeSignal = signals?.length > 0 ? JSON.stringify(signals[0], null, 2) : 'Нет активных сигналов'
@@ -41,13 +40,12 @@ export default function AIChat({ signals, stats, market }) {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: '👋 Привет! Я AI-ассистент NWICKI на базе GPT-4o. Могу объяснить текущий сигнал, риски, стратегию сканера или ответить на любой вопрос о торговле. Спрашивай!'
+      content: '👋 Привет! Я AI-ассистент NWICKI. Могу объяснить текущий сигнал, риски, стратегию сканера или ответить на любой вопрос о торговле. Спрашивай!'
     }
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [apiKey, setApiKey] = useState(OPENAI_API_KEY)
-  const [showKeyInput, setShowKeyInput] = useState(!OPENAI_API_KEY)
+  const [quota, setQuota] = useState(null)   // {used, limit} с бэкенда
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -56,7 +54,6 @@ export default function AIChat({ signals, stats, market }) {
 
   async function sendMessage(text) {
     if (!text.trim() || loading) return
-    if (!apiKey) { setShowKeyInput(true); return }
 
     const userMsg = { role: 'user', content: text }
     setMessages(prev => [...prev, userMsg])
@@ -64,90 +61,18 @@ export default function AIChat({ signals, stats, market }) {
     setLoading(true)
 
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          max_tokens: 800,
-          messages: [
-            { role: 'system', content: buildSystemPrompt(signals, stats, market) },
-            ...messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
-            userMsg,
-          ]
-        })
-      })
-      const data = await response.json()
-      if (data.error) throw new Error(data.error.message)
-      const reply = data.choices?.[0]?.message?.content || 'Не удалось получить ответ'
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }])
+      const data = await api.aiChat([
+        { role: 'system', content: buildSystemPrompt(signals, stats, market) },
+        ...messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
+        userMsg,
+      ])
+      setQuota({ used: data.used, limit: data.limit })
+      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `❌ Ошибка: ${e.message}` }])
+      setMessages(prev => [...prev, { role: 'assistant', content: `❌ ${e.message}` }])
     } finally {
       setLoading(false)
     }
-  }
-
-  if (showKeyInput) {
-    return (
-      <div className="key-setup">
-        <div className="key-icon">🔑</div>
-        <h3 className="key-title">Введи OpenAI API ключ</h3>
-        <p className="key-desc">Ключ хранится только в браузере и никуда не отправляется кроме OpenAI.</p>
-        <input
-          className="key-input"
-          type="password"
-          placeholder="sk-..."
-          value={apiKey}
-          onChange={e => setApiKey(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && apiKey.startsWith('sk-')) {
-              setShowKeyInput(false)
-            }
-          }}
-        />
-        <button
-          className="key-btn"
-          disabled={!apiKey.startsWith('sk-')}
-          onClick={() => setShowKeyInput(false)}
-        >
-          Подключить
-        </button>
-        <p className="key-hint">Получить ключ: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">platform.openai.com/api-keys</a></p>
-        <style>{`
-          .key-setup {
-            background: var(--surface); border: 1px solid var(--border);
-            border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
-            padding: 48px 32px; display: flex; flex-direction: column;
-            align-items: center; gap: 16px; text-align: center;
-          }
-          .key-icon { font-size: 40px; }
-          .key-title { font-size: 20px; font-weight: 700; color: var(--text); }
-          .key-desc { font-size: 13px; color: var(--text-secondary); max-width: 360px; line-height: 1.6; }
-          .key-input {
-            width: 100%; max-width: 400px; padding: 12px 16px;
-            background: var(--surface-hover); border: 1px solid var(--border);
-            border-radius: var(--radius-md); color: var(--text);
-            font-family: var(--font-mono); font-size: 14px; outline: none;
-            transition: border-color 0.15s;
-          }
-          .key-input:focus { border-color: var(--accent); }
-          .key-btn {
-            padding: 12px 32px; background: var(--accent); color: #fff;
-            border: none; border-radius: var(--radius-md);
-            font-size: 14px; font-weight: 600;
-            transition: opacity 0.15s;
-          }
-          .key-btn:disabled { opacity: 0.4; }
-          .key-btn:hover:not(:disabled) { opacity: 0.85; }
-          .key-hint { font-size: 12px; color: var(--text-tertiary); }
-          .key-hint a { color: var(--accent); }
-        `}</style>
-      </div>
-    )
   }
 
   return (
@@ -157,15 +82,15 @@ export default function AIChat({ signals, stats, market }) {
           <div className="ai-avatar">AI</div>
           <div>
             <span className="chat-title">NWICKI AI</span>
-            <span className="chat-sub">GPT-4o · Знает текущие сигналы и рынок</span>
+            <span className="chat-sub">Знает текущие сигналы и рынок</span>
           </div>
         </div>
         <div className="chat-header-right">
+          {quota && <span className="quota-text">{quota.used}/{quota.limit} сегодня</span>}
           <div className="ai-status">
             <span className="status-dot" />
             <span className="status-text">Online</span>
           </div>
-          <button className="key-change-btn" onClick={() => setShowKeyInput(true)} title="Сменить API ключ">🔑</button>
         </div>
       </div>
 
@@ -241,8 +166,7 @@ export default function AIChat({ signals, stats, market }) {
         .ai-status { display: flex; align-items: center; gap: 6px; }
         .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--long); animation: pulse 2s infinite; }
         .status-text { font-size: 12px; color: var(--text-tertiary); }
-        .key-change-btn { border: 1px solid var(--border); background: var(--surface-hover); width: 32px; height: 32px; border-radius: 8px; font-size: 14px; }
-        .key-change-btn:hover { background: var(--surface); }
+        .quota-text { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
 
         .chat-messages {
           flex: 1; overflow-y: auto; padding: 20px;

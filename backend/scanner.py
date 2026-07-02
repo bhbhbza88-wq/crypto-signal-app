@@ -10,7 +10,7 @@ import asyncio
 from datetime import datetime
 
 import database as db
-from data_layer import clean_cache
+from data_layer import clean_cache, get_market_overview
 from nfi_strategy import scan_for_nfi_signals, daily_loss_ok, DAILY_LOSS_LIMIT_PCT
 import tracker
 
@@ -143,6 +143,12 @@ def safe_scan():
         print(f"❌ scan: {e}\n{traceback.format_exc()}")
     xsec_tick()
     trend_tick()
+    # Держим снапшот Скринера тёплым: после скана OHLCV уже в кэше,
+    # так что обновление обзора не делает лишних запросов к бирже.
+    try:
+        get_market_overview()
+    except Exception as e:
+        print(f"❌ overview: {e}")
 
 
 def run_scanner_loop():

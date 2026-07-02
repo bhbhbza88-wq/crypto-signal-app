@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { api, setToken } from './api'
 
-export default function AuthModal({ onClose, onAuth }) {
-  const [mode, setMode] = useState('login')   // 'login' | 'register'
+export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
+  const [mode, setMode] = useState(initialMode)   // 'login' | 'register'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(null)
@@ -29,7 +29,7 @@ export default function AuthModal({ onClose, onAuth }) {
       <div className="am-modal" onClick={e => e.stopPropagation()}>
         <button className="am-close" onClick={onClose}>✕</button>
         <h2 className="am-title">{mode === 'login' ? 'Вход' : 'Регистрация'}</h2>
-        <p className="am-sub">{mode === 'login' ? 'Войдите в аккаунт NWICKI' : 'Создайте бесплатный аккаунт'}</p>
+        <p className="am-sub">{mode === 'login' ? 'Войдите в аккаунт NWICKI' : 'Первые 3 дня Premium бесплатно — карта не нужна'}</p>
 
         <form onSubmit={submit} className="am-form">
           <input className="am-input" type="email" placeholder="Email" value={email}

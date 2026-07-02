@@ -58,4 +58,5 @@ export const api = {
   getTrendHistory: (limit = 100) => get(`/trend/history?limit=${limit}`),
   getMarketPhase: () => get('/market/phase'),
   getStrategiesSummary: () => get('/strategies/summary'),
+  aiChat: (messages) => post('/ai/chat', { messages }),
 }

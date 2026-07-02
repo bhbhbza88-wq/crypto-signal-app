@@ -4,6 +4,7 @@ Data Layer — получение OHLCV данных с Bybit и расчёт т
 """
 
 import time
+import threading
 import ccxt
 import pandas as pd
 
@@ -144,6 +145,58 @@ CANDIDATES = [
 
 def get_active_symbols():
     return CANDIDATES
+
+
+# ── Обзор рынка (Скринер) ────────────────────────────────────────
+# Снапшот режимов по всем парам. Строится в фоновом потоке, потому что
+# холодный проход по 39 парам занимает десятки секунд — HTTP-запрос
+# не должен этого ждать. Пока снапшота нет, эндпоинт отдаёт "loading".
+
+OVERVIEW_TTL = 180
+_overview_state = {'ts': 0, 'data': None, 'building': False}
+_overview_lock = threading.Lock()
+
+
+def _build_market_overview():
+    symbols = []
+    for sym in CANDIDATES:
+        data = fetch_data_cached(sym)
+        if not data:
+            continue
+        df = build_features(data['1h'])
+        regime, adx = detect_regime(df)
+        symbols.append({'symbol': sym, 'regime': regime, 'adx': round(float(adx), 1)})
+    up = sum(1 for s in symbols if s['regime'] == 'UPTREND')
+    down = sum(1 for s in symbols if s['regime'] == 'DOWNTREND')
+    btc = next((s for s in symbols if s['symbol'] == 'BTC/USDT'), None)
+    return {
+        'symbols': symbols,
+        'btc_regime': btc['regime'] if btc else 'НЕТ ДАННЫХ',
+        'uptrend_count': up,
+        'downtrend_count': down,
+        'chop_count': len(symbols) - up - down,
+    }
+
+
+def _refresh_overview():
+    try:
+        data = _build_market_overview()
+        with _overview_lock:
+            _overview_state['data'] = data
+            _overview_state['ts'] = time.time()
+    finally:
+        with _overview_lock:
+            _overview_state['building'] = False
+
+
+def get_market_overview():
+    """Текущий снапшот обзора рынка (может быть None, пока строится первый)."""
+    with _overview_lock:
+        stale = _overview_state['data'] is None or time.time() - _overview_state['ts'] >= OVERVIEW_TTL
+        if stale and not _overview_state['building']:
+            _overview_state['building'] = True
+            threading.Thread(target=_refresh_overview, daemon=True).start()
+        return _overview_state['data']
 
 
 def fmt_price(p):

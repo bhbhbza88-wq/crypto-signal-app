@@ -121,11 +121,11 @@ const EXCHANGES = [
 // Возможности (Toolkit + Benefits, отобрано сильнейшее)
 const FEATURES = [
   { icon: '◈', title: 'Сигнал-сканер', desc: 'Сканирует 32 пары на Bybit каждые 2 минуты по EMA, RSI, ADX и ATR и сам находит лучший сетап. Сердце платформы.', wide: true },
-  { icon: '✦', title: 'AI Ассистент', desc: 'GPT-4o знает текущие сигналы. Спроси «почему вошли?» — получи ответ за секунду.', badge: 'AI' },
+  { icon: '✦', title: 'AI Ассистент', desc: 'AI знает текущие сигналы и рынок. Спроси «почему вошли?» — получи ответ за секунду.', badge: 'AI' },
   { icon: '⬡', title: 'Скринер рынка', desc: 'Тепловая карта 32 пар с режимами и ADX. TradingView-график по клику.' },
   { icon: '≡', title: 'История & аналитика', desc: 'Публичный трек-рекорд: PnL по дням, винрейт, разбивка TP/SL.' },
   { icon: '📊', title: 'Бэктест на полной истории', desc: 'Проверяй любую стратегию на исторических данных перед запуском.' },
-  { icon: '⚡', title: 'Терминал', desc: 'Исполнение через API Bybit: трейлинг-стоп, частичное закрытие, мульти-тейк.', badge: 'NEW' },
+  { icon: '⚡', title: 'Smart Trade калькулятор', desc: 'Размер позиции, риск и R:R по TP-уровням — посчитай сделку до входа.', badge: 'NEW' },
 ]
 
 // Почему мы честнее (Reasons + Security, слитые в один блок доверия)
@@ -283,7 +283,7 @@ export default function Landing() {
       <div className="announce-bar">
         <span className="announce-dot" />
         <span>✦ NWICKI — AI сканирует рынок и объясняет каждый сигнал в реальном времени</span>
-        <button className="announce-btn" onClick={() => navigate('/app')}>Попробовать бесплатно →</button>
+        <button className="announce-btn" onClick={() => navigate('/app?auth=register')}>Попробовать бесплатно →</button>
       </div>
 
       {/* ── NAVBAR ── */}
@@ -302,8 +302,8 @@ export default function Landing() {
 
           <div className="nav-right">
             <button className="theme-btn" onClick={() => setDark(d => !d)}>{dark ? '☀' : '☾'}</button>
-            <button className="btn-login" onClick={() => navigate('/app')}>Войти</button>
-            <button className="btn-trial" onClick={() => navigate('/app')}>Начать бесплатно</button>
+            <button className="btn-login" onClick={() => navigate('/app?auth=login')}>Войти</button>
+            <button className="btn-trial" onClick={() => navigate('/app?auth=register')}>Начать бесплатно</button>
             <button className="burger-btn" onClick={() => setMenuOpen(o => !o)}>
               <span/><span/><span/>
             </button>
@@ -322,7 +322,7 @@ export default function Landing() {
         <div className="hero-inner">
           <div className="hero-badge animate-in">
             <span className="hb-dot" />
-            <span>Новое: Telegram-уведомления о сигналах</span>
+            <span>Новое: AI-ассистент объясняет каждый сигнал</span>
           </div>
 
           <h1 className="hero-title animate-in">
@@ -334,7 +334,7 @@ export default function Landing() {
           </p>
 
           <div className="hero-actions animate-in">
-            <button className="btn-hero-primary" onClick={() => navigate('/app')}>
+            <button className="btn-hero-primary" onClick={() => navigate('/app?auth=register')}>
               <span>Начать бесплатно</span>
               <span className="btn-arrow">→</span>
             </button>
@@ -515,14 +515,15 @@ export default function Landing() {
             <div className="community-text">
               <h2 className="section-heading">Присоединяйся к сообществу<br/>NWICKI</h2>
               <p className="community-sub">Сигналы, разборы стратегий и поддержка — в Telegram и Discord.</p>
-              <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
-                <button className="community-btn tg">✈ Telegram</button>
-                <button className="community-btn dc">Discord</button>
+              <div style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'center'}}>
+                <button className="community-btn tg" disabled style={{opacity:0.55,cursor:'default'}}>✈ Telegram</button>
+                <button className="community-btn dc" disabled style={{opacity:0.55,cursor:'default'}}>Discord</button>
+                <span style={{fontSize:11,fontWeight:700,letterSpacing:'0.08em',color:'var(--text-tertiary)',border:'1px solid var(--border)',borderRadius:20,padding:'4px 10px'}}>СКОРО</span>
               </div>
             </div>
             <div className="community-visual">
               <div className="cv-pulse"><span /><span /><span /></div>
-              <div style={{fontSize:13,color:'var(--text-secondary)',marginTop:12}}>Сообщество растёт каждый день</div>
+              <div style={{fontSize:13,color:'var(--text-secondary)',marginTop:12}}>Каналы сообщества запускаются</div>
             </div>
           </div>
         </div>

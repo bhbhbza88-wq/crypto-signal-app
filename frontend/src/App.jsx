@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, Component } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getToken, setToken } from './api'
 import AuthModal from './AuthModal'
@@ -17,6 +17,30 @@ import StrategiesCompare from './StrategiesCompare'
 
 const POLL_INTERVAL = 15000
 const MARKET_POLL_INTERVAL = 60000
+
+// Ошибка в одной вкладке не должна ронять всё приложение в белый экран
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null } }
+  static getDerivedStateFromError(error) { return { error } }
+  componentDidUpdate(prevProps) {
+    if (this.state.error && prevProps.resetKey !== this.props.resetKey) this.setState({ error: null })
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="section animate-in" style={{ textAlign: 'center', padding: '60px 20px' }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+          <h2 style={{ marginBottom: 8 }}>Что-то пошло не так</h2>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 20 }}>
+            Раздел не смог загрузиться. Попробуй обновить страницу — остальное приложение работает.
+          </p>
+          <button className="btn-primary" onClick={() => window.location.reload()}>Обновить</button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 const NAV_SECTIONS = [
   { title: 'Главное', items: [
@@ -146,7 +170,7 @@ function UpgradeLock({ tab, user, onUpgrade, onLogin }) {
         ? <button className="lock-btn" onClick={onUpgrade}>Перейти на Premium →</button>
         : <button className="lock-btn" onClick={onLogin}>Начать 3 дня бесплатно →</button>}
       <div className="lock-feats">
-        {['Сравнение всех стратегий', 'Дальран в реальном времени', 'Long-Short и Trend-Following', 'Telegram-алерты'].map((f, i) => (
+        {['Сравнение всех стратегий', 'Дальран в реальном времени', 'Long-Short и Trend-Following', 'AI-ассистент 50 вопросов/день'].map((f, i) => (
           <span key={i} className="lock-feat">✓ {f}</span>
         ))}
       </div>
@@ -178,6 +202,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [user, setUser] = useState(null)
   const [showAuth, setShowAuth] = useState(false)
+  const [authMode, setAuthMode] = useState('login')
   const prevRef = useRef([])
   const prices = useLivePrices()
 
@@ -185,6 +210,15 @@ export default function App() {
   useEffect(() => {
     if (getToken()) {
       api.me().then(r => setUser(r.user)).catch(() => setToken(null))
+    }
+  }, [])
+
+  // CTA с лендинга: /app?auth=register|login — открываем модалку, если не залогинен
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get('auth')
+    if (wanted === 'register' || wanted === 'login') {
+      if (!getToken()) { setAuthMode(wanted); setShowAuth(true) }
+      window.history.replaceState({}, '', window.location.pathname)
     }
   }, [])
 
@@ -240,7 +274,7 @@ export default function App() {
   const isPremium = !!user && (user.tier === 'premium' || user.tier === 'vip')
   const gate = (node) => isPremium
     ? node
-    : <UpgradeLock tab={tab} user={user} onUpgrade={() => setTab('pricing')} onLogin={() => setShowAuth(true)} />
+    : <UpgradeLock tab={tab} user={user} onUpgrade={() => setTab('pricing')} onLogin={() => { setAuthMode('register'); setShowAuth(true) }} />
 
   return (
     <div className={`layout ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -355,7 +389,7 @@ export default function App() {
                 <button className="auth-logout" onClick={logout} title="Выйти">⎋</button>
               </div>
             ) : (
-              <button className="auth-login-btn" onClick={() => setShowAuth(true)}>Войти</button>
+              <button className="auth-login-btn" onClick={() => { setAuthMode('login'); setShowAuth(true) }}>Войти</button>
             )}
             <button className="theme-toggle-sm" onClick={() => setDark(d => !d)}>{dark ? '☀' : '☾'}</button>
           </div>
@@ -371,6 +405,7 @@ export default function App() {
             </div>
           )}
 
+          <ErrorBoundary resetKey={tab}>
           {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat signals={signals} stats={stats} market={market} /></section>}
           {tab === 'market' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Скринер рынка</h1></div><MarketView market={market} /></section>}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} /></section>}
@@ -449,10 +484,11 @@ export default function App() {
               </section>
             </div>
           )}
+          </ErrorBoundary>
         </main>
       </div>
 
-      {showAuth && <AuthModal onClose={() => setShowAuth(false)} onAuth={setUser} />}
+      {showAuth && <AuthModal initialMode={authMode} onClose={() => setShowAuth(false)} onAuth={setUser} />}
 
       <style>{`
         .auth-box { display: flex; align-items: center; gap: 8px; }
@@ -628,6 +664,11 @@ export default function App() {
           .topbar-prices { display: none; }
           .ts-grid { grid-template-columns: 1fr; }
           .kpi-grid { grid-template-columns: 1fr 1fr; }
+          /* topbar-right не должен выталкивать страницу в горизонтальный скролл */
+          .topbar { padding: 0 12px; }
+          .topbar-right { gap: 6px; }
+          .topbar-right .btn-trial { display: none; }
+          .auth-email { max-width: 64px; }
         }
       `}</style>
     </div>

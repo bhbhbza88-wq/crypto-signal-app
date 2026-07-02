@@ -169,6 +169,9 @@ export default function MarketView({ market }) {
   const [sort, setSort]             = useState('regime')
 
   if (!market) return <div className="placeholder">Загрузка рынка...</div>
+  if (!market.symbols?.length) {
+    return <div className="placeholder">Собираю данные по парам — первый снапшот занимает около минуты...</div>
+  }
 
   const btcColor = REGIME_COLORS[market.btc_regime] || REGIME_COLORS.CHOP
 

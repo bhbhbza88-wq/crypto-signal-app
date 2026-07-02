@@ -7,20 +7,21 @@ const PERIODS = [
   { key: 'lifetime', label: 'Lifetime', mult: null, discount: 0 },
 ]
 
+// features: строка — уже работает; { label, soon: true } — честно помечаем «СКОРО»
 const TIERS = [
   {
     key: 'free', name: 'Free', price: 0, lifetime: 0, period: 'навсегда',
-    features: ['Обзор рынка и фаза', 'Базовый бэктест', 'Просмотр стратегий (с задержкой)'],
+    features: ['Обзор рынка и скринер', 'Базовый бэктест', 'AI-ассистент (5 вопросов/день)'],
     cta: 'Текущий', accent: 'var(--text-tertiary)',
   },
   {
     key: 'premium', name: 'Premium', price: 29, lifetime: 299,
-    features: ['Все 3 стратегии в реальном времени', 'Полный дашборд сравнения', 'Дальран-мониторинг', 'Telegram-алерты'],
+    features: ['Все 3 стратегии в реальном времени', 'Полный дашборд сравнения', 'Дальран-мониторинг', 'AI-ассистент (50 вопросов/день)', { label: 'Telegram-алерты', soon: true }],
     cta: 'Выбрать Premium', accent: 'var(--accent)', popular: true,
   },
   {
     key: 'vip', name: 'VIP', price: 79, lifetime: 799,
-    features: ['Всё из Premium', 'Закрытый VIP Telegram-канал', 'Приоритетные сигналы', 'Личная поддержка'],
+    features: ['Всё из Premium', 'AI-ассистент (200 вопросов/день)', { label: 'Закрытый VIP Telegram-канал', soon: true }, { label: 'Личная поддержка', soon: true }],
     cta: 'Выбрать VIP', accent: 'var(--purple)',
   },
 ]
@@ -93,7 +94,16 @@ export default function Pricing({ user, onUpgraded, onNeedAuth }) {
               <div className="pr-name" style={{ color: t.accent }}>{t.name}</div>
               <div className="pr-price">${amount}<span>{suffix}</span></div>
               <ul className="pr-features">
-                {t.features.map((f, i) => <li key={i}>✓ {f}</li>)}
+                {t.features.map((f, i) => {
+                  const label = typeof f === 'string' ? f : f.label
+                  const soon = typeof f === 'object' && f.soon
+                  return (
+                    <li key={i} style={soon ? { opacity: 0.65 } : undefined}>
+                      {soon ? '◷' : '✓'} {label}
+                      {soon && <span className="pr-soon">СКОРО</span>}
+                    </li>
+                  )
+                })}
               </ul>
               <button
                 className="pr-cta"
@@ -137,6 +147,7 @@ export default function Pricing({ user, onUpgraded, onNeedAuth }) {
         .pr-price span { font-size: 14px; color: var(--text-tertiary); font-weight: 400; }
         .pr-features { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; flex: 1; }
         .pr-features li { font-size: 13px; color: var(--text-secondary); }
+        .pr-soon { font-size: 9px; font-weight: 800; letter-spacing: 0.08em; color: var(--text-tertiary); border: 1px solid var(--border); border-radius: 8px; padding: 1px 6px; margin-left: 6px; vertical-align: 1px; }
         .pr-cta { border: none; border-radius: var(--radius-sm); padding: 12px; font-size: 14px; font-weight: 700; cursor: pointer; }
         .pr-cta:disabled { cursor: default; }
         .pr-hint { text-align: center; color: var(--text-tertiary); font-size: 13px; margin-top: 16px; }
