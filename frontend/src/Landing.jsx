@@ -860,6 +860,14 @@ export default function Landing() {
           .nav-links.open { display: flex; }
           .burger-btn { display: flex; }
           .btn-login { display: none; }
+          /* Навбар должен целиком помещаться в экран — бургер был на x=383 при ширине 375 */
+          .nav-inner { padding: 0 14px; gap: 10px; }
+          .nav-right { margin-left: auto; gap: 6px; }
+          .btn-trial { padding: 7px 12px; font-size: 13px; }
+          .announce-bar { padding: 8px 12px; font-size: 12px; gap: 8px; }
+          .hero-inner, .section-inner { padding: 0 16px; }
+          .hero-sub { font-size: 15px; }
+          .stat-val { font-size: 32px; }
           .sh-body { grid-template-columns: 1fr; }
           .sh-scanner { border-right: none; border-bottom: 1px solid var(--border); }
           .sh-prices { display: none; }
@@ -872,6 +880,11 @@ export default function Landing() {
         @media (max-width: 480px) {
           .stats-grid { grid-template-columns: 1fr 1fr; }
           .hero { padding: 40px 0 56px; }
+          .theme-btn { display: none; }
+          .hero-title { font-size: 34px; }
+          .hero-actions { flex-direction: column; width: 100%; }
+          .hero-actions .btn-hero-primary, .hero-actions .btn-hero-secondary { width: 100%; justify-content: center; text-align: center; }
+          .nav-logo-text { font-size: 15px; }
         }
       `}</style>
     </div>
