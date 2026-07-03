@@ -670,6 +670,14 @@ export default function App() {
           .topbar-right .btn-trial { display: none; }
           .auth-email { max-width: 64px; }
         }
+        @media (max-width: 480px) {
+          /* Триал-баннер: аккуратный стек вместо кривого переноса кнопки */
+          .trial-banner { flex-direction: column; align-items: stretch; text-align: center; gap: 10px; }
+          .trial-banner button { width: 100%; padding: 9px 14px; }
+          .page-title { font-size: 21px; }
+          .kpi-grid > * { padding: 14px 16px; }
+          .section-title { font-size: 15px; }
+        }
       `}</style>
     </div>
   )

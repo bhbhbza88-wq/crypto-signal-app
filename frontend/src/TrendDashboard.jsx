@@ -48,7 +48,7 @@ function MarketPhaseBanner({ phase }) {
         .mp-title { font-weight: 800; font-size: 14px; color: var(--text); display: flex; align-items: center; gap: 8px; }
         .mp-score { font-size: 11px; font-weight: 700; font-family: var(--font-mono); padding: 1px 7px; border-radius: 6px; background: var(--surface-2); color: var(--text-secondary); }
         .mp-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; font-family: var(--font-mono); }
-        .mp-note { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+        .mp-note { font-size: 11px; color: var(--text-tertiary); }
       `}</style>
     </div>
   )

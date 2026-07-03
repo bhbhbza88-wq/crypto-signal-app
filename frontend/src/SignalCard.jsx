@@ -337,6 +337,20 @@ export default function SignalCard({ signal }) {
         .reasons-list li { font-size: 13px; color: var(--text); line-height: 1.4; }
 
         @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(0,229,168,0.4)} 70%{box-shadow:0 0 0 5px rgba(0,229,168,0)} 100%{box-shadow:0 0 0 0 rgba(0,229,168,0)} }
+
+        /* На телефоне ужимаем боковые поля — иначе график зажат в 299px внутри 347px карточки */
+        @media (max-width: 480px) {
+          .signal-header { padding: 16px 16px 0; }
+          .signal-meta { gap: 12px; }
+          .symbol { font-size: 20px; }
+          .confidence-section { padding: 0 16px 14px; }
+          .tv-card { margin: 12px 14px 0; }
+          .tv-chart-canvas { height: 240px; }
+          .tv-legend { gap: 8px 12px; padding: 10px 12px; }
+          .position-row { margin: 12px 14px 0; padding: 11px 12px; }
+          .position-label { font-size: 11px; }
+          .reasons-block { margin: 14px 16px 18px; }
+        }
       `}</style>
     </div>
   )
