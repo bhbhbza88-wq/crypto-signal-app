@@ -408,7 +408,7 @@ export default function App() {
           <ErrorBoundary resetKey={tab}>
           {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat signals={signals} stats={stats} market={market} /></section>}
           {tab === 'market' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Скринер рынка</h1></div><MarketView market={market} /></section>}
-          {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} /></section>}
+          {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
           {tab === 'backtest' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Бэктест <span className="beta-tag">BETA</span></h1></div><Backtest /></section>}
           {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} onUpgraded={(t) => setUser(u => u ? { ...u, tier: t } : u)} onNeedAuth={() => setShowAuth(true)} /></section>}
           {tab === 'compare' && gate(<section className="section animate-in"><StrategiesCompare /></section>)}

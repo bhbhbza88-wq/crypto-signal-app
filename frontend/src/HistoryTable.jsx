@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import WinrateRing from './WinrateRing'
 
 const RESULT_LABELS = {
   tp1: 'TP1', tp2: 'TP2', tp3: 'TP3',
@@ -77,7 +78,72 @@ function PnLChart({ history }) {
   )
 }
 
-export default function HistoryTable({ history }) {
+// Публичный (free) вид: только винрейт — остальное за Premium.
+// Обещание «трек-рекорд публичен» остаётся правдой (винрейт открыт всем),
+// но глубина — PnL по дням и каждая сделка — это ценность подписки.
+function HistoryLocked({ history, onUpgrade }) {
+  const total = history.length
+  const wins = history.filter(t => Number(t.pnl) > 0).length
+  const winrate = total ? Math.round((wins / total) * 100) : 0
+  const mod10 = total % 10, mod100 = total % 100
+  const tradeWord = (mod10 === 1 && mod100 !== 11) ? 'закрытая сделка'
+    : (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) ? 'закрытые сделки'
+    : 'закрытых сделок'
+
+  return (
+    <div className="history-wrap">
+      <div className="hist-public-card">
+        <WinrateRing winrate={winrate} total={total} />
+        <div className="hist-public-info">
+          <div className="hpi-total">{total} <span>{tradeWord}</span></div>
+          <div className="hpi-note">Винрейт за всё время открыт всем. Полная история — на Premium.</div>
+        </div>
+      </div>
+
+      <div className="hist-lock-card">
+        <div className="hist-lock-icon">🔒</div>
+        <div className="hist-lock-title">Полная история сделок — на Premium</div>
+        <div className="hist-lock-feats">
+          {['PnL по дням — график доходности', 'Каждая сделка: вход, результат, PnL', 'Разбивка по TP1 / TP2 / TP3 / стопам'].map((f, i) => (
+            <span key={i} className="hist-lock-feat">✓ {f}</span>
+          ))}
+        </div>
+        <button className="hist-lock-btn" onClick={onUpgrade}>Открыть за Premium →</button>
+      </div>
+
+      <style>{`
+        .history-wrap { display: flex; flex-direction: column; gap: 14px; }
+        .hist-public-card {
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+          padding: 24px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+        }
+        .hist-public-info { display: flex; flex-direction: column; gap: 6px; }
+        .hpi-total { font-size: 28px; font-weight: 800; font-family: var(--font-mono); color: var(--text); }
+        .hpi-total span { font-size: 13px; font-weight: 500; color: var(--text-tertiary); font-family: var(--font-ui); }
+        .hpi-note { font-size: 13px; color: var(--text-secondary); max-width: 340px; line-height: 1.5; }
+        .hist-lock-card {
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+          padding: 32px 24px; display: flex; flex-direction: column; align-items: center;
+          gap: 14px; text-align: center; position: relative; overflow: hidden;
+        }
+        .hist-lock-icon { font-size: 32px; }
+        .hist-lock-title { font-size: 17px; font-weight: 700; color: var(--text); }
+        .hist-lock-feats { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 6px; }
+        .hist-lock-feat { font-size: 13px; color: var(--text-secondary); }
+        .hist-lock-btn {
+          background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff;
+          border: none; border-radius: var(--radius-md); padding: 12px 28px;
+          font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity 0.15s;
+        }
+        .hist-lock-btn:hover { opacity: 0.88; }
+      `}</style>
+    </div>
+  )
+}
+
+export default function HistoryTable({ history, isPremium = true, onUpgrade }) {
   if (!history?.length) {
     return (
       <div className="history-empty">
@@ -93,6 +159,10 @@ export default function HistoryTable({ history }) {
         `}</style>
       </div>
     )
+  }
+
+  if (!isPremium) {
+    return <HistoryLocked history={history} onUpgrade={onUpgrade} />
   }
 
   return (

@@ -1,6 +1,62 @@
 import { useState, useRef, useEffect } from 'react'
 import { api } from './api'
 
+// Инлайновый markdown: **жирный** и `код`. Возвращает массив React-узлов.
+function renderInline(text, keyPrefix) {
+  const parts = []
+  const regex = /(\*\*[^*]+\*\*|`[^`]+`)/g
+  let last = 0, m, i = 0
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    const tok = m[0]
+    if (tok.startsWith('**')) parts.push(<strong key={`${keyPrefix}-b${i}`}>{tok.slice(2, -2)}</strong>)
+    else parts.push(<code key={`${keyPrefix}-c${i}`} className="md-code">{tok.slice(1, -1)}</code>)
+    last = m.index + tok.length
+    i++
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return parts
+}
+
+// Блочный markdown: абзацы, маркированные и нумерованные списки, заголовки.
+function MarkdownMessage({ content }) {
+  const lines = content.split('\n')
+  const blocks = []
+  let list = null   // { type: 'ul'|'ol', items: [] }
+  const flush = () => { if (list) { blocks.push(list); list = null } }
+
+  lines.forEach((raw) => {
+    const line = raw.trimEnd()
+    const bullet = line.match(/^\s*[-*•]\s+(.*)$/)
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/)
+    if (bullet) {
+      if (!list || list.type !== 'ul') { flush(); list = { type: 'ul', items: [] } }
+      list.items.push(bullet[1])
+    } else if (numbered) {
+      if (!list || list.type !== 'ol') { flush(); list = { type: 'ol', items: [] } }
+      list.items.push(numbered[1])
+    } else {
+      flush()
+      if (line.trim()) blocks.push({ type: 'p', text: line.replace(/^#+\s*/, '') })
+    }
+  })
+  flush()
+
+  return (
+    <>
+      {blocks.map((b, i) => {
+        if (b.type === 'p') return <p key={i} className="md-p">{renderInline(b.text, `p${i}`)}</p>
+        const Tag = b.type === 'ol' ? 'ol' : 'ul'
+        return (
+          <Tag key={i} className="md-list">
+            {b.items.map((it, j) => <li key={j}>{renderInline(it, `l${i}-${j}`)}</li>)}
+          </Tag>
+        )
+      })}
+    </>
+  )
+}
+
 const SUGGESTIONS = [
   'Почему сканер вошёл в эту сделку?',
   'Какие риски у текущего сигнала?',
@@ -99,9 +155,11 @@ export default function AIChat({ signals, stats, market }) {
           <div key={i} className={`message ${msg.role}`}>
             {msg.role === 'assistant' && <div className="msg-avatar">AI</div>}
             <div className="msg-bubble">
-              {msg.content.split('\n').map((line, j) => (
-                <span key={j}>{line}{j < msg.content.split('\n').length - 1 && <br />}</span>
-              ))}
+              {msg.role === 'assistant'
+                ? <MarkdownMessage content={msg.content} />
+                : msg.content.split('\n').map((line, j) => (
+                    <span key={j}>{line}{j < msg.content.split('\n').length - 1 && <br />}</span>
+                  ))}
             </div>
           </div>
         ))}
@@ -191,6 +249,18 @@ export default function AIChat({ signals, stats, market }) {
         .message.user .msg-bubble {
           background: var(--accent); color: #fff;
           border-radius: 16px 4px 16px 16px;
+        }
+        /* markdown внутри ответов ассистента */
+        .msg-bubble .md-p { margin: 0 0 8px; }
+        .msg-bubble .md-p:last-child { margin-bottom: 0; }
+        .msg-bubble .md-list { margin: 0 0 8px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+        .msg-bubble .md-list:last-child { margin-bottom: 0; }
+        .msg-bubble .md-list li { line-height: 1.5; }
+        .msg-bubble strong { font-weight: 700; }
+        .msg-bubble .md-code {
+          font-family: var(--font-mono); font-size: 12px;
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: 5px; padding: 1px 5px;
         }
         .typing { display: flex; gap: 5px; align-items: center; padding: 14px 18px; }
         .typing span {
