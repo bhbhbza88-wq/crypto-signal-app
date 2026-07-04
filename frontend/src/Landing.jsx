@@ -279,11 +279,10 @@ export default function Landing() {
   return (
     <div className="lp">
 
-      {/* ── ANNOUNCEMENT BAR ── */}
+      {/* ── ANNOUNCEMENT BAR — информационная полоса, без CTA (кнопки есть в навбаре и hero) ── */}
       <div className="announce-bar">
         <span className="announce-dot" />
         <span>✦ NWICKI — AI сканирует рынок и объясняет каждый сигнал в реальном времени</span>
-        <button className="announce-btn" onClick={() => navigate('/app?auth=register')}>Попробовать бесплатно →</button>
       </div>
 
       {/* ── NAVBAR ── */}
@@ -622,7 +621,6 @@ export default function Landing() {
         /* ANNOUNCE */
         .announce-bar { background: linear-gradient(135deg, var(--accent), var(--purple)); padding: 10px 24px; display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 13px; color: #fff; font-weight: 500; flex-wrap: wrap; text-align: center; }
         .announce-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; opacity: 0.8; flex-shrink: 0; animation: pulse 2s infinite; }
-        .announce-btn { border: 1px solid rgba(255,255,255,0.5); background: rgba(255,255,255,0.15); color: #fff; font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 6px; white-space: nowrap; }
 
         /* NAVBAR */
         .navbar { position: sticky; top: 0; z-index: 100; border-bottom: 1px solid var(--border); }
