@@ -66,33 +66,7 @@ const SUGGESTIONS = [
   'Когда лучше не торговать?',
 ]
 
-function buildSystemPrompt(signals, stats, market) {
-  const activeSignal = signals?.length > 0 ? JSON.stringify(signals[0], null, 2) : 'Нет активных сигналов'
-  const statsToday = stats?.today ? `Сделок: ${stats.today.total}, Винрейт: ${stats.today.winrate}%, PnL: ${stats.today.total_pnl}%` : 'Нет данных'
-  const marketInfo = market ? `BTC режим: ${market.btc_regime}, Аптренд: ${market.uptrend_count}, Даунтренд: ${market.downtrend_count}` : 'Нет данных'
-
-  return `Ты — AI-ассистент торговой платформы NWICKI. Помогаешь трейдерам понять сигналы, стратегию и риски.
-
-ТЕКУЩИЙ АКТИВНЫЙ СИГНАЛ:
-${activeSignal}
-
-СТАТИСТИКА СЕГОДНЯ:
-${statsToday}
-
-СОСТОЯНИЕ РЫНКА:
-${marketInfo}
-
-СТРАТЕГИЯ СКАНЕРА:
-- Сканирует 32 пары USDT на Bybit каждые 2 минуты
-- Использует EMA, RSI, ADX, ATR для анализа
-- Минимальный Score для входа: 12/20
-- Блокирует сигналы против режима BTC
-- Устанавливает TP1, TP2, TP3 и стоп-лосс на основе ATR
-
-Отвечай кратко и по делу. Используй эмодзи для наглядности. Отвечай на русском языке.`
-}
-
-export default function AIChat({ signals, stats, market }) {
+export default function AIChat() {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
@@ -117,8 +91,8 @@ export default function AIChat({ signals, stats, market }) {
     setLoading(true)
 
     try {
+      // Системный контекст (цены, скринер, сигналы, фаза) строит бэкенд из реальных данных.
       const data = await api.aiChat([
-        { role: 'system', content: buildSystemPrompt(signals, stats, market) },
         ...messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
         userMsg,
       ])

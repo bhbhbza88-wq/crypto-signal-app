@@ -138,6 +138,71 @@ class AIChatRequest(BaseModel):
     messages: list[dict]
 
 
+def _ai_market_context() -> str:
+    """Собирает актуальное состояние платформы для системного промпта AI.
+    Всё — реальные данные (цены, скринер, сигналы, фаза), чтобы ассистент
+    отвечал по факту, а не общими словами. Каждый блок в своём try — если
+    что-то недоступно, остальное всё равно попадёт в контекст."""
+    lines = [
+        "Ты — AI-ассистент платформы NWICKI (крипто-сигналы на Bybit, бумажная торговля).",
+        "Отвечай кратко и по-русски. Опирайся на данные НИЖЕ — это реальное состояние платформы прямо сейчас.",
+        "Ты объясняешь сигналы, рыночные режимы и статистику. Ты НЕ предсказываешь будущую цену и не даёшь персональных инвест-советов — если просят прогноз, честно скажи, что даёшь только текущую картину и аналитику.",
+    ]
+
+    try:
+        btc = api_call(exchange.fetch_ticker, 'BTC/USDT') or {}
+        eth = api_call(exchange.fetch_ticker, 'ETH/USDT') or {}
+        lines.append(f"ЦЕНЫ (24ч): BTC ${btc.get('last')} ({btc.get('percentage')}%), "
+                     f"ETH ${eth.get('last')} ({eth.get('percentage')}%).")
+    except Exception:
+        pass
+
+    try:
+        ov = data_layer.get_market_overview()
+        if ov and ov.get('symbols'):
+            syms = ov['symbols']
+            lines.append(f"СКРИНЕР (режим BTC: {ov.get('btc_regime')}): в аптренде "
+                         f"{ov.get('uptrend_count')}, в даунтренде {ov.get('downtrend_count')}, "
+                         f"без тренда {ov.get('chop_count')}.")
+            up = sorted([s for s in syms if s['regime'] == 'UPTREND'], key=lambda s: -s['adx'])[:6]
+            dn = sorted([s for s in syms if s['regime'] == 'DOWNTREND'], key=lambda s: -s['adx'])[:6]
+            if up:
+                lines.append("Сильнейший аптренд (по ADX): " +
+                             ", ".join(f"{s['symbol'].replace('/USDT','')} ADX {s['adx']}" for s in up))
+            if dn:
+                lines.append("Сильнейший даунтренд: " +
+                             ", ".join(f"{s['symbol'].replace('/USDT','')} ADX {s['adx']}" for s in dn))
+            # полный список — чтобы можно было ответить про любую монету
+            lines.append("Все монеты (символ:режим:ADX): " +
+                         "; ".join(f"{s['symbol'].replace('/USDT','')}:{s['regime']}:{s['adx']}" for s in syms))
+    except Exception:
+        pass
+
+    try:
+        import trend_strategy
+        ph = trend_strategy.get_market_phase()
+        if ph:
+            lines.append(f"ФАЗА РЫНКА (BTC, информационно, не торгует): {ph.get('phase')}, "
+                         f"моментум 60д {ph.get('momentum_60d_pct')}%.")
+    except Exception:
+        pass
+
+    try:
+        trades = db.load_trades()
+        if trades:
+            parts = []
+            for sym, t in list(trades.items())[:8]:
+                parts.append(f"{sym.replace('/USDT','')} {t['signal']} вход {t['entry']} "
+                             f"стоп {t['stop']} TP1 {t['tp1']} (score {t.get('score')})")
+            lines.append("АКТИВНЫЕ СИГНАЛЫ СКАНЕРА: " + "; ".join(parts))
+        else:
+            lines.append("АКТИВНЫХ СИГНАЛОВ СКАНЕРА СЕЙЧАС НЕТ (сканер ищет сетапы каждые 2 минуты).")
+    except Exception:
+        pass
+
+    return "\n".join(lines)
+
+
 @app.post("/api/ai/chat")
 def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)):
     user = auth.user_from_token(_token_from_header(authorization))
@@ -157,15 +222,19 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
                             detail=f"Дневной лимит AI-запросов исчерпан ({limit}/день на тарифе {tier}). "
                                    f"Лимит обновится завтра.")
 
-    # Санитизация: только role/content, хвост диалога, обрезка длинных сообщений
+    # Санитизация: берём только user/assistant из клиента (клиентский system
+    # игнорируем — свой системный контекст строим на сервере из реальных данных).
     msgs = []
     for m in req.messages[-20:]:
         role = m.get('role')
         content = m.get('content')
-        if role in ('system', 'user', 'assistant') and isinstance(content, str):
+        if role in ('user', 'assistant') and isinstance(content, str):
             msgs.append({'role': role, 'content': content[:6000]})
     if not msgs or msgs[-1]['role'] != 'user':
         raise HTTPException(status_code=400, detail="Некорректный формат сообщений")
+
+    # Серверный системный промпт с актуальным состоянием платформы
+    msgs.insert(0, {'role': 'system', 'content': _ai_market_context()})
 
     payload = json.dumps({'model': AI_MODEL, 'max_tokens': 800, 'messages': msgs}).encode()
     request = urllib.request.Request(
