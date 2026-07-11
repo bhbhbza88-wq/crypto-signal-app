@@ -3,3 +3,4 @@ uvicorn[standard]
 ccxt
 pandas
 schedule
+httpx
