@@ -189,7 +189,12 @@ def init_db():
         cs_cols = [r[1] for r in conn.execute("PRAGMA table_info(channel_stats)").fetchall()]
         for col, typedef in [("tp2_hit_rate", "REAL"), ("tp2_sample", "INTEGER"),
                               ("tp3_hit_rate", "REAL"), ("tp3_sample", "INTEGER"),
-                              ("total_pnl_usd", "REAL")]:
+                              ("total_pnl_usd", "REAL"),
+                              # Параметры, с которыми считался кэш — без них повторный запрос с другими
+                              # days/entry_timeout/max_hold/risk молча получал бы старый отчёт под чужими
+                              # настройками (реальный баг: анализ на 7д "залипал" при запросе на 30д).
+                              ("entry_timeout_hours", "INTEGER"), ("max_hold_hours", "INTEGER"),
+                              ("risk_per_trade_usd", "REAL")]:
             if col not in cs_cols:
                 conn.execute(f"ALTER TABLE channel_stats ADD COLUMN {col} {typedef}")
 
@@ -613,14 +618,16 @@ def save_backtest_result(signal_id, entry_filled, entry_filled_at, outcome, exit
 
 
 # ── Кэш отчёта по каналу (Channel Analyzer) ────────────────
-def save_channel_stats(channel, period_days, report: dict, equity_curve_json: str):
+def save_channel_stats(channel, period_days, report: dict, equity_curve_json: str,
+                        entry_timeout_hours=None, max_hold_hours=None, risk_per_trade_usd=None):
     with _lock, get_conn() as conn:
         conn.execute("""
             INSERT INTO channel_stats
                 (channel, period_days, total_signals, checked, closed_trades, wins, losses,
                  winrate_pct, avg_risk_reward, total_pnl_pct, total_pnl_usd, equity_curve_json,
-                 last_analyzed_at, tp2_hit_rate, tp2_sample, tp3_hit_rate, tp3_sample)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 last_analyzed_at, tp2_hit_rate, tp2_sample, tp3_hit_rate, tp3_sample,
+                 entry_timeout_hours, max_hold_hours, risk_per_trade_usd)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(channel) DO UPDATE SET
                 period_days=excluded.period_days,
                 total_signals=excluded.total_signals,
@@ -637,14 +644,18 @@ def save_channel_stats(channel, period_days, report: dict, equity_curve_json: st
                 tp2_hit_rate=excluded.tp2_hit_rate,
                 tp2_sample=excluded.tp2_sample,
                 tp3_hit_rate=excluded.tp3_hit_rate,
-                tp3_sample=excluded.tp3_sample
+                tp3_sample=excluded.tp3_sample,
+                entry_timeout_hours=excluded.entry_timeout_hours,
+                max_hold_hours=excluded.max_hold_hours,
+                risk_per_trade_usd=excluded.risk_per_trade_usd
         """, (channel, period_days, report['total_signals'], report['checked'],
               report['closed_trades'], report['wins'], report['losses'],
               report['winrate_pct'], report['avg_risk_reward'], report['total_pnl_pct_of_risk'],
               report['total_pnl_usd'],
               equity_curve_json, datetime.now().isoformat(),
               report.get('tp2_hit_rate'), report.get('tp2_sample'),
-              report.get('tp3_hit_rate'), report.get('tp3_sample')))
+              report.get('tp3_hit_rate'), report.get('tp3_sample'),
+              entry_timeout_hours, max_hold_hours, risk_per_trade_usd))
 
 
 def get_channel_stats(channel):

@@ -70,7 +70,10 @@ def run_channel_analysis(job_id: str, channel: str, days: int, entry_timeout_hou
         _update(job_id, "формирование отчёта")
         report = bt.build_report(channel)
         curve = bt.build_equity_curve(channel)
-        db.save_channel_stats(channel, days, report, json.dumps(curve))
+        db.save_channel_stats(channel, days, report, json.dumps(curve),
+                               entry_timeout_hours=entry_timeout_hours,
+                               max_hold_hours=max_hold_hours,
+                               risk_per_trade_usd=risk_per_trade_usd)
 
         _finish(job_id, result={"report": report, "equity_curve": curve})
     except Exception as e:

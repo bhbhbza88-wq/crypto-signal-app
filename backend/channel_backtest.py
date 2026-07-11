@@ -329,10 +329,18 @@ class SignalBacktester:
                     exit_price=None, pnl_pct=None, pnl_usd=None, position_size=None,
                     tp2_hit=None, tp3_hit=None)
 
-    def run_backtest(self, channel: str) -> list:
-        """Прогоняет все ещё не сверенные сигналы канала через simulate_trade
-        и сохраняет результат обратно в historical_signals."""
-        signals = db.load_historical_signals(channel, unchecked_only=True)
+    def run_backtest(self, channel: str, recheck_all: bool = True) -> list:
+        """Прогоняет сигналы канала через simulate_trade и сохраняет результат
+        обратно в historical_signals.
+
+        recheck_all=True (по умолчанию) — пересчитывает ВСЕ сигналы, а не
+        только ещё не сверенные. Это дёшево (только ccxt-запросы свечей, без
+        повторного похода в Telegram/OpenAI) и обязательно при повторном
+        анализе с другими параметрами (max_hold_hours/risk_per_trade_usd) —
+        иначе старые сигналы остались бы посчитаны по старым параметрам, а
+        новые по новым, и отчёт превратился бы в мешанину несопоставимых
+        цифр. unchecked_only имеет смысл только для точечного дозапуска CLI."""
+        signals = db.load_historical_signals(channel, unchecked_only=not recheck_all)
         results = []
         for sig in signals:
             res = self.simulate_trade(sig)

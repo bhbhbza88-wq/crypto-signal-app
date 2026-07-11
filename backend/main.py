@@ -1202,7 +1202,17 @@ def analyze_channel(req: AnalyzeChannelRequest, admin=Depends(require_admin)):
     cached = db.get_channel_stats(channel)
     if cached and cached.get('last_analyzed_at'):
         age_h = (datetime.now() - datetime.fromisoformat(cached['last_analyzed_at'])).total_seconds() / 3600
-        if age_h < CHANNEL_ANALYSIS_CACHE_HOURS:
+        # Кэш валиден только если он посчитан С ТЕМИ ЖЕ параметрами — иначе
+        # запрос на 30 дней молча получал бы отчёт, посчитанный на 7 (баг,
+        # пойманный в проде: повторный анализ с другими параметрами "не давал"
+        # запуститься, потому что тихо возвращал старые цифры под видом новых).
+        same_params = (
+            cached.get('period_days') == days
+            and cached.get('entry_timeout_hours') == entry_timeout_hours
+            and cached.get('max_hold_hours') == max_hold_hours
+            and cached.get('risk_per_trade_usd') == risk_per_trade_usd
+        )
+        if age_h < CHANNEL_ANALYSIS_CACHE_HOURS and same_params:
             return {
                 "cached": True, "channel": channel,
                 "report": {k: cached[k] for k in (
