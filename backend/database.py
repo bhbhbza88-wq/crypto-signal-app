@@ -186,6 +186,11 @@ def init_db():
                 last_analyzed_at TEXT
             )
         """)
+        cs_cols = [r[1] for r in conn.execute("PRAGMA table_info(channel_stats)").fetchall()]
+        for col, typedef in [("tp2_hit_rate", "REAL"), ("tp2_sample", "INTEGER"),
+                              ("tp3_hit_rate", "REAL"), ("tp3_sample", "INTEGER")]:
+            if col not in cs_cols:
+                conn.execute(f"ALTER TABLE channel_stats ADD COLUMN {col} {typedef}")
 
         # ── Исторические сигналы каналов (для channel_backtest.py, офлайн-анализ) ─
         conn.execute("""
@@ -208,6 +213,12 @@ def init_db():
                 UNIQUE(channel, message_id)
             )
         """)
+        # Миграция: TP2/TP3 (только если канал сам их назвал — NULL иначе,
+        # никогда не достраиваем сами) + флаги, дошла ли цена дальше TP1
+        hist_cols = [r[1] for r in conn.execute("PRAGMA table_info(historical_signals)").fetchall()]
+        for col, typedef in [("tp2", "REAL"), ("tp3", "REAL"), ("tp2_hit", "INTEGER"), ("tp3_hit", "INTEGER")]:
+            if col not in hist_cols:
+                conn.execute(f"ALTER TABLE historical_signals ADD COLUMN {col} {typedef}")
 
 
 # ── Open trades ──────────────────────────────────────────
@@ -553,15 +564,16 @@ def update_trader(trader_id, name=None, avatar_url=None, bio=None, is_active=Non
 
 
 # ── Исторические сигналы каналов (channel_backtest.py) ────
-def save_historical_signal(channel, message_id, symbol, side, entry, stop, tp1, posted_at):
+def save_historical_signal(channel, message_id, symbol, side, entry, stop, tp1, posted_at, tp2=None, tp3=None):
     """INSERT OR IGNORE — при повторном запуске ingest по тому же каналу
-    не дублирует уже сохранённые посты (UNIQUE(channel, message_id))."""
+    не дублирует уже сохранённые посты (UNIQUE(channel, message_id)).
+    tp2/tp3 — только если канал сам их назвал в посте, иначе NULL (не достраиваем)."""
     with _lock, get_conn() as conn:
         cur = conn.execute("""
             INSERT OR IGNORE INTO historical_signals
-                (channel, message_id, symbol, side, entry, stop, tp1, posted_at)
-            VALUES (?,?,?,?,?,?,?,?)
-        """, (channel, message_id, symbol, side, entry, stop, tp1, posted_at))
+                (channel, message_id, symbol, side, entry, stop, tp1, tp2, tp3, posted_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+        """, (channel, message_id, symbol, side, entry, stop, tp1, tp2, tp3, posted_at))
         return cur.lastrowid if cur.rowcount else None
 
 
@@ -571,17 +583,30 @@ def load_historical_signals(channel, unchecked_only=False):
         if unchecked_only:
             q += " AND checked_at IS NULL"
         rows = conn.execute(q + " ORDER BY posted_at", (channel,)).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            # SQLite хранит tp2_hit/tp3_hit как 0/1/NULL — приводим к настоящему
+            # bool/None, иначе на фронте `s.tp2_hit === true` не совпадёт с числом 1.
+            d['tp2_hit'] = None if d['tp2_hit'] is None else bool(d['tp2_hit'])
+            d['tp3_hit'] = None if d['tp3_hit'] is None else bool(d['tp3_hit'])
+            out.append(d)
+        return out
 
 
-def save_backtest_result(signal_id, entry_filled, entry_filled_at, outcome, exit_price, pnl_pct):
+def save_backtest_result(signal_id, entry_filled, entry_filled_at, outcome, exit_price, pnl_pct,
+                          tp2_hit=None, tp3_hit=None):
     with _lock, get_conn() as conn:
         conn.execute("""
             UPDATE historical_signals SET
-                entry_filled=?, entry_filled_at=?, outcome=?, exit_price=?, pnl_pct=?, checked_at=?
+                entry_filled=?, entry_filled_at=?, outcome=?, exit_price=?, pnl_pct=?, checked_at=?,
+                tp2_hit=?, tp3_hit=?
             WHERE id=?
         """, (int(entry_filled), entry_filled_at, outcome, exit_price, pnl_pct,
-              datetime.now().isoformat(), signal_id))
+              datetime.now().isoformat(),
+              None if tp2_hit is None else int(tp2_hit),
+              None if tp3_hit is None else int(tp3_hit),
+              signal_id))
 
 
 # ── Кэш отчёта по каналу (Channel Analyzer) ────────────────
@@ -590,8 +615,9 @@ def save_channel_stats(channel, period_days, report: dict, equity_curve_json: st
         conn.execute("""
             INSERT INTO channel_stats
                 (channel, period_days, total_signals, checked, closed_trades, wins, losses,
-                 winrate_pct, avg_risk_reward, total_pnl_pct, equity_curve_json, last_analyzed_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                 winrate_pct, avg_risk_reward, total_pnl_pct, equity_curve_json, last_analyzed_at,
+                 tp2_hit_rate, tp2_sample, tp3_hit_rate, tp3_sample)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(channel) DO UPDATE SET
                 period_days=excluded.period_days,
                 total_signals=excluded.total_signals,
@@ -603,14 +629,29 @@ def save_channel_stats(channel, period_days, report: dict, equity_curve_json: st
                 avg_risk_reward=excluded.avg_risk_reward,
                 total_pnl_pct=excluded.total_pnl_pct,
                 equity_curve_json=excluded.equity_curve_json,
-                last_analyzed_at=excluded.last_analyzed_at
+                last_analyzed_at=excluded.last_analyzed_at,
+                tp2_hit_rate=excluded.tp2_hit_rate,
+                tp2_sample=excluded.tp2_sample,
+                tp3_hit_rate=excluded.tp3_hit_rate,
+                tp3_sample=excluded.tp3_sample
         """, (channel, period_days, report['total_signals'], report['checked'],
               report['closed_trades'], report['wins'], report['losses'],
               report['winrate_pct'], report['avg_risk_reward'], report['total_pnl_pct_fixed_size'],
-              equity_curve_json, datetime.now().isoformat()))
+              equity_curve_json, datetime.now().isoformat(),
+              report.get('tp2_hit_rate'), report.get('tp2_sample'),
+              report.get('tp3_hit_rate'), report.get('tp3_sample')))
 
 
 def get_channel_stats(channel):
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM channel_stats WHERE channel=?", (channel,)).fetchone()
         return dict(row) if row else None
+
+
+def list_channel_stats():
+    """Все проанализированные каналы — для рейтинга/сравнения на фронте."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM channel_stats ORDER BY total_pnl_pct DESC NULLS LAST"
+        ).fetchall()
+        return [dict(r) for r in rows]

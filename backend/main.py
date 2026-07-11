@@ -1169,6 +1169,7 @@ CHANNEL_ANALYSIS_CACHE_HOURS = 24  # повторный запрос по том
 class AnalyzeChannelRequest(BaseModel):
     channel_url: str
     days: int = 30
+    entry_timeout_hours: int = 6
 
 
 def _parse_channel_username(raw: str) -> str:
@@ -1192,6 +1193,7 @@ def analyze_channel(req: AnalyzeChannelRequest, admin=Depends(require_admin)):
     """
     channel = _parse_channel_username(req.channel_url)
     days = max(1, min(90, req.days))
+    entry_timeout_hours = max(1, min(48, req.entry_timeout_hours))
 
     cached = db.get_channel_stats(channel)
     if cached and cached.get('last_analyzed_at'):
@@ -1201,14 +1203,17 @@ def analyze_channel(req: AnalyzeChannelRequest, admin=Depends(require_admin)):
                 "cached": True, "channel": channel,
                 "report": {k: cached[k] for k in (
                     'total_signals', 'checked', 'closed_trades', 'wins', 'losses',
-                    'winrate_pct', 'avg_risk_reward',
+                    'winrate_pct', 'avg_risk_reward', 'tp2_hit_rate', 'tp2_sample',
+                    'tp3_hit_rate', 'tp3_sample',
                 )} | {"total_pnl_pct_fixed_size": cached['total_pnl_pct'], "channel": channel},
                 "equity_curve": _json.loads(cached['equity_curve_json'] or '[]'),
             }
 
     job_id = channel_jobs.create_job()
     _threading_ca.Thread(
-        target=channel_jobs.run_channel_analysis, args=(job_id, channel, days), daemon=True,
+        target=channel_jobs.run_channel_analysis,
+        args=(job_id, channel, days), kwargs=dict(entry_timeout_hours=entry_timeout_hours),
+        daemon=True,
     ).start()
     return {"cached": False, "job_id": job_id, "channel": channel}
 
@@ -1219,6 +1224,20 @@ def analysis_status(job_id: str, admin=Depends(require_admin)):
     if not job:
         raise HTTPException(status_code=404, detail="Задача не найдена (возможно, устарела или сервер перезапускался)")
     return {"status": job["status"], "step": job["step"], "result": job["result"], "error": job["error"]}
+
+
+@app.get("/api/channel-history/{channel}")
+def get_channel_history(channel: str, admin=Depends(require_admin)):
+    """Полный список найденных ботом сигналов канала с исходом каждого —
+    для таблицы истории на фронте (не только агрегированный отчёт)."""
+    return db.load_historical_signals(channel)
+
+
+@app.get("/api/channels-ranking")
+def get_channels_ranking(admin=Depends(require_admin)):
+    """Все уже проанализированные каналы бок о бок — для сравнения, а не
+    только последний прогнанный. Сортировка по итоговому PnL% (в db-функции)."""
+    return db.list_channel_stats()
 
 
 @app.post("/api/backtest/multi")

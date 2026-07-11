@@ -14,20 +14,86 @@ function Metric({ label, value, sub }) {
   )
 }
 
+const OUTCOME_LABEL = {
+  win: 'Прибыль', loss: 'Убыток', not_filled: 'Не дошла до входа',
+  no_data: 'Нет данных биржи', timeout: 'Не дошла ни до TP1, ни до SL',
+}
+
+function TpCell({ level, hit }) {
+  if (level == null) return <td className="ca-hist-dim">—</td>
+  return (
+    <td>
+      {level}
+      {hit === true && <span className="ca-tp-hit" title="Цена дошла до этого уровня">✓</span>}
+      {hit === false && <span className="ca-tp-miss" title="Не дошла">✕</span>}
+    </td>
+  )
+}
+
+function HistoryRow({ s }) {
+  const isWin = s.outcome === 'win'
+  const isLoss = s.outcome === 'loss'
+  const tone = isWin ? 'pos' : isLoss ? 'neg' : 'neutral'
+  return (
+    <tr className={`ca-hist-row ${tone}`}>
+      <td>{s.posted_at?.slice(0, 16).replace('T', ' ')}</td>
+      <td className="ca-hist-sym">{s.symbol}</td>
+      <td>{s.side}</td>
+      <td>{s.entry}</td>
+      <td>{s.stop}</td>
+      <td>{s.tp1}</td>
+      <TpCell level={s.tp2} hit={s.tp2_hit} />
+      <TpCell level={s.tp3} hit={s.tp3_hit} />
+      <td><span className={`ca-hist-badge ${tone}`}>{OUTCOME_LABEL[s.outcome] || (s.checked_at ? 'В обработке' : 'Не сверено')}</span></td>
+      <td className={tone === 'pos' ? 'pos' : tone === 'neg' ? 'neg' : ''}>
+        {s.pnl_pct != null ? `${s.pnl_pct >= 0 ? '+' : ''}${s.pnl_pct}%` : '—'}
+      </td>
+    </tr>
+  )
+}
+
+function RankingRow({ c }) {
+  const pos = (c.total_pnl_pct ?? 0) >= 0
+  return (
+    <tr className="ca-rank-row">
+      <td className="ca-hist-sym">{c.channel}</td>
+      <td>{c.total_signals}</td>
+      <td>{c.closed_trades}</td>
+      <td>{c.winrate_pct != null ? `${c.winrate_pct}%` : '—'}</td>
+      <td>{c.avg_risk_reward ?? '—'}</td>
+      <td className={pos ? 'pos' : 'neg'}>{pos ? '+' : ''}{c.total_pnl_pct}%</td>
+      <td className="ca-hist-dim">{c.last_analyzed_at?.slice(0, 10)}</td>
+    </tr>
+  )
+}
+
 export default function ChannelAnalyzer() {
   const [url, setUrl] = useState('')
   const [days, setDays] = useState(30)
+  const [entryTimeoutHours, setEntryTimeoutHours] = useState(6)
   const [status, setStatus] = useState('idle')   // idle | running | done | error
   const [step, setStep] = useState('')
   const [error, setError] = useState(null)
   const [report, setReport] = useState(null)
   const [curve, setCurve] = useState([])
   const [cached, setCached] = useState(false)
+  const [history, setHistory] = useState([])
+  const [ranking, setRanking] = useState([])
   const pollRef = useRef(null)
 
   useEffect(() => () => clearInterval(pollRef.current), [])
 
-  const pollStatus = (jobId) => {
+  const loadRanking = async () => {
+    try { setRanking(await api.getChannelsRanking()) } catch { /* тихо — это вспомогательный блок */ }
+  }
+
+  useEffect(() => { loadRanking() }, [])
+
+  const loadHistory = async (channel) => {
+    try { setHistory(await api.getChannelHistory(channel)) } catch { setHistory([]) }
+  }
+
+  const pollStatus = (jobId, channel) => {
     pollRef.current = setInterval(async () => {
       try {
         const s = await api.getAnalysisStatus(jobId)
@@ -37,6 +103,8 @@ export default function ChannelAnalyzer() {
           setReport(s.result.report)
           setCurve(s.result.equity_curve || [])
           setStatus('done')
+          loadHistory(channel)
+          loadRanking()
         } else if (s.status === 'failed') {
           clearInterval(pollRef.current)
           setError(s.error || 'Анализ завершился ошибкой')
@@ -53,17 +121,18 @@ export default function ChannelAnalyzer() {
   const analyze = async () => {
     if (!url.trim()) return
     clearInterval(pollRef.current)
-    setStatus('running'); setError(null); setReport(null); setCurve([]); setStep('Отправка запроса...')
+    setStatus('running'); setError(null); setReport(null); setCurve([]); setHistory([]); setStep('Отправка запроса...')
     try {
-      const res = await api.analyzeChannel(url.trim(), days)
+      const res = await api.analyzeChannel(url.trim(), days, entryTimeoutHours)
       setCached(!!res.cached)
       if (res.cached) {
         setReport(res.report)
         setCurve(res.equity_curve || [])
         setStatus('done')
+        loadHistory(res.channel)
       } else {
         setStep('Анализирую историю...')
-        pollStatus(res.job_id)
+        pollStatus(res.job_id, res.channel)
       }
     } catch (e) {
       setError(e.message)
@@ -96,6 +165,19 @@ export default function ChannelAnalyzer() {
           <option value={30}>30 дней</option>
           <option value={90}>90 дней</option>
         </select>
+        <select
+          className="ca-days"
+          value={entryTimeoutHours}
+          onChange={e => setEntryTimeoutHours(Number(e.target.value))}
+          disabled={status === 'running'}
+          title="Сколько ждать, пока цена дойдёт до Entry, прежде чем считать сигнал непройденным"
+        >
+          <option value={2}>Вход за 2ч</option>
+          <option value={6}>Вход за 6ч</option>
+          <option value={12}>Вход за 12ч</option>
+          <option value={24}>Вход за 24ч</option>
+          <option value={48}>Вход за 48ч</option>
+        </select>
         <button className="ca-btn" onClick={analyze} disabled={status === 'running' || !url.trim()}>
           {status === 'running' ? 'Анализирую...' : 'Analyze'}
         </button>
@@ -126,6 +208,12 @@ export default function ChannelAnalyzer() {
               value={<span className={posTotal ? 'pos' : 'neg'}>{posTotal ? '+' : ''}{report.total_pnl_pct_fixed_size}%</span>}
               sub={`комиссия 0.1% учтена`}
             />
+            {report.tp2_hit_rate != null && (
+              <Metric label="Доходили до TP2" value={`${report.tp2_hit_rate}%`} sub={`из ${report.tp2_sample} сигналов с заявленным TP2`} />
+            )}
+            {report.tp3_hit_rate != null && (
+              <Metric label="Доходили до TP3" value={`${report.tp3_hit_rate}%`} sub={`из ${report.tp3_sample} сигналов с заявленным TP3`} />
+            )}
           </div>
 
           {curve.length > 1 ? (
@@ -144,6 +232,44 @@ export default function ChannelAnalyzer() {
           ) : (
             <div className="ca-empty">Недостаточно закрытых сделок для графика доходности.</div>
           )}
+
+          {history.length > 0 && (
+            <div className="ca-hist">
+              <h3 className="ca-hist-title">История всех найденных сигналов ({history.length})</h3>
+              <div className="ca-hist-scroll">
+                <table className="ca-hist-table">
+                  <thead>
+                    <tr>
+                      <th>Дата поста</th><th>Символ</th><th>Сторона</th>
+                      <th>Entry</th><th>Stop</th><th>TP1</th><th>TP2</th><th>TP3</th><th>Исход</th><th>PnL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map(s => <HistoryRow key={s.id} s={s} />)}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {ranking.length > 0 && (
+        <div className="ca-hist" style={{ marginTop: 34 }}>
+          <h3 className="ca-hist-title">Сравнение проанализированных каналов ({ranking.length})</h3>
+          <div className="ca-hist-scroll">
+            <table className="ca-hist-table">
+              <thead>
+                <tr>
+                  <th>Канал</th><th>Сигналов</th><th>Закрытых сделок</th>
+                  <th>Winrate</th><th>R:R</th><th>Итоговый PnL</th><th>Обновлено</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ranking.map(c => <RankingRow key={c.channel} c={c} />)}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -167,6 +293,28 @@ export default function ChannelAnalyzer() {
         .ca-metric-val .neg { color: var(--short); }
         .ca-chart { margin-top: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
         .ca-empty { margin-top: 22px; padding: 30px; text-align: center; color: var(--text-tertiary); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+
+        .ca-hist { margin-top: 22px; }
+        .ca-hist-title { font-size: 14px; font-weight: 600; color: var(--text); margin: 0 0 10px; }
+        .ca-hist-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+        .ca-hist-table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--font-mono); white-space: nowrap; }
+        .ca-hist-table th { text-align: left; padding: 10px 14px; color: var(--text-tertiary); font-weight: 600; border-bottom: 1px solid var(--border); text-transform: uppercase; font-size: 10px; letter-spacing: 0.03em; }
+        .ca-hist-table td { padding: 9px 14px; border-bottom: 1px solid var(--border); color: var(--text); }
+        .ca-hist-row:last-child td { border-bottom: none; }
+        .ca-hist-row.pos { background: var(--long-soft); }
+        .ca-hist-row.neg { background: var(--short-soft); }
+        .ca-hist-sym { font-weight: 700; }
+        .ca-hist-badge { padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+        .ca-hist-badge.pos { color: var(--long); background: rgba(0,200,150,0.12); }
+        .ca-hist-badge.neg { color: var(--short); background: rgba(240,74,89,0.12); }
+        .ca-hist-badge.neutral { color: var(--text-tertiary); background: var(--surface-hover); }
+        .ca-hist-row td.pos { color: var(--long); font-weight: 700; }
+        .ca-hist-row td.neg { color: var(--short); font-weight: 700; }
+        .ca-hist-dim { color: var(--text-tertiary); }
+        .ca-tp-hit { color: var(--long); margin-left: 5px; font-weight: 700; }
+        .ca-tp-miss { color: var(--text-tertiary); margin-left: 5px; }
+        .ca-rank-row td.pos { color: var(--long); font-weight: 700; }
+        .ca-rank-row td.neg { color: var(--short); font-weight: 700; }
       `}</style>
     </div>
   )
