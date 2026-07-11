@@ -188,7 +188,8 @@ def init_db():
         """)
         cs_cols = [r[1] for r in conn.execute("PRAGMA table_info(channel_stats)").fetchall()]
         for col, typedef in [("tp2_hit_rate", "REAL"), ("tp2_sample", "INTEGER"),
-                              ("tp3_hit_rate", "REAL"), ("tp3_sample", "INTEGER")]:
+                              ("tp3_hit_rate", "REAL"), ("tp3_sample", "INTEGER"),
+                              ("total_pnl_usd", "REAL")]:
             if col not in cs_cols:
                 conn.execute(f"ALTER TABLE channel_stats ADD COLUMN {col} {typedef}")
 
@@ -216,7 +217,8 @@ def init_db():
         # Миграция: TP2/TP3 (только если канал сам их назвал — NULL иначе,
         # никогда не достраиваем сами) + флаги, дошла ли цена дальше TP1
         hist_cols = [r[1] for r in conn.execute("PRAGMA table_info(historical_signals)").fetchall()]
-        for col, typedef in [("tp2", "REAL"), ("tp3", "REAL"), ("tp2_hit", "INTEGER"), ("tp3_hit", "INTEGER")]:
+        for col, typedef in [("tp2", "REAL"), ("tp3", "REAL"), ("tp2_hit", "INTEGER"), ("tp3_hit", "INTEGER"),
+                              ("pnl_usd", "REAL"), ("position_size", "REAL")]:
             if col not in hist_cols:
                 conn.execute(f"ALTER TABLE historical_signals ADD COLUMN {col} {typedef}")
 
@@ -595,17 +597,18 @@ def load_historical_signals(channel, unchecked_only=False):
 
 
 def save_backtest_result(signal_id, entry_filled, entry_filled_at, outcome, exit_price, pnl_pct,
-                          tp2_hit=None, tp3_hit=None):
+                          tp2_hit=None, tp3_hit=None, pnl_usd=None, position_size=None):
     with _lock, get_conn() as conn:
         conn.execute("""
             UPDATE historical_signals SET
                 entry_filled=?, entry_filled_at=?, outcome=?, exit_price=?, pnl_pct=?, checked_at=?,
-                tp2_hit=?, tp3_hit=?
+                tp2_hit=?, tp3_hit=?, pnl_usd=?, position_size=?
             WHERE id=?
         """, (int(entry_filled), entry_filled_at, outcome, exit_price, pnl_pct,
               datetime.now().isoformat(),
               None if tp2_hit is None else int(tp2_hit),
               None if tp3_hit is None else int(tp3_hit),
+              pnl_usd, position_size,
               signal_id))
 
 
@@ -615,9 +618,9 @@ def save_channel_stats(channel, period_days, report: dict, equity_curve_json: st
         conn.execute("""
             INSERT INTO channel_stats
                 (channel, period_days, total_signals, checked, closed_trades, wins, losses,
-                 winrate_pct, avg_risk_reward, total_pnl_pct, equity_curve_json, last_analyzed_at,
-                 tp2_hit_rate, tp2_sample, tp3_hit_rate, tp3_sample)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 winrate_pct, avg_risk_reward, total_pnl_pct, total_pnl_usd, equity_curve_json,
+                 last_analyzed_at, tp2_hit_rate, tp2_sample, tp3_hit_rate, tp3_sample)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(channel) DO UPDATE SET
                 period_days=excluded.period_days,
                 total_signals=excluded.total_signals,
@@ -628,6 +631,7 @@ def save_channel_stats(channel, period_days, report: dict, equity_curve_json: st
                 winrate_pct=excluded.winrate_pct,
                 avg_risk_reward=excluded.avg_risk_reward,
                 total_pnl_pct=excluded.total_pnl_pct,
+                total_pnl_usd=excluded.total_pnl_usd,
                 equity_curve_json=excluded.equity_curve_json,
                 last_analyzed_at=excluded.last_analyzed_at,
                 tp2_hit_rate=excluded.tp2_hit_rate,
@@ -636,7 +640,8 @@ def save_channel_stats(channel, period_days, report: dict, equity_curve_json: st
                 tp3_sample=excluded.tp3_sample
         """, (channel, period_days, report['total_signals'], report['checked'],
               report['closed_trades'], report['wins'], report['losses'],
-              report['winrate_pct'], report['avg_risk_reward'], report['total_pnl_pct_fixed_size'],
+              report['winrate_pct'], report['avg_risk_reward'], report['total_pnl_pct_of_risk'],
+              report['total_pnl_usd'],
               equity_curve_json, datetime.now().isoformat(),
               report.get('tp2_hit_rate'), report.get('tp2_sample'),
               report.get('tp3_hit_rate'), report.get('tp3_sample')))

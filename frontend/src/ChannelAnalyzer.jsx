@@ -15,8 +15,8 @@ function Metric({ label, value, sub }) {
 }
 
 const OUTCOME_LABEL = {
-  win: 'Прибыль', loss: 'Убыток', not_filled: 'Не дошла до входа',
-  no_data: 'Нет данных биржи', timeout: 'Не дошла ни до TP1, ни до SL',
+  win: 'Прибыль (TP1)', loss: 'Убыток (Stop)', not_filled: 'Не дошла до входа',
+  no_data: 'Нет данных биржи', timeout_closed: 'Закрыта по таймауту', still_open: 'Исход ещё не известен',
 }
 
 function TpCell({ level, hit }) {
@@ -31,9 +31,10 @@ function TpCell({ level, hit }) {
 }
 
 function HistoryRow({ s }) {
-  const isWin = s.outcome === 'win'
-  const isLoss = s.outcome === 'loss'
-  const tone = isWin ? 'pos' : isLoss ? 'neg' : 'neutral'
+  const hasPnl = s.pnl_usd != null
+  // timeout_closed — реальная закрытая сделка с реальным PnL (плюс или минус
+  // по факту), красим по знаку, а не как нейтральный "непонятный" исход.
+  const tone = hasPnl ? (s.pnl_usd >= 0 ? 'pos' : 'neg') : 'neutral'
   return (
     <tr className={`ca-hist-row ${tone}`}>
       <td>{s.posted_at?.slice(0, 16).replace('T', ' ')}</td>
@@ -46,14 +47,14 @@ function HistoryRow({ s }) {
       <TpCell level={s.tp3} hit={s.tp3_hit} />
       <td><span className={`ca-hist-badge ${tone}`}>{OUTCOME_LABEL[s.outcome] || (s.checked_at ? 'В обработке' : 'Не сверено')}</span></td>
       <td className={tone === 'pos' ? 'pos' : tone === 'neg' ? 'neg' : ''}>
-        {s.pnl_pct != null ? `${s.pnl_pct >= 0 ? '+' : ''}${s.pnl_pct}%` : '—'}
+        {hasPnl ? `${s.pnl_usd >= 0 ? '+' : ''}${s.pnl_usd}$` : '—'}
       </td>
     </tr>
   )
 }
 
 function RankingRow({ c }) {
-  const pos = (c.total_pnl_pct ?? 0) >= 0
+  const pos = (c.total_pnl_usd ?? 0) >= 0
   return (
     <tr className="ca-rank-row">
       <td className="ca-hist-sym">{c.channel}</td>
@@ -61,7 +62,7 @@ function RankingRow({ c }) {
       <td>{c.closed_trades}</td>
       <td>{c.winrate_pct != null ? `${c.winrate_pct}%` : '—'}</td>
       <td>{c.avg_risk_reward ?? '—'}</td>
-      <td className={pos ? 'pos' : 'neg'}>{pos ? '+' : ''}{c.total_pnl_pct}%</td>
+      <td className={pos ? 'pos' : 'neg'}>{pos ? '+' : ''}{c.total_pnl_usd}$</td>
       <td className="ca-hist-dim">{c.last_analyzed_at?.slice(0, 10)}</td>
     </tr>
   )
@@ -71,6 +72,8 @@ export default function ChannelAnalyzer() {
   const [url, setUrl] = useState('')
   const [days, setDays] = useState(30)
   const [entryTimeoutHours, setEntryTimeoutHours] = useState(6)
+  const [maxHoldHours, setMaxHoldHours] = useState(168)
+  const [riskUsd, setRiskUsd] = useState(100)
   const [status, setStatus] = useState('idle')   // idle | running | done | error
   const [step, setStep] = useState('')
   const [error, setError] = useState(null)
@@ -123,7 +126,7 @@ export default function ChannelAnalyzer() {
     clearInterval(pollRef.current)
     setStatus('running'); setError(null); setReport(null); setCurve([]); setHistory([]); setStep('Отправка запроса...')
     try {
-      const res = await api.analyzeChannel(url.trim(), days, entryTimeoutHours)
+      const res = await api.analyzeChannel(url.trim(), days, entryTimeoutHours, maxHoldHours, riskUsd)
       setCached(!!res.cached)
       if (res.cached) {
         setReport(res.report)
@@ -140,7 +143,7 @@ export default function ChannelAnalyzer() {
     }
   }
 
-  const posTotal = (report?.total_pnl_pct_fixed_size ?? 0) >= 0
+  const posTotal = (report?.total_pnl_usd ?? 0) >= 0
 
   return (
     <div className="ca-page animate-in">
@@ -178,10 +181,32 @@ export default function ChannelAnalyzer() {
           <option value={24}>Вход за 24ч</option>
           <option value={48}>Вход за 48ч</option>
         </select>
+        <select
+          className="ca-days"
+          value={maxHoldHours}
+          onChange={e => setMaxHoldHours(Number(e.target.value))}
+          disabled={status === 'running'}
+          title="Максимум держим позицию открытой, прежде чем принудительно закрыть по факту (если ни TP1, ни Stop не достигнуты)"
+        >
+          <option value={24}>Держим до 1д</option>
+          <option value={72}>Держим до 3д</option>
+          <option value={168}>Держим до 7д</option>
+          <option value={336}>Держим до 14д</option>
+        </select>
+        <input
+          className="ca-days ca-risk-input"
+          type="number"
+          min={1}
+          value={riskUsd}
+          onChange={e => setRiskUsd(Number(e.target.value))}
+          disabled={status === 'running'}
+          title="Сколько $ риска на один сигнал — размер позиции считается от этого, не от фиксированного объёма"
+        />
         <button className="ca-btn" onClick={analyze} disabled={status === 'running' || !url.trim()}>
           {status === 'running' ? 'Анализирую...' : 'Analyze'}
         </button>
       </div>
+      <p className="ca-hint">Риск на сделку: ${riskUsd} · держим позицию максимум {maxHoldHours}ч, затем закрываем по факту</p>
 
       {status === 'running' && (
         <div className="ca-status animate-in">
@@ -200,13 +225,17 @@ export default function ChannelAnalyzer() {
 
           <div className="ca-metrics">
             <Metric label="Сигналов найдено" value={report.total_signals} />
-            <Metric label="Закрытых сделок" value={report.closed_trades} />
-            <Metric label="Winrate" value={report.winrate_pct != null ? `${report.winrate_pct}%` : '—'} />
+            <Metric
+              label="Закрытых сделок"
+              value={report.closed_trades}
+              sub={report.closed_by_timeout ? `из них ${report.closed_by_timeout} закрыты по таймауту` : undefined}
+            />
+            <Metric label="Winrate (TP1/Stop)" value={report.winrate_pct != null ? `${report.winrate_pct}%` : '—'} />
             <Metric label="Средний R:R" value={report.avg_risk_reward ?? '—'} />
             <Metric
-              label="Итоговый PnL (фикс. объём)"
-              value={<span className={posTotal ? 'pos' : 'neg'}>{posTotal ? '+' : ''}{report.total_pnl_pct_fixed_size}%</span>}
-              sub={`комиссия 0.1% учтена`}
+              label="Итоговый PnL"
+              value={<span className={posTotal ? 'pos' : 'neg'}>{posTotal ? '+' : ''}{report.total_pnl_usd}$</span>}
+              sub={`${report.total_pnl_pct_of_risk >= 0 ? '+' : ''}${report.total_pnl_pct_of_risk}% от риска · комиссия учтена`}
             />
             {report.tp2_hit_rate != null && (
               <Metric label="Доходили до TP2" value={`${report.tp2_hit_rate}%`} sub={`из ${report.tp2_sample} сигналов с заявленным TP2`} />
@@ -222,10 +251,10 @@ export default function ChannelAnalyzer() {
                 <LineChart data={curve}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                   <XAxis dataKey="date" tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: 'var(--text-tertiary)', fontSize: 10, fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} tickFormatter={v => `${v}%`} width={50} />
-                  <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, fontFamily: 'var(--font-mono)', fontSize: 12 }} formatter={v => [`${v}%`, 'Кум. PnL']} />
+                  <YAxis tick={{ fill: 'var(--text-tertiary)', fontSize: 10, fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} width={56} />
+                  <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, fontFamily: 'var(--font-mono)', fontSize: 12 }} formatter={v => [`$${v}`, 'Кум. PnL']} />
                   <ReferenceLine y={0} stroke="var(--text-tertiary)" strokeDasharray="4 4" />
-                  <Line type="monotone" dataKey="cum_pnl_pct" stroke={posTotal ? 'var(--long)' : 'var(--short)'} strokeWidth={2.5} dot={false} />
+                  <Line type="monotone" dataKey="cum_pnl_usd" stroke={posTotal ? 'var(--long)' : 'var(--short)'} strokeWidth={2.5} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -280,6 +309,8 @@ export default function ChannelAnalyzer() {
         .ca-days { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; color: var(--text); font-size: 13px; }
         .ca-btn { background: var(--accent); color: #fff; border: none; border-radius: 10px; padding: 11px 22px; font-weight: 600; font-size: 14px; cursor: pointer; }
         .ca-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .ca-risk-input { width: 90px; }
+        .ca-hint { font-size: 11px; color: var(--text-tertiary); margin: 8px 0 0; }
         .ca-status { display: flex; align-items: center; gap: 10px; margin-top: 18px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text-secondary); font-size: 13px; }
         .ca-spinner { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: ca-spin 0.8s linear infinite; flex-shrink: 0; }
         @keyframes ca-spin { to { transform: rotate(360deg); } }

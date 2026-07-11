@@ -65,8 +65,11 @@ export const api = {
   adminGetTraders: () => get('/admin/traders'),
   adminCreateTrader: (data) => post('/admin/traders', data),
   adminAddSignal: (data) => post('/admin/add-signal', data),
-  analyzeChannel: (channelUrl, days = 30, entryTimeoutHours = 6) =>
-    post('/analyze-channel', { channel_url: channelUrl, days, entry_timeout_hours: entryTimeoutHours }),
+  analyzeChannel: (channelUrl, days = 30, entryTimeoutHours = 6, maxHoldHours = 168, riskPerTradeUsd = 100) =>
+    post('/analyze-channel', {
+      channel_url: channelUrl, days, entry_timeout_hours: entryTimeoutHours,
+      max_hold_hours: maxHoldHours, risk_per_trade_usd: riskPerTradeUsd,
+    }),
   getAnalysisStatus: (jobId) => get(`/analysis-status/${jobId}`),
   getChannelHistory: (channel) => get(`/channel-history/${encodeURIComponent(channel)}`),
   getChannelsRanking: () => get('/channels-ranking'),

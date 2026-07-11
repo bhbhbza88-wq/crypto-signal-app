@@ -52,11 +52,14 @@ def _finish(job_id, result=None, error=None):
             _jobs[job_id]["error"] = error
 
 
-def run_channel_analysis(job_id: str, channel: str, days: int, entry_timeout_hours: int = 6):
+def run_channel_analysis(job_id: str, channel: str, days: int, entry_timeout_hours: int = 6,
+                          max_hold_hours: int = 168, risk_per_trade_usd: float = 100.0):
     """Синхронная точка входа для threading.Thread (как в /api/backtest/robustness) —
     сама открывает свой asyncio event loop для ingest_channel_history (Telethon async)."""
     try:
-        bt = SignalBacktester(entry_timeout_hours=entry_timeout_hours)
+        bt = SignalBacktester(entry_timeout_hours=entry_timeout_hours,
+                               max_hold_hours=max_hold_hours,
+                               risk_per_trade_usd=risk_per_trade_usd)
 
         _update(job_id, "загрузка истории канала из Telegram")
         asyncio.run(bt.ingest_channel_history(channel, days=days))
