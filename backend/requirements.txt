@@ -4,3 +4,4 @@ ccxt
 pandas
 schedule
 httpx
+telethon

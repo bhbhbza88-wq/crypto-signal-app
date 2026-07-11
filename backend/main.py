@@ -6,6 +6,7 @@ FastAPI backend — V8 стратегия.
 import os
 import json
 import hmac
+import asyncio
 import urllib.request
 import urllib.error
 import pandas as pd
@@ -29,22 +30,16 @@ from nfi_strategy import (
     get_mults, calc_levels, calc_position_size, volatility_position_size,
     backtest_levels, ADX_MIN, get_risk_status
 )
-
-
-def normalize_symbol(raw: str) -> str:
-    """'BTCUSDT' / 'btc/usdt' -> 'BTC/USDT' (унифицированный формат ccxt, нужен tracker.py)."""
-    s = raw.upper().strip()
-    if '/' in s:
-        return s
-    if s.endswith('USDT'):
-        return s[:-4] + '/USDT'
-    return s
+from signal_ingest import normalize_symbol, open_signal
+import telegram_ingest
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
     start_background_scanner()
+    if telegram_ingest.is_configured():
+        asyncio.create_task(telegram_ingest.run())
     yield
 
 
@@ -203,29 +198,18 @@ def admin_add_signal(req: AddSignalRequest, background_tasks: BackgroundTasks, a
     if signal not in ('LONG', 'SHORT'):
         raise HTTPException(status_code=400, detail="signal должен быть LONG или SHORT")
 
-    symbol = normalize_symbol(req.symbol)
-    if db.get_trade(symbol):
-        raise HTTPException(status_code=409, detail=f"По {symbol} уже есть открытая позиция")
+    symbol, err = open_signal(
+        req.symbol, signal, req.entry, req.stop, req.tp1, req.tp2, req.tp3,
+        trader_id=req.trader_id, regime="manual",
+        reasons=[req.note] if req.note else None,
+    )
+    if err == 'already_open':
+        raise HTTPException(status_code=409, detail=f"По {normalize_symbol(req.symbol)} уже есть открытая позиция")
+    if err == 'invalid_levels':
+        detail = ("Для LONG: stop < entry < tp1 < tp2 < tp3" if signal == 'LONG'
+                  else "Для SHORT: stop > entry > tp1 > tp2 > tp3")
+        raise HTTPException(status_code=400, detail=detail)
 
-    if signal == 'LONG':
-        if not (req.stop < req.entry < req.tp1 < req.tp2 < req.tp3):
-            raise HTTPException(status_code=400, detail="Для LONG: stop < entry < tp1 < tp2 < tp3")
-    else:
-        if not (req.stop > req.entry > req.tp1 > req.tp2 > req.tp3):
-            raise HTTPException(status_code=400, detail="Для SHORT: stop > entry > tp1 > tp2 > tp3")
-
-    trade = {
-        "signal": signal,
-        "entry": req.entry,
-        "stop": req.stop,
-        "tp1": req.tp1, "tp2": req.tp2, "tp3": req.tp3,
-        "score": None,
-        "regime": "manual",
-        "opened_at": datetime.now().isoformat(),
-        "entry_reasons_json": json.dumps([req.note] if req.note else []),
-        "trader_id": req.trader_id,
-    }
-    db.upsert_trade(symbol, trade)
     db.add_event(symbol, 'manual_signal', f"Новый сигнал от {trader['name']}: {signal} {symbol} @ {req.entry}")
     background_tasks.add_task(telegram_bot.notify_manual_signal, {
         "symbol": symbol, "signal": signal,
@@ -256,10 +240,6 @@ def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTas
     if req.price <= 0:
         raise HTTPException(status_code=400, detail="price должен быть положительным")
 
-    symbol = normalize_symbol(req.ticker)
-    if db.get_trade(symbol):
-        raise HTTPException(status_code=409, detail=f"По {symbol} уже есть открытая позиция")
-
     entry = req.price
     if signal == 'LONG':
         stop = entry * (1 - TV_SL_PCT)
@@ -271,15 +251,16 @@ def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTas
     trader_id = db.get_or_create_trader(req.indicator_name)
     trader = db.get_trader(trader_id)
 
-    trade = {
-        "signal": signal, "entry": entry, "stop": stop,
-        "tp1": tp1, "tp2": tp2, "tp3": tp3,
-        "score": None, "regime": "tradingview",
-        "opened_at": datetime.now().isoformat(),
-        "entry_reasons_json": json.dumps([f"TradingView: {req.indicator_name}"], ensure_ascii=False),
-        "trader_id": trader_id,
-    }
-    db.upsert_trade(symbol, trade)
+    symbol, err = open_signal(
+        req.ticker, signal, entry, stop, tp1, tp2, tp3,
+        trader_id=trader_id, regime="tradingview",
+        reasons=[f"TradingView: {req.indicator_name}"],
+    )
+    if err == 'already_open':
+        raise HTTPException(status_code=409, detail=f"По {normalize_symbol(req.ticker)} уже есть открытая позиция")
+    if err == 'invalid_levels':
+        raise HTTPException(status_code=400, detail="Некорректные уровни TP/SL")
+
     db.add_event(symbol, 'tradingview_signal',
                  f"{req.indicator_name}: {signal} {symbol} @ {entry}")
 
@@ -463,7 +444,7 @@ def get_active_signals():
             "candles": candles,
             "entry_reasons": entry_reasons,
             "position_size": t.get('position_size'),
-            "trader": {"id": trader['id'], "name": trader['name'], "avatar_url": trader.get('avatar_url')} if trader else None,
+            "trader": {"id": trader['id'], "name": trader['name'], "avatar_url": trader.get('avatar_url'), "source_type": trader.get('source_type')} if trader else None,
         })
     return out
 

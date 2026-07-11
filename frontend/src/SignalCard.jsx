@@ -250,7 +250,12 @@ export default function SignalCard({ signal }) {
         </div>
       )}
 
-      {signal.entry_reasons?.length > 0 && (
+      {signal.trader?.source_type === 'telegram_aggregate' ? (
+        <div className="reasons-block">
+          <span className="reasons-title">Источник</span>
+          <p className="source-attribution">{signal.trader.name}</p>
+        </div>
+      ) : signal.entry_reasons?.length > 0 && (
         <div className="reasons-block">
           <span className="reasons-title">Почему сканер вошёл в сделку</span>
           <ul className="reasons-list">
@@ -335,6 +340,7 @@ export default function SignalCard({ signal }) {
           display: flex; flex-direction: column; gap: 6px;
         }
         .reasons-list li { font-size: 13px; color: var(--text); line-height: 1.4; }
+        .source-attribution { margin: 10px 0 0; font-size: 13px; color: var(--text); font-weight: 600; }
 
         @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(0,229,168,0.4)} 70%{box-shadow:0 0 0 5px rgba(0,229,168,0)} 100%{box-shadow:0 0 0 0 rgba(0,229,168,0)} }
 

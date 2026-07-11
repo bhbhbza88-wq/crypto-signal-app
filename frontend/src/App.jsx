@@ -443,9 +443,21 @@ export default function App() {
               <section className="section" style={{ marginTop: 28 }}>
                 <h2 className="section-title">Активный сигнал</h2>
                 {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal /> : (
-                  <div className="signals-grid">{signals.map(s => <SignalCard key={s.symbol} signal={s} />)}</div>
+                  <div className="signals-grid">
+                    {signals.filter(s => s.trader?.source_type !== 'telegram_aggregate').map(s => <SignalCard key={s.symbol} signal={s} />)}
+                  </div>
                 )}
               </section>
+
+              {/* Внешние сигналы — мониторинг приватных Telegram-каналов, не наша стратегия */}
+              {signals.some(s => s.trader?.source_type === 'telegram_aggregate') && (
+                <section className="section" style={{ marginTop: 28 }}>
+                  <h2 className="section-title">Внешние сигналы (мониторинг приватных каналов)</h2>
+                  <div className="signals-grid">
+                    {signals.filter(s => s.trader?.source_type === 'telegram_aggregate').map(s => <SignalCard key={s.symbol} signal={s} />)}
+                  </div>
+                </section>
+              )}
 
               {/* Живые стратегии — реальные данные */}
               <div className="ts-block">

@@ -156,6 +156,12 @@ def init_db():
                 created_at TEXT
             )
         """)
+        trader_cols = [r[1] for r in conn.execute("PRAGMA table_info(traders)").fetchall()]
+        if 'source_url' not in trader_cols:
+            conn.execute("ALTER TABLE traders ADD COLUMN source_url TEXT")
+        if 'source_type' not in trader_cols:
+            conn.execute("ALTER TABLE traders ADD COLUMN source_type TEXT DEFAULT 'manual'")
+            print("✅ Миграция: добавлены колонки source_url, source_type в traders")
 
 
 # ── Open trades ──────────────────────────────────────────
@@ -386,12 +392,12 @@ def delete_session(token):
 
 
 # ── Трейдеры (авторы сигналов) ────────────────────────────
-def create_trader(name, avatar_url=None, bio=None):
+def create_trader(name, avatar_url=None, bio=None, source_url=None, source_type='manual'):
     with _lock, get_conn() as conn:
         cur = conn.execute("""
-            INSERT INTO traders (name, avatar_url, bio, is_active, created_at)
-            VALUES (?,?,?,1,?)
-        """, (name, avatar_url, bio, datetime.now().isoformat()))
+            INSERT INTO traders (name, avatar_url, bio, is_active, created_at, source_url, source_type)
+            VALUES (?,?,?,1,?,?,?)
+        """, (name, avatar_url, bio, datetime.now().isoformat(), source_url, source_type))
         return cur.lastrowid
 
 
@@ -411,6 +417,17 @@ def get_or_create_trader(name, bio=None):
         if row:
             return row['id']
     return create_trader(name, avatar_url=None, bio=bio or "Автоматический источник (TradingView)")
+
+
+def get_or_create_source_trader(name, source_url=None, source_type='manual', bio=None):
+    """Как get_or_create_trader, но для источников с атрибуцией (Telegram-агрегатор
+    и т.п.) — хранит source_url/source_type, чтобы фронт мог честно показать
+    происхождение сигнала и не путать его с ручными/собственными."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT id FROM traders WHERE name=?", (name,)).fetchone()
+        if row:
+            return row['id']
+    return create_trader(name, avatar_url=None, bio=bio, source_url=source_url, source_type=source_type)
 
 
 def list_traders(only_active=False):
