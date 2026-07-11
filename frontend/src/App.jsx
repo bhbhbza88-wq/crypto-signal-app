@@ -14,6 +14,7 @@ import DryRunDashboard from './DryRunDashboard'
 import XSecDashboard from './XSecDashboard'
 import TrendDashboard from './TrendDashboard'
 import StrategiesCompare from './StrategiesCompare'
+import Admin from './Admin'
 
 const POLL_INTERVAL = 15000
 const MARKET_POLL_INTERVAL = 60000
@@ -276,6 +277,10 @@ export default function App() {
     ? node
     : <UpgradeLock tab={tab} user={user} onUpgrade={() => setTab('pricing')} onLogin={() => { setAuthMode('register'); setShowAuth(true) }} />
 
+  const navSections = user?.is_admin
+    ? [...NAV_SECTIONS, { title: 'Админ', items: [{ key: 'admin', label: 'Админка', icon: '🛠' }] }]
+    : NAV_SECTIONS
+
   return (
     <div className={`layout ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
 
@@ -314,7 +319,7 @@ export default function App() {
         )}
 
         <nav className="sidebar-nav">
-          {NAV_SECTIONS.map((sec) => (
+          {navSections.map((sec) => (
             <div key={sec.title} className="nav-group">
               {!sidebarCollapsed && <div className="nav-group-title">{sec.title}</div>}
               {sec.items.map((t) => (
@@ -409,7 +414,7 @@ export default function App() {
           {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat signals={signals} stats={stats} market={market} /></section>}
           {tab === 'market' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Скринер рынка</h1></div><MarketView market={market} /></section>}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
-          {tab === 'backtest' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Бэктест <span className="beta-tag">BETA</span></h1></div><Backtest /></section>}
+          {tab === 'backtest' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Бэктест <span className="beta-tag">BETA</span></h1></div><Backtest isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
           {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} onUpgraded={(t) => setUser(u => u ? { ...u, tier: t } : u)} onNeedAuth={() => setShowAuth(true)} /></section>}
           {tab === 'compare' && gate(<section className="section animate-in"><StrategiesCompare /></section>)}
           {tab === 'dryrun' && gate(<section className="section animate-in"><DryRunDashboard /></section>)}
@@ -417,6 +422,7 @@ export default function App() {
           {tab === 'trend_ff' && gate(<section className="section animate-in"><TrendDashboard /></section>)}
           {tab === 'smarttrade_calc' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Smart Trade <span className="hot-tag">NEW</span></h1></div><SmartTrade /></section>}
           {tab === 'invite' && <ComingSoonPage tab="invite" />}
+          {tab === 'admin' && user?.is_admin && <Admin />}
 
           {tab === 'overview' && (
             <div className="animate-in">

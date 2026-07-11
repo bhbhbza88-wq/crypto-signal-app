@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid, BarChart, Bar, Cell } from 'recharts'
+import { api } from './api'
 
 const ALL_PAIRS = [
   'BTC/USDT','ETH/USDT','SOL/USDT','BNB/USDT','XRP/USDT',
@@ -251,8 +252,191 @@ function TradesList({ trades, showSymbol }) {
   )
 }
 
+// ── Проверка на прочность ──────────────────────────────────────
+const VERDICT_META = {
+  robust:        { label: 'УСТОЙЧИВ',        color: 'var(--long)',    icon: '✓' },
+  fragile:       { label: 'ХРУПКИЙ',         color: 'var(--amber)',   icon: '⚠' },
+  artifact:      { label: 'ПОХОЖ НА АРТЕФАКТ', color: 'var(--short)', icon: '✕' },
+  insufficient:  { label: 'МАЛО ДАННЫХ',     color: 'var(--text-tertiary)', icon: '?' },
+}
+const CHECK_STATUS_META = {
+  passed:        { color: 'var(--long)',  icon: '✓' },
+  warning:       { color: 'var(--amber)', icon: '⚠' },
+  failed:        { color: 'var(--short)', icon: '✕' },
+  insufficient:  { color: 'var(--text-tertiary)', icon: '?' },
+}
+
+function RobustnessUpsell({ onUpgrade }) {
+  return (
+    <div className="rb-upsell">
+      <div className="rb-upsell-icon">🔒</div>
+      <div className="rb-upsell-title">Проверка на прочность — Premium</div>
+      <div className="rb-upsell-desc">
+        Walk-forward, стресс по костам, устойчивость к сдвигу параметров, Monte-Carlo и Deflated Sharpe —
+        честный вердикт «эдж реальный или похож на артефакт подбора».
+      </div>
+      <button className="rb-upsell-btn" onClick={onUpgrade}>Открыть за Premium →</button>
+      <style>{`
+        .rb-upsell { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+          box-shadow: var(--shadow-card); padding: 28px 24px; text-align: center; display: flex;
+          flex-direction: column; align-items: center; gap: 10px; margin-top: 14px; }
+        .rb-upsell-icon { font-size: 26px; }
+        .rb-upsell-title { font-size: 15px; font-weight: 700; color: var(--text); }
+        .rb-upsell-desc { font-size: 13px; color: var(--text-secondary); max-width: 460px; line-height: 1.5; }
+        .rb-upsell-btn { margin-top: 6px; background: linear-gradient(135deg, var(--accent), var(--purple));
+          color: #fff; border: none; border-radius: var(--radius-md); padding: 10px 24px;
+          font-size: 13px; font-weight: 700; cursor: pointer; }
+      `}</style>
+    </div>
+  )
+}
+
+function RobustnessPanel({ pair, period, deposit, commission, slippage, strategy, isPremium, onUpgrade }) {
+  const [running, setRunning] = useState(false)
+  const [progress, setProgress] = useState(null)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
+  const [expanded, setExpanded] = useState(null)
+  const pollRef = useRef(null)
+
+  useEffect(() => () => clearTimeout(pollRef.current), [])
+
+  async function start() {
+    setRunning(true); setResult(null); setError(null); setProgress(null)
+    try {
+      const { job_id } = await api.startRobustness({
+        symbol: pair, deposit: Number(deposit), period_days: period.days,
+        commission: Number(commission), slippage: Number(slippage), strategy,
+      })
+      poll(job_id)
+    } catch (e) {
+      setError(e.message); setRunning(false)
+    }
+  }
+
+  function poll(jobId) {
+    pollRef.current = setTimeout(async () => {
+      try {
+        const data = await api.getRobustnessStatus(jobId)
+        setProgress(data.progress)
+        if (data.status === 'running') {
+          poll(jobId)
+        } else if (data.status === 'done') {
+          setResult(data.result); setRunning(false)
+        } else {
+          setError(data.error || 'Проверка не удалась'); setRunning(false)
+        }
+      } catch (e) {
+        setError(e.message); setRunning(false)
+      }
+    }, 1500)
+  }
+
+  if (!isPremium) return <RobustnessUpsell onUpgrade={onUpgrade} />
+
+  const meta = result ? VERDICT_META[result.verdict] : null
+
+  return (
+    <div className="rb-panel">
+      <div className="rb-header">
+        <div>
+          <h3 className="rb-title">Проверка на прочность</h3>
+          <p className="rb-sub">Walk-forward · стресс по костам · сдвиг параметров · Monte-Carlo · Deflated Sharpe</p>
+        </div>
+        <button className="rb-run-btn" onClick={start} disabled={running}>
+          {running ? '⟳ Проверяю...' : '🛡 Проверить'}
+        </button>
+      </div>
+
+      {running && progress && (
+        <div className="rb-progress">
+          <div className="rb-progress-bar">
+            <div className="rb-progress-fill" style={{ width: `${Math.min(100, progress.done / progress.total * 100)}%` }} />
+          </div>
+          <span className="rb-progress-text">{progress.step} ({progress.done}/{progress.total})</span>
+        </div>
+      )}
+
+      {error && <div className="rb-error">{error}</div>}
+
+      {result && (
+        <div className="rb-result animate-in">
+          <div className="rb-verdict" style={{ borderColor: meta.color }}>
+            <span className="rb-verdict-icon" style={{ color: meta.color }}>{meta.icon}</span>
+            <div>
+              <div className="rb-verdict-label" style={{ color: meta.color }}>{meta.label}</div>
+              <div className="rb-verdict-text">{result.verdict_text}</div>
+            </div>
+          </div>
+
+          <div className="rb-checks">
+            {result.checks.map((c) => {
+              const cm = CHECK_STATUS_META[c.status]
+              const isOpen = expanded === c.key
+              return (
+                <div key={c.key} className="rb-check">
+                  <button className="rb-check-row" onClick={() => setExpanded(isOpen ? null : c.key)}>
+                    <span className="rb-check-icon" style={{ color: cm.color }}>{cm.icon}</span>
+                    <span className="rb-check-name">{c.name}</span>
+                    <span className="rb-check-summary">{c.summary}</span>
+                    <span className="rb-check-arrow">{isOpen ? '▲' : '▼'}</span>
+                  </button>
+                  {isOpen && (
+                    <pre className="rb-check-detail">{JSON.stringify(c.detail, null, 2)}</pre>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="rb-disclaimer">
+            ⚠️ Это проверка устойчивости самого бэктеста, не гарантия будущей прибыли.
+            «Устойчив» значит «не похоже на случайность» — не «будет расти».
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        .rb-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+          box-shadow: var(--shadow-card); padding: 20px 22px; margin-top: 14px; }
+        .rb-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+        .rb-title { font-size: 15px; font-weight: 700; color: var(--text); margin: 0; }
+        .rb-sub { font-size: 12px; color: var(--text-tertiary); margin: 4px 0 0; }
+        .rb-run-btn { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff;
+          border: none; border-radius: var(--radius-md); padding: 9px 18px; font-size: 13px; font-weight: 700;
+          cursor: pointer; white-space: nowrap; }
+        .rb-run-btn:disabled { opacity: 0.6; cursor: default; }
+        .rb-progress { margin-top: 16px; }
+        .rb-progress-bar { height: 6px; background: var(--surface-hover); border-radius: 4px; overflow: hidden; }
+        .rb-progress-fill { height: 100%; background: linear-gradient(135deg, var(--accent), var(--purple)); transition: width 0.4s ease; }
+        .rb-progress-text { font-size: 11px; color: var(--text-tertiary); margin-top: 6px; display: block; font-family: var(--font-mono); }
+        .rb-error { margin-top: 14px; padding: 12px 14px; background: var(--short-soft); color: var(--short);
+          border-radius: var(--radius-sm); font-size: 13px; }
+        .rb-result { margin-top: 18px; display: flex; flex-direction: column; gap: 16px; }
+        .rb-verdict { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px;
+          border: 1.5px solid; border-radius: var(--radius-md); background: var(--surface-hover); }
+        .rb-verdict-icon { font-size: 24px; font-weight: 900; flex-shrink: 0; }
+        .rb-verdict-label { font-size: 14px; font-weight: 800; letter-spacing: 0.03em; margin-bottom: 4px; }
+        .rb-verdict-text { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+        .rb-checks { display: flex; flex-direction: column; gap: 6px; }
+        .rb-check { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+        .rb-check-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+          background: none; border: none; cursor: pointer; text-align: left; }
+        .rb-check-icon { font-weight: 900; font-size: 14px; width: 16px; flex-shrink: 0; }
+        .rb-check-name { font-size: 13px; font-weight: 600; color: var(--text); width: 200px; flex-shrink: 0; }
+        .rb-check-summary { font-size: 12px; color: var(--text-secondary); flex: 1; }
+        .rb-check-arrow { font-size: 10px; color: var(--text-tertiary); flex-shrink: 0; }
+        .rb-check-detail { margin: 0; padding: 12px 14px; background: var(--surface-hover); font-size: 11px;
+          font-family: var(--font-mono); color: var(--text-secondary); overflow-x: auto; max-height: 260px; overflow-y: auto; }
+        .rb-disclaimer { font-size: 12px; color: var(--text-tertiary); line-height: 1.5; padding-top: 4px; border-top: 1px solid var(--border); }
+        @media (max-width: 600px) { .rb-check-name { width: auto; } .rb-check-row { flex-wrap: wrap; } }
+      `}</style>
+    </div>
+  )
+}
+
 // ── Главный компонент ──────────────────────────────────────────
-export default function Backtest() {
+export default function Backtest({ isPremium, onUpgrade }) {
   const [mode, setMode] = useState('multi')   // 'single' | 'multi'
   const [pair, setPair] = useState('BTC/USDT')
   const [period, setPeriod] = useState(PERIODS[0])
@@ -442,6 +626,14 @@ export default function Backtest() {
         result.type === 'single'
           ? <SingleResult result={result.data} deposit={deposit} />
           : <MultiResult result={result.data} />
+      )}
+
+      {mode === 'single' && result?.type === 'single' && !running && (
+        <RobustnessPanel
+          pair={pair} period={period} deposit={deposit}
+          commission={commission} slippage={slippage} strategy={strategy}
+          isPremium={isPremium} onUpgrade={onUpgrade}
+        />
       )}
 
       <style>{`

@@ -59,4 +59,10 @@ export const api = {
   getMarketPhase: () => get('/market/phase'),
   getStrategiesSummary: () => get('/strategies/summary'),
   aiChat: (messages) => post('/ai/chat', { messages }),
+  startRobustness: (params) => post('/backtest/robustness', params),
+  getRobustnessStatus: (jobId) => get(`/backtest/robustness/${jobId}`),
+  getTraders: () => get('/traders'),
+  adminGetTraders: () => get('/admin/traders'),
+  adminCreateTrader: (data) => post('/admin/traders', data),
+  adminAddSignal: (data) => post('/admin/add-signal', data),
 }
