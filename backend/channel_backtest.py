@@ -32,6 +32,10 @@ from telegram_ingest import (
 COMMISSION_PCT = 0.1          # 0.1% за сторону (вход + выход = 0.2% с сделки)
 ENTRY_TIMEOUT_HOURS = 6       # если цена не дошла до Entry за это время — сигнал не в винрейте
 MAX_TRADE_HOURS = 72          # максимум ждём выход по TP1/Stop
+DEDUP_WINDOW_HOURS = 48       # апдейты по той же позиции (то же symbol/side/уровни от канала
+                               # в этом окне) не считаются новым сигналом — защита от переучёта
+                               # даже если промпт ошибочно пометил апдейт как is_signal=true
+DEDUP_TOLERANCE = 0.003       # 0.3% — уровни считаются "теми же", если отличаются меньше этого
 
 
 class SignalBacktester:
@@ -62,6 +66,19 @@ class SignalBacktester:
 
         since = datetime.now(timezone.utc) - timedelta(days=days)
         saved = 0
+        skipped_dupes = 0
+        recent_by_key = {}   # (symbol, side) -> (entry, stop, tp1, posted_at) последнего сохранённого
+
+        def _is_duplicate(symbol, side, entry, stop, tp1, posted_at) -> bool:
+            prev = recent_by_key.get((symbol, side))
+            if not prev:
+                return False
+            p_entry, p_stop, p_tp1, p_posted_at = prev
+            if posted_at - p_posted_at > timedelta(hours=DEDUP_WINDOW_HOURS):
+                return False
+            def _close(a, b):
+                return abs(a - b) <= abs(b) * DEDUP_TOLERANCE
+            return _close(entry, p_entry) and _close(stop, p_stop) and _close(tp1, p_tp1)
 
         client = TelegramClient(StringSession(TELEGRAM_SESSION), int(TELEGRAM_API_ID), TELEGRAM_API_HASH)
         async with client:
@@ -85,6 +102,14 @@ class SignalBacktester:
                 except (KeyError, TypeError, ValueError):
                     continue
 
+                # iter_messages(reverse=True) идёт от старых к новым, поэтому это сравнение
+                # ловит апдейты/реминдеры о позиции, которая была открыта раньше в том же окне —
+                # даже если промпт ошибочно счёл повтор новым сигналом.
+                if _is_duplicate(symbol, side, entry, stop, tp1, msg.date):
+                    skipped_dupes += 1
+                    continue
+                recent_by_key[(symbol, side)] = (entry, stop, tp1, msg.date)
+
                 row_id = db.save_historical_signal(
                     channel=channel, message_id=msg.id, symbol=symbol, side=side,
                     entry=entry, stop=stop, tp1=tp1,
@@ -93,7 +118,8 @@ class SignalBacktester:
                 if row_id:
                     saved += 1
 
-        print(f"[channel_backtest] {channel}: сохранено {saved} новых сигналов за {days} дн.")
+        print(f"[channel_backtest] {channel}: сохранено {saved} новых сигналов за {days} дн. "
+              f"(отброшено как дубль/апдейт: {skipped_dupes})")
         return saved
 
     # ── 2. Backtest Engine ───────────────────────────────────
