@@ -22,18 +22,20 @@ def normalize_symbol(raw: str) -> str:
 
 
 def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime, reasons=None):
-    """Валидирует и открывает позицию через db.upsert_trade.
+    """Валидирует и открывает позицию через db.insert_trade_if_not_exists.
 
     Возвращает (symbol, None) при успехе или (None, причина) при отказе,
     где причина — 'invalid_levels' или 'already_open'. Не бросает исключений:
     вызывающая сторона (HTTP-хендлер или фоновый парсер) сама решает, что
     делать с отказом (409 для API, тихий пропуск + лог для фоновых источников).
+
+    Проверка 'уже открыта' полагается на affected rows атомарной вставки
+    (ON CONFLICT(symbol) DO NOTHING под _lock в database.py), а не на
+    предварительный db.get_trade() — так закрывается TOCTOU-гонка между
+    проверкой и записью при конкурентных вызовах на один symbol.
     """
     symbol = normalize_symbol(symbol)
     signal = signal.upper().strip()
-
-    if db.get_trade(symbol):
-        return None, 'already_open'
 
     if signal == 'LONG':
         ok = stop < entry < tp1 < tp2 < tp3
@@ -53,5 +55,7 @@ def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime, r
         "entry_reasons_json": json.dumps(reasons or [], ensure_ascii=False),
         "trader_id": trader_id,
     }
-    db.upsert_trade(symbol, trade)
+    rowcount = db.insert_trade_if_not_exists(symbol, trade)
+    if rowcount == 0:
+        return None, 'already_open'
     return symbol, None

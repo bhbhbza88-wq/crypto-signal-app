@@ -177,6 +177,42 @@ def get_trade(symbol):
         return dict(row) if row else None
 
 
+def insert_trade_if_not_exists(symbol, trade: dict) -> int:
+    """Атомарная вставка новой позиции: INSERT ... ON CONFLICT(symbol) DO NOTHING.
+
+    В отличие от upsert_trade (который апдейтит существующую позицию и
+    используется трекером для tp1_hit/trailing и т.п.), этот метод никогда
+    не перезаписывает уже открытую сделку — конфликт по symbol просто
+    отбрасывается на уровне БД под тем же _lock, что закрывает TOCTOU-окно
+    между db.get_trade() и записью в open_signal().
+
+    Возвращает rowcount: 1 если позиция реально создана, 0 если symbol
+    уже был открыт (вызывающая сторона должна трактовать 0 как 'already_open').
+    """
+    with _lock, get_conn() as conn:
+        cur = conn.execute("""
+            INSERT INTO open_trades
+                (symbol, signal, entry, stop, tp1, tp2, tp3, score, regime,
+                 tp1_hit, tp2_hit, be_hit, potential_warned, pre_tp1_trail,
+                 opened_at, candles_json, entry_reasons_json, position_size, trader_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(symbol) DO NOTHING
+        """, (
+            symbol, trade['signal'], trade['entry'], trade['stop'],
+            trade['tp1'], trade['tp2'], trade['tp3'],
+            trade.get('score'), trade.get('regime'),
+            int(trade.get('tp1_hit', False)), int(trade.get('tp2_hit', False)),
+            int(trade.get('be_hit', False)), int(trade.get('potential_warned', False)),
+            int(trade.get('pre_tp1_trail', False)),
+            trade.get('opened_at', datetime.now().isoformat()),
+            trade.get('candles_json'),
+            trade.get('entry_reasons_json'),
+            trade.get('position_size'),
+            trade.get('trader_id'),
+        ))
+        return cur.rowcount
+
+
 def upsert_trade(symbol, trade: dict):
     with _lock, get_conn() as conn:
         conn.execute("""
