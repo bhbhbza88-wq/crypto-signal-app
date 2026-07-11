@@ -5,6 +5,7 @@ FastAPI backend — V8 стратегия.
 
 import os
 import json
+import hmac
 import urllib.request
 import urllib.error
 import pandas as pd
@@ -12,12 +13,13 @@ import time as _time
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import database as db
 import auth
+import telegram_bot
 from scanner import start_background_scanner, MAX_OPEN_TRADES
 import data_layer
 from data_layer import exchange, api_call, build_features, detect_regime, get_active_symbols, CANDIDATES
@@ -27,6 +29,16 @@ from nfi_strategy import (
     get_mults, calc_levels, calc_position_size, volatility_position_size,
     backtest_levels, ADX_MIN, get_risk_status
 )
+
+
+def normalize_symbol(raw: str) -> str:
+    """'BTCUSDT' / 'btc/usdt' -> 'BTC/USDT' (унифицированный формат ccxt, нужен tracker.py)."""
+    s = raw.upper().strip()
+    if '/' in s:
+        return s
+    if s.endswith('USDT'):
+        return s[:-4] + '/USDT'
+    return s
 
 
 @asynccontextmanager
@@ -47,6 +59,35 @@ class AuthRequest(BaseModel):
 
 class UpgradeRequest(BaseModel):
     tier: str   # 'premium' | 'vip'
+
+
+class TraderCreate(BaseModel):
+    name: str
+    avatar_url: str | None = None
+    bio: str | None = None
+
+
+class AddSignalRequest(BaseModel):
+    trader_id: int
+    symbol: str
+    signal: str      # 'LONG' | 'SHORT'
+    entry: float
+    stop: float
+    tp1: float
+    tp2: float
+    tp3: float
+    note: str | None = None   # комментарий трейдера к сделке (необязательно)
+
+
+class TradingViewWebhook(BaseModel):
+    ticker: str
+    action: str            # "buy" | "sell"
+    price: float
+    indicator_name: str
+    secret: str
+
+
+TRADINGVIEW_SECRET = os.getenv("TRADINGVIEW_SECRET", "")
 
 
 def _token_from_header(authorization: str | None) -> str | None:
@@ -76,6 +117,15 @@ def require_tier(min_tier: str):
             raise HTTPException(status_code=403, detail=f"Нужен тариф {min_tier} или выше")
         return user
     return dep
+
+
+def require_admin(authorization: str | None = Header(default=None)):
+    user = auth.user_from_token(_token_from_header(authorization))
+    if not user:
+        raise HTTPException(status_code=401, detail="Требуется вход")
+    if not user.get('is_admin'):
+        raise HTTPException(status_code=403, detail="Только для администратора")
+    return user
 
 
 @app.post("/api/auth/register")
@@ -123,6 +173,123 @@ def billing_upgrade(req: UpgradeRequest, authorization: str | None = Header(defa
         raise HTTPException(status_code=400, detail="Неизвестный тариф")
     db.set_user_tier(user['id'], req.tier)
     return {"ok": True, "tier": req.tier, "note": "ЗАГЛУШКА — реальная оплата будет позже"}
+
+
+# ── Трейдеры и ручные сигналы (ТВХ от людей) ──────────────────────
+@app.get("/api/traders")
+def list_traders():
+    """Публичный список трейдеров с честной статистикой (считается вживую из history)."""
+    return db.list_traders(only_active=True)
+
+
+@app.post("/api/admin/traders")
+def admin_create_trader(req: TraderCreate, admin=Depends(require_admin)):
+    trader_id = db.create_trader(req.name, req.avatar_url, req.bio)
+    return db.get_trader(trader_id)
+
+
+@app.get("/api/admin/traders")
+def admin_list_traders(admin=Depends(require_admin)):
+    return db.list_traders(only_active=False)
+
+
+@app.post("/api/admin/add-signal")
+def admin_add_signal(req: AddSignalRequest, background_tasks: BackgroundTasks, admin=Depends(require_admin)):
+    trader = db.get_trader(req.trader_id)
+    if not trader:
+        raise HTTPException(status_code=404, detail="Трейдер не найден")
+
+    signal = req.signal.upper().strip()
+    if signal not in ('LONG', 'SHORT'):
+        raise HTTPException(status_code=400, detail="signal должен быть LONG или SHORT")
+
+    symbol = normalize_symbol(req.symbol)
+    if db.get_trade(symbol):
+        raise HTTPException(status_code=409, detail=f"По {symbol} уже есть открытая позиция")
+
+    if signal == 'LONG':
+        if not (req.stop < req.entry < req.tp1 < req.tp2 < req.tp3):
+            raise HTTPException(status_code=400, detail="Для LONG: stop < entry < tp1 < tp2 < tp3")
+    else:
+        if not (req.stop > req.entry > req.tp1 > req.tp2 > req.tp3):
+            raise HTTPException(status_code=400, detail="Для SHORT: stop > entry > tp1 > tp2 > tp3")
+
+    trade = {
+        "signal": signal,
+        "entry": req.entry,
+        "stop": req.stop,
+        "tp1": req.tp1, "tp2": req.tp2, "tp3": req.tp3,
+        "score": None,
+        "regime": "manual",
+        "opened_at": datetime.now().isoformat(),
+        "entry_reasons_json": json.dumps([req.note] if req.note else []),
+        "trader_id": req.trader_id,
+    }
+    db.upsert_trade(symbol, trade)
+    db.add_event(symbol, 'manual_signal', f"Новый сигнал от {trader['name']}: {signal} {symbol} @ {req.entry}")
+    background_tasks.add_task(telegram_bot.notify_manual_signal, {
+        "symbol": symbol, "signal": signal,
+        "entry": req.entry, "stop": req.stop,
+        "tp1": req.tp1, "tp2": req.tp2, "tp3": req.tp3,
+    }, trader['name'])
+    return {"ok": True, "symbol": symbol, "trader": trader['name']}
+
+
+# ── Вебхуки TradingView ────────────────────────────────────────────
+# Расчёт SL/TP на вебхуке — заглушка 1:3 (стоп 2%, тейк 6%). Как и ручные
+# сигналы, дальше сделку ведёт tracker.py по цене Bybit — никакой отдельной
+# логики TP/SL для вебхуков не нужно, она уже общая для всех open_trades.
+TV_SL_PCT = 0.02
+TV_TP_PCT = 0.06
+
+
+@app.post("/api/webhooks/tradingview")
+def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTasks):
+    if not TRADINGVIEW_SECRET or not hmac.compare_digest(req.secret, TRADINGVIEW_SECRET):
+        raise HTTPException(status_code=401, detail="Неверный секрет")
+
+    action = req.action.lower().strip()
+    if action not in ('buy', 'sell'):
+        raise HTTPException(status_code=400, detail="action должен быть buy или sell")
+    signal = 'LONG' if action == 'buy' else 'SHORT'
+
+    if req.price <= 0:
+        raise HTTPException(status_code=400, detail="price должен быть положительным")
+
+    symbol = normalize_symbol(req.ticker)
+    if db.get_trade(symbol):
+        raise HTTPException(status_code=409, detail=f"По {symbol} уже есть открытая позиция")
+
+    entry = req.price
+    if signal == 'LONG':
+        stop = entry * (1 - TV_SL_PCT)
+        tp1, tp2, tp3 = entry * 1.02, entry * 1.04, entry * (1 + TV_TP_PCT)
+    else:
+        stop = entry * (1 + TV_SL_PCT)
+        tp1, tp2, tp3 = entry * 0.98, entry * 0.96, entry * (1 - TV_TP_PCT)
+
+    trader_id = db.get_or_create_trader(req.indicator_name)
+    trader = db.get_trader(trader_id)
+
+    trade = {
+        "signal": signal, "entry": entry, "stop": stop,
+        "tp1": tp1, "tp2": tp2, "tp3": tp3,
+        "score": None, "regime": "tradingview",
+        "opened_at": datetime.now().isoformat(),
+        "entry_reasons_json": json.dumps([f"TradingView: {req.indicator_name}"], ensure_ascii=False),
+        "trader_id": trader_id,
+    }
+    db.upsert_trade(symbol, trade)
+    db.add_event(symbol, 'tradingview_signal',
+                 f"{req.indicator_name}: {signal} {symbol} @ {entry}")
+
+    background_tasks.add_task(telegram_bot.notify_manual_signal, {
+        "symbol": symbol, "signal": signal,
+        "entry": entry, "stop": stop,
+        "tp1": tp1, "tp2": tp2, "tp3": tp3,
+    }, f"TradingView · {trader['name']}")
+
+    return {"ok": True, "symbol": symbol, "signal": signal, "trader": trader['name']}
 
 
 # ── AI Ассистент (серверный ключ) ────────────────────────────────
@@ -275,10 +442,12 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
 @app.get("/api/signals")
 def get_active_signals():
     trades = db.load_trades()
+    traders_by_id = {t['id']: t for t in db.list_traders(only_active=False)}
     out = []
     for symbol, t in trades.items():
         candles       = json.loads(t['candles_json'])       if t.get('candles_json')       else []
         entry_reasons = json.loads(t['entry_reasons_json']) if t.get('entry_reasons_json') else []
+        trader = traders_by_id.get(t.get('trader_id'))
         out.append({
             "symbol": symbol,
             "signal": t['signal'],
@@ -294,6 +463,7 @@ def get_active_signals():
             "candles": candles,
             "entry_reasons": entry_reasons,
             "position_size": t.get('position_size'),
+            "trader": {"id": trader['id'], "name": trader['name'], "avatar_url": trader.get('avatar_url')} if trader else None,
         })
     return out
 
@@ -637,33 +807,43 @@ def _load_btc_regime_series(period_days: int) -> pd.DataFrame:
 
 
 def _run_one(symbol: str, period_days: int, deposit: float,
-             commission: float, slippage: float, single_mode=False, timeframe='1h') -> dict:
+             commission: float, slippage: float, single_mode=False, timeframe='1h',
+             raw_candles=None, btc_regimes=None,
+             timeout_candles=36, trail_atr_mult=0.8) -> dict:
     """
     V8 бэктест одной пары. По умолчанию 1h.
     Логика выхода: TP1 фиксирует 50% → стоп в б/у → трейлинг → TP2 → TP3.
-    Таймаут 36 свечей.
+    Таймаут timeout_candles свечей (по умолчанию 36).
+
+    raw_candles / btc_regimes можно передать заранее — так robustness-проверка
+    гоняет десятки симуляций по одним и тем же данным без повторных запросов
+    к бирже. timeout_candles / trail_atr_mult параметризованы для jitter-теста
+    (наша история: сдвиг таймаута на 1 свечу менял PF на 30-60% — это и ловим).
     """
     COMM = commission / 100
     SLIP = slippage  / 100
     cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
 
-    try:
-        raw = fetch_ohlcv_paginated(symbol, timeframe, period_days)
-        if not raw or len(raw) < 50:
+    raw = raw_candles
+    if raw is None:
+        try:
+            raw = fetch_ohlcv_paginated(symbol, timeframe, period_days)
+        except Exception:
             return None
-    except Exception:
+    if not raw or len(raw) < 50:
         return None
 
     df_main = build_features(pd.DataFrame(raw, columns=cols))
     df_main = build_nfi_features(df_main)  # + Supertrend
 
     # BTC режим фильтр (только для 1h — на других ТФ пропускаем)
-    btc_regimes = {}
-    if symbol != 'BTC/USDT' and timeframe == '1h':
-        try:
-            btc_regimes = _load_btc_regime_series(period_days)
-        except Exception:
-            pass
+    if btc_regimes is None:
+        btc_regimes = {}
+        if symbol != 'BTC/USDT' and timeframe == '1h':
+            try:
+                btc_regimes = _load_btc_regime_series(period_days)
+            except Exception:
+                pass
 
     in_trade  = False
     t_signal  = t_entry = t_stop = t_tp1 = t_tp2 = t_tp3 = t_pos = 0
@@ -720,7 +900,10 @@ def _run_one(symbol: str, period_days: int, deposit: float,
             if not result and t_tp1_hit:
                 atr_now = candle['atr']
                 if not pd.isna(atr_now) and atr_now > 0:
-                    new_stop = _trailing(t_signal, price, atr_now, t_stop)
+                    if t_signal == 'LONG':
+                        new_stop = max(price - atr_now * trail_atr_mult, t_stop)
+                    else:
+                        new_stop = min(price + atr_now * trail_atr_mult, t_stop)
                     if abs(new_stop - t_stop) / (t_stop + 1e-10) > 0.003:
                         t_stop = new_stop
 
@@ -738,8 +921,8 @@ def _run_one(symbol: str, period_days: int, deposit: float,
                     pnl_p  = _pnl(t_signal, t_entry, exit_p)
                     result = 'tp3'
 
-            # Таймаут 72 свечи (36 часов)
-            if not result and i - t_open_i > 36:
+            # Таймаут (по умолчанию 36 свечей = 36 часов на 1h)
+            if not result and i - t_open_i > timeout_candles:
                 exit_p = price * (1 - SLIP if t_signal == 'LONG' else 1 + SLIP)
                 pnl_p  = _pnl(t_signal, t_entry, exit_p)
                 result = 'timeout'
@@ -933,6 +1116,65 @@ def run_backtest(req: BacktestRequest):
         "equity_curve":     result["equity_curve"],
         "trades":           result["trades"][-50:],
     }
+
+
+# ── Проверка на прочность (robustness) ───────────────────────────
+# Автоматизация нашей методологии: walk-forward + cost stress + jitter +
+# Monte-Carlo + Deflated Sharpe. Premium-фича: ~16 симуляций, тяжёлый компьют.
+
+import robustness as robustness_mod
+
+
+class RobustnessRequest(BaseModel):
+    symbol:      str   = "BTC/USDT"
+    deposit:     float = 1000.0
+    period_days: int   = 90
+    commission:  float = 0.055
+    slippage:    float = 0.05
+    strategy:    str   = "momentum"
+
+
+@app.post("/api/backtest/robustness")
+def start_robustness(req: RobustnessRequest, authorization: str | None = Header(default=None)):
+    user = auth.user_from_token(_token_from_header(authorization))
+    if not user:
+        raise HTTPException(status_code=401, detail="Требуется вход")
+    if not auth.tier_allows(auth.effective_tier(user), 'premium'):
+        raise HTTPException(status_code=403, detail="Проверка на прочность доступна на Premium")
+    if req.strategy not in ('trend', 'mean_reversion', 'momentum'):
+        raise HTTPException(status_code=400, detail="Неизвестная стратегия")
+    period = max(30, min(365, req.period_days))
+
+    job_id = robustness_mod.create_job()
+
+    def _worker():
+        # Тот же паттерн, что /api/backtest: временно ставим режим стратегии и
+        # восстанавливаем. Окно гонки со сканером такое же, как у обычного бэктеста.
+        live_mode = nfi_strategy.STRATEGY_MODE
+        try:
+            nfi_strategy.STRATEGY_MODE = req.strategy
+            robustness_mod.run_robustness(
+                job_id, _run_one, fetch_ohlcv_paginated,
+                req.symbol, period, req.deposit, req.commission, req.slippage,
+            )
+        finally:
+            nfi_strategy.STRATEGY_MODE = live_mode
+
+    import threading as _threading
+    _threading.Thread(target=_worker, daemon=True).start()
+    return {"job_id": job_id}
+
+
+@app.get("/api/backtest/robustness/{job_id}")
+def robustness_status(job_id: str, authorization: str | None = Header(default=None)):
+    user = auth.user_from_token(_token_from_header(authorization))
+    if not user:
+        raise HTTPException(status_code=401, detail="Требуется вход")
+    job = robustness_mod.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Джоба не найдена (возможно, устарела)")
+    return {"status": job["status"], "progress": job["progress"],
+            "result": job["result"], "error": job["error"]}
 
 
 @app.post("/api/backtest/multi")

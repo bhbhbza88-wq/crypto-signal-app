@@ -24,6 +24,11 @@ except ImportError:
 SCAN_INTERVAL_SECONDS = 2 * 60
 MAX_OPEN_TRADES = 3
 
+# Пивот на маркетплейс сигналов: авто-открытие сделок по V8-скану отключено.
+# Цикл продолжает трекать уже открытые позиции (в т.ч. ручные ТВХ трейдеров)
+# и обслуживать xsec/trend — не трогаем, это независимые бумажные стратегии.
+AUTO_SCAN_ENABLED = False
+
 
 def register_signal(sig):
     symbol   = sig['symbol']
@@ -75,13 +80,16 @@ def scan_once():
     now_str = datetime.now().strftime('%H:%M:%S')
     print(f"\n🔍 {now_str}")
 
-    # Daily loss limit — если лимит достигнут, пропускаем сканирование
+    clean_cache()
+    tracker.check_trades()  # трекаем открытые позиции всегда, независимо от daily loss limit
+
+    if not AUTO_SCAN_ENABLED:
+        return
+
+    # Daily loss limit — актуален только для авто-скана V8, пропускаем поиск новых сигналов
     if not daily_loss_ok():
         print(f"🛑 Daily loss limit {DAILY_LOSS_LIMIT_PCT}% — сканирование пропущено")
         return
-
-    clean_cache()
-    tracker.check_trades()
 
     open_trades = db.load_trades()
     slots = MAX_OPEN_TRADES - len(open_trades)

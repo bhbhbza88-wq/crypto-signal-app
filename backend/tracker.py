@@ -155,6 +155,7 @@ def check_trades():
             tp1, tp2, tp3 = trade['tp1'], trade['tp2'], trade['tp3']
             pnl    = pnl_pct(signal, entry, price)
             tp1_hit = bool(trade.get('tp1_hit'))
+            trader_id = trade.get('trader_id')
 
             # ── Потеря потенциала (только до TP1) ─────────────────
             # Для momentum отключено: TP1 недостижим (выход по времени/стопу),
@@ -168,7 +169,7 @@ def check_trades():
                     db.add_event(symbol, 'potential',
                                  f"Закрыто по потере потенциала ({pnl:+.1f}%): " + ", ".join(lines))
                     record_daily_loss(pnl)
-                    db.add_to_history(symbol, signal, entry, 'potential', pnl)
+                    db.add_to_history(symbol, signal, entry, 'potential', pnl, trader_id)
                     db.remove_trade(symbol)
                     if pnl < -0.5:
                         set_cooldown(symbol)
@@ -201,7 +202,7 @@ def check_trades():
                 result = 'be' if trade.get('be_hit') else 'sl'
                 db.add_event(symbol, result, f"{'Безубыток' if result=='be' else 'Стоп'} ({pnl:+.1f}%)")
                 record_daily_loss(pnl)
-                db.add_to_history(symbol, signal, entry, result, pnl)
+                db.add_to_history(symbol, signal, entry, result, pnl, trader_id)
                 db.remove_trade(symbol)
                 if result == 'sl':
                     set_cooldown(symbol)   # cooldown только после реального стопа
@@ -217,7 +218,7 @@ def check_trades():
                 if hours_open >= TIMEOUT_HOURS:
                     db.add_event(symbol, 'timeout', f"Закрыто по времени ({TIMEOUT_HOURS}ч, {pnl:+.1f}%)")
                     record_daily_loss(pnl)
-                    db.add_to_history(symbol, signal, entry, 'timeout', pnl)
+                    db.add_to_history(symbol, signal, entry, 'timeout', pnl, trader_id)
                     db.remove_trade(symbol)
                     continue
 
@@ -229,7 +230,7 @@ def check_trades():
                 pnl_tp1 = pnl_pct(signal, entry, tp1)
                 _, rec  = analyze_tp1(symbol, signal)
                 db.add_event(symbol, 'tp1', f"TP1 достигнут (+{pnl_tp1:.1f}%). {rec}")
-                db.add_to_history(symbol, signal, entry, 'tp1', pnl_tp1)
+                db.add_to_history(symbol, signal, entry, 'tp1', pnl_tp1, trader_id)
                 db.upsert_trade(symbol, trade)
 
             # ── Chandelier Exit trailing после TP1 ────────────────
@@ -254,7 +255,7 @@ def check_trades():
             if _hit(signal, price, tp3, 'tp'):
                 pnl_tp3 = pnl_pct(signal, entry, tp3)
                 db.add_event(symbol, 'tp3', f"TP3 достигнут (+{pnl_tp3:.1f}%)")
-                db.add_to_history(symbol, signal, entry, 'tp3', pnl_tp3)
+                db.add_to_history(symbol, signal, entry, 'tp3', pnl_tp3, trader_id)
                 db.remove_trade(symbol)
                 continue
 

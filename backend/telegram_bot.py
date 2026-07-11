@@ -64,6 +64,34 @@ async def notify_new_signal(signal: dict):
 
     await send_telegram(text)
 
+async def notify_manual_signal(signal: dict, source: str):
+    """Сигнал от трейдера (ручной ввод в админке) или внешнего источника
+    (вебхук TradingView) — без V8 score/confidence, это чужая сделка, не наш скан."""
+    sym   = signal.get("symbol", "")
+    side  = signal.get("signal", "")
+    entry = signal.get("entry", 0)
+    tp1   = signal.get("tp1", 0)
+    tp2   = signal.get("tp2", 0)
+    tp3   = signal.get("tp3", 0)
+    stop  = signal.get("stop", 0)
+
+    emoji = "🟢" if side == "LONG" else "🔴"
+    text = (
+        f"{emoji} <b>NWICKI SIGNAL — {side}</b>\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"📊 <b>{sym}</b> · Bybit\n"
+        f"✍️ Автор: <b>{source}</b>\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"💰 Вход:  <code>{entry:.4f}</code>\n"
+        f"🎯 TP1:   <code>{tp1:.4f}</code>\n"
+        f"🎯 TP2:   <code>{tp2:.4f}</code>\n"
+        f"🎯 TP3:   <code>{tp3:.4f}</code>\n"
+        f"🛑 Стоп:  <code>{stop:.4f}</code>\n"
+        f"\n⚠️ <i>Не является финансовым советом</i>"
+    )
+    await send_telegram(text)
+
+
 async def notify_signal_closed(signal: dict, result: str, pnl: float):
     sym  = signal.get("symbol", "")
     side = signal.get("signal", "")

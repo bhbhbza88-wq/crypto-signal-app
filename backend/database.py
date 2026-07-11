@@ -56,6 +56,7 @@ def init_db():
             ("candles_json", "TEXT"),
             ("entry_reasons_json", "TEXT"),
             ("dca_done", "INTEGER DEFAULT 0"),
+            ("trader_id", "INTEGER"),
         ]:
             if col not in existing:
                 conn.execute(f"ALTER TABLE open_trades ADD COLUMN {col} {typedef}")
@@ -68,6 +69,10 @@ def init_db():
                 entry REAL, result TEXT, pnl REAL
             )
         """)
+        hist_cols = [r[1] for r in conn.execute("PRAGMA table_info(history)").fetchall()]
+        if 'trader_id' not in hist_cols:
+            conn.execute("ALTER TABLE history ADD COLUMN trader_id INTEGER")
+            print("✅ Миграция: добавлена колонка trader_id в history")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,6 +142,20 @@ def init_db():
         cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
         if 'trial_ends_at' not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN trial_ends_at TEXT")
+        if 'is_admin' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+
+        # ── Трейдеры (авторы сигналов) ────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS traders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                avatar_url TEXT,
+                bio TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT
+            )
+        """)
 
 
 # ── Open trades ──────────────────────────────────────────
@@ -158,8 +177,8 @@ def upsert_trade(symbol, trade: dict):
             INSERT INTO open_trades
                 (symbol, signal, entry, stop, tp1, tp2, tp3, score, regime,
                  tp1_hit, tp2_hit, be_hit, potential_warned, pre_tp1_trail,
-                 opened_at, candles_json, entry_reasons_json, position_size)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 opened_at, candles_json, entry_reasons_json, position_size, trader_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(symbol) DO UPDATE SET
                 signal=excluded.signal, entry=excluded.entry, stop=excluded.stop,
                 tp1=excluded.tp1, tp2=excluded.tp2, tp3=excluded.tp3,
@@ -169,7 +188,8 @@ def upsert_trade(symbol, trade: dict):
                 pre_tp1_trail=excluded.pre_tp1_trail,
                 candles_json=excluded.candles_json,
                 entry_reasons_json=excluded.entry_reasons_json,
-                position_size=excluded.position_size
+                position_size=excluded.position_size,
+                trader_id=excluded.trader_id
         """, (
             symbol, trade['signal'], trade['entry'], trade['stop'],
             trade['tp1'], trade['tp2'], trade['tp3'],
@@ -181,6 +201,7 @@ def upsert_trade(symbol, trade: dict):
             trade.get('candles_json'),
             trade.get('entry_reasons_json'),
             trade.get('position_size'),
+            trade.get('trader_id'),
         ))
 
 
@@ -190,15 +211,15 @@ def remove_trade(symbol):
 
 
 # ── History ──────────────────────────────────────────────
-def add_to_history(symbol, signal, entry, result, pnl):
+def add_to_history(symbol, signal, entry, result, pnl, trader_id=None):
     now = datetime.now()
     with _lock, get_conn() as conn:
         conn.execute("""
-            INSERT INTO history (date, time, symbol, signal, entry, result, pnl)
-            VALUES (?,?,?,?,?,?,?)
+            INSERT INTO history (date, time, symbol, signal, entry, result, pnl, trader_id)
+            VALUES (?,?,?,?,?,?,?,?)
         """, (
             now.strftime('%Y-%m-%d'), now.strftime('%H:%M'),
-            symbol, signal, entry, result, round(pnl, 2),
+            symbol, signal, entry, result, round(pnl, 2), trader_id,
         ))
     print(f"📝 {symbol} {result} {pnl:+.1f}%")
 
@@ -334,6 +355,11 @@ def set_user_tier(user_id, tier):
         conn.execute("UPDATE users SET tier=? WHERE id=?", (tier, user_id))
 
 
+def set_user_admin(user_id, is_admin: bool):
+    with _lock, get_conn() as conn:
+        conn.execute("UPDATE users SET is_admin=? WHERE id=?", (int(is_admin), user_id))
+
+
 def create_session(token, user_id, expires_at):
     with _lock, get_conn() as conn:
         conn.execute("""
@@ -357,3 +383,71 @@ def get_user_by_token(token):
 def delete_session(token):
     with _lock, get_conn() as conn:
         conn.execute("DELETE FROM sessions WHERE token=?", (token,))
+
+
+# ── Трейдеры (авторы сигналов) ────────────────────────────
+def create_trader(name, avatar_url=None, bio=None):
+    with _lock, get_conn() as conn:
+        cur = conn.execute("""
+            INSERT INTO traders (name, avatar_url, bio, is_active, created_at)
+            VALUES (?,?,?,1,?)
+        """, (name, avatar_url, bio, datetime.now().isoformat()))
+        return cur.lastrowid
+
+
+def get_trader(trader_id):
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM traders WHERE id=?", (trader_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def get_or_create_trader(name, bio=None):
+    """Для автоматических источников сигналов (TradingView и т.п.) —
+    заводит трейдера по имени при первом сигнале, дальше переиспользует.
+    Гонка при параллельных вебхуках безвредна: UNIQUE не нужен, дубль
+    просто получит свою отдельную (пустую) статистику, а не сломает данные."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT id FROM traders WHERE name=?", (name,)).fetchone()
+        if row:
+            return row['id']
+    return create_trader(name, avatar_url=None, bio=bio or "Автоматический источник (TradingView)")
+
+
+def list_traders(only_active=False):
+    """Трейдеры с честной статистикой, посчитанной прямо из history/open_trades
+    (не денормализованные счётчики — исключает рассинхрон)."""
+    with get_conn() as conn:
+        traders = conn.execute(
+            "SELECT * FROM traders" + (" WHERE is_active=1" if only_active else "") + " ORDER BY id"
+        ).fetchall()
+        out = []
+        for t in traders:
+            t = dict(t)
+            hist = conn.execute(
+                "SELECT result, pnl FROM history WHERE trader_id=?", (t['id'],)
+            ).fetchall()
+            open_count = conn.execute(
+                "SELECT COUNT(*) c FROM open_trades WHERE trader_id=?", (t['id'],)
+            ).fetchone()['c']
+            closed = len(hist)
+            wins = sum(1 for h in hist if h['pnl'] > 0)
+            total_pnl = sum(h['pnl'] for h in hist)
+            t['closed_trades'] = closed
+            t['open_positions'] = open_count
+            t['winrate'] = round(wins / closed * 100, 1) if closed else None
+            t['total_pnl'] = round(total_pnl, 2)
+            out.append(t)
+        return out
+
+
+def update_trader(trader_id, name=None, avatar_url=None, bio=None, is_active=None):
+    fields, values = [], []
+    if name is not None:       fields.append("name=?");       values.append(name)
+    if avatar_url is not None: fields.append("avatar_url=?"); values.append(avatar_url)
+    if bio is not None:        fields.append("bio=?");        values.append(bio)
+    if is_active is not None:  fields.append("is_active=?");  values.append(int(is_active))
+    if not fields:
+        return
+    values.append(trader_id)
+    with _lock, get_conn() as conn:
+        conn.execute(f"UPDATE traders SET {', '.join(fields)} WHERE id=?", values)

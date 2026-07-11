@@ -77,10 +77,18 @@ def register(email: str, password: str):
     return user, token
 
 
+def _admin_emails() -> set[str]:
+    raw = os.getenv("ADMIN_EMAILS", "")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
 def login(email: str, password: str):
     user = db.get_user_by_email(email)
     if not user or not verify_password(password, user['password_hash'], user['salt']):
         return None, 'Неверный email или пароль'
+    if user['email'] in _admin_emails() and not user.get('is_admin'):
+        db.set_user_admin(user['id'], True)
+        user = db.get_user_by_id(user['id'])
     token = _issue_session(user['id'])
     return user, token
 
@@ -126,4 +134,5 @@ def public_user(user: dict) -> dict:
         'on_trial': active,
         'trial_days_left': days_left,
         'trial_ends_at': user.get('trial_ends_at'),
+        'is_admin': bool(user.get('is_admin')),
     }
