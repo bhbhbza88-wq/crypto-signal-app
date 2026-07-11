@@ -168,6 +168,10 @@ export default function SignalCard({ signal }) {
   const tone = isLong ? 'var(--long)' : 'var(--short)'
   const toneSoft = isLong ? 'var(--long-soft)' : 'var(--short-soft)'
   const sym = signal.symbol.replace('/USDT', '')
+  // сигналы Premium Aggregator Feed не проходят через технический сканер:
+  // score/candles у них принципиально нет (score=None, candles_json не заполняется
+  // в open_signal при импорте из Telegram) — это не "недогрузка", а другой тип сигнала
+  const isAggregated = signal.trader?.source_type === 'telegram_aggregate'
 
   const candles = signal.candles || []
   const lastClose = candles.length ? candles[candles.length - 1].close : null
@@ -207,10 +211,13 @@ export default function SignalCard({ signal }) {
         </div>
       </div>
 
-      {/* Шкала уверенности */}
-      <div className="confidence-section">
-        <ConfidenceBar score={signal.score} maxScore={20} />
-      </div>
+      {/* Шкала уверенности — только для сигналов техсканера. У Premium Aggregator
+          Feed score принципиально нет (не наш алгоритм это оценивал). */}
+      {!isAggregated && (
+        <div className="confidence-section">
+          <ConfidenceBar score={signal.score} maxScore={20} />
+        </div>
+      )}
 
       {/* TradingView-style свечной график */}
       <div className="tv-card">
@@ -231,6 +238,8 @@ export default function SignalCard({ signal }) {
         </div>
         {candles.length > 0 ? (
           <CandleChart signal={signal} />
+        ) : isAggregated ? (
+          <div className="tv-empty">График недоступен для сигналов внешнего потока</div>
         ) : (
           <div className="tv-empty">Загрузка графика...</div>
         )}
