@@ -1158,6 +1158,69 @@ def robustness_status(job_id: str, authorization: str | None = Header(default=No
             "result": job["result"], "error": job["error"]}
 
 
+import re as _re
+import json as _json
+import threading as _threading_ca
+import channel_jobs
+
+CHANNEL_ANALYSIS_CACHE_HOURS = 24  # повторный запрос по тому же каналу в течение суток отдаёт кэш без нового скрейпа
+
+
+class AnalyzeChannelRequest(BaseModel):
+    channel_url: str
+    days: int = 30
+
+
+def _parse_channel_username(raw: str) -> str:
+    """'https://t.me/binancekillers', '@binancekillers', 'binancekillers' -> 'binancekillers'.
+    Валидируем формат до того, как отдать строку в Telethon — не пускаем
+    произвольный мусор/URL с чужими параметрами в iter_messages()."""
+    s = raw.strip()
+    s = _re.sub(r'^https?://(t\.me|telegram\.me)/', '', s, flags=_re.IGNORECASE)
+    s = s.lstrip('@').split('/')[0].split('?')[0].strip()
+    if not _re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{4,31}', s):
+        raise HTTPException(status_code=400, detail="Некорректная ссылка на канал — ожидается t.me/username")
+    return s
+
+
+@app.post("/api/analyze-channel")
+def analyze_channel(req: AnalyzeChannelRequest, admin=Depends(require_admin)):
+    """
+    Только для админа: полный ingest+backtest дорогой (Telegram history scrape +
+    OpenAI на каждое сообщение + запросы к бирже) и бьёт по нашему аккаунту/бюджету,
+    а не по деньгам пользователя — открывать это на весь сайт нельзя.
+    """
+    channel = _parse_channel_username(req.channel_url)
+    days = max(1, min(90, req.days))
+
+    cached = db.get_channel_stats(channel)
+    if cached and cached.get('last_analyzed_at'):
+        age_h = (datetime.now() - datetime.fromisoformat(cached['last_analyzed_at'])).total_seconds() / 3600
+        if age_h < CHANNEL_ANALYSIS_CACHE_HOURS:
+            return {
+                "cached": True, "channel": channel,
+                "report": {k: cached[k] for k in (
+                    'total_signals', 'checked', 'closed_trades', 'wins', 'losses',
+                    'winrate_pct', 'avg_risk_reward',
+                )} | {"total_pnl_pct_fixed_size": cached['total_pnl_pct'], "channel": channel},
+                "equity_curve": _json.loads(cached['equity_curve_json'] or '[]'),
+            }
+
+    job_id = channel_jobs.create_job()
+    _threading_ca.Thread(
+        target=channel_jobs.run_channel_analysis, args=(job_id, channel, days), daemon=True,
+    ).start()
+    return {"cached": False, "job_id": job_id, "channel": channel}
+
+
+@app.get("/api/analysis-status/{job_id}")
+def analysis_status(job_id: str, admin=Depends(require_admin)):
+    job = channel_jobs.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Задача не найдена (возможно, устарела или сервер перезапускался)")
+    return {"status": job["status"], "step": job["step"], "result": job["result"], "error": job["error"]}
+
+
 @app.post("/api/backtest/multi")
 def run_multi_backtest(req: MultiBacktestRequest):
     """

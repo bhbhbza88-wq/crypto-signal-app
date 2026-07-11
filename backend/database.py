@@ -163,6 +163,46 @@ def init_db():
             conn.execute("ALTER TABLE traders ADD COLUMN source_type TEXT DEFAULT 'manual'")
             print("✅ Миграция: добавлены колонки source_url, source_type в traders")
 
+        # ── Кэш готового отчёта по каналу (Channel Analyzer) ──────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS channel_stats (
+                channel TEXT PRIMARY KEY,
+                period_days INTEGER,
+                total_signals INTEGER,
+                checked INTEGER,
+                closed_trades INTEGER,
+                wins INTEGER,
+                losses INTEGER,
+                winrate_pct REAL,
+                avg_risk_reward REAL,
+                total_pnl_pct REAL,
+                equity_curve_json TEXT,
+                last_analyzed_at TEXT
+            )
+        """)
+
+        # ── Исторические сигналы каналов (для channel_backtest.py, офлайн-анализ) ─
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS historical_signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel TEXT NOT NULL,
+                message_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                entry REAL NOT NULL,
+                stop REAL NOT NULL,
+                tp1 REAL NOT NULL,
+                posted_at TEXT NOT NULL,
+                entry_filled INTEGER DEFAULT 0,
+                entry_filled_at TEXT,
+                outcome TEXT,
+                exit_price REAL,
+                pnl_pct REAL,
+                checked_at TEXT,
+                UNIQUE(channel, message_id)
+            )
+        """)
+
 
 # ── Open trades ──────────────────────────────────────────
 def load_trades():
@@ -504,3 +544,67 @@ def update_trader(trader_id, name=None, avatar_url=None, bio=None, is_active=Non
     values.append(trader_id)
     with _lock, get_conn() as conn:
         conn.execute(f"UPDATE traders SET {', '.join(fields)} WHERE id=?", values)
+
+
+# ── Исторические сигналы каналов (channel_backtest.py) ────
+def save_historical_signal(channel, message_id, symbol, side, entry, stop, tp1, posted_at):
+    """INSERT OR IGNORE — при повторном запуске ingest по тому же каналу
+    не дублирует уже сохранённые посты (UNIQUE(channel, message_id))."""
+    with _lock, get_conn() as conn:
+        cur = conn.execute("""
+            INSERT OR IGNORE INTO historical_signals
+                (channel, message_id, symbol, side, entry, stop, tp1, posted_at)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (channel, message_id, symbol, side, entry, stop, tp1, posted_at))
+        return cur.lastrowid if cur.rowcount else None
+
+
+def load_historical_signals(channel, unchecked_only=False):
+    with get_conn() as conn:
+        q = "SELECT * FROM historical_signals WHERE channel=?"
+        if unchecked_only:
+            q += " AND checked_at IS NULL"
+        rows = conn.execute(q + " ORDER BY posted_at", (channel,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def save_backtest_result(signal_id, entry_filled, entry_filled_at, outcome, exit_price, pnl_pct):
+    with _lock, get_conn() as conn:
+        conn.execute("""
+            UPDATE historical_signals SET
+                entry_filled=?, entry_filled_at=?, outcome=?, exit_price=?, pnl_pct=?, checked_at=?
+            WHERE id=?
+        """, (int(entry_filled), entry_filled_at, outcome, exit_price, pnl_pct,
+              datetime.now().isoformat(), signal_id))
+
+
+# ── Кэш отчёта по каналу (Channel Analyzer) ────────────────
+def save_channel_stats(channel, period_days, report: dict, equity_curve_json: str):
+    with _lock, get_conn() as conn:
+        conn.execute("""
+            INSERT INTO channel_stats
+                (channel, period_days, total_signals, checked, closed_trades, wins, losses,
+                 winrate_pct, avg_risk_reward, total_pnl_pct, equity_curve_json, last_analyzed_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(channel) DO UPDATE SET
+                period_days=excluded.period_days,
+                total_signals=excluded.total_signals,
+                checked=excluded.checked,
+                closed_trades=excluded.closed_trades,
+                wins=excluded.wins,
+                losses=excluded.losses,
+                winrate_pct=excluded.winrate_pct,
+                avg_risk_reward=excluded.avg_risk_reward,
+                total_pnl_pct=excluded.total_pnl_pct,
+                equity_curve_json=excluded.equity_curve_json,
+                last_analyzed_at=excluded.last_analyzed_at
+        """, (channel, period_days, report['total_signals'], report['checked'],
+              report['closed_trades'], report['wins'], report['losses'],
+              report['winrate_pct'], report['avg_risk_reward'], report['total_pnl_pct_fixed_size'],
+              equity_curve_json, datetime.now().isoformat()))
+
+
+def get_channel_stats(channel):
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM channel_stats WHERE channel=?", (channel,)).fetchone()
+        return dict(row) if row else None

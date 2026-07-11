@@ -65,4 +65,6 @@ export const api = {
   adminGetTraders: () => get('/admin/traders'),
   adminCreateTrader: (data) => post('/admin/traders', data),
   adminAddSignal: (data) => post('/admin/add-signal', data),
+  analyzeChannel: (channelUrl, days = 30) => post('/analyze-channel', { channel_url: channelUrl, days }),
+  getAnalysisStatus: (jobId) => get(`/analysis-status/${jobId}`),
 }

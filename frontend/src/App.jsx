@@ -15,6 +15,7 @@ import XSecDashboard from './XSecDashboard'
 import TrendDashboard from './TrendDashboard'
 import StrategiesCompare from './StrategiesCompare'
 import Admin from './Admin'
+import ChannelAnalyzer from './ChannelAnalyzer'
 
 const POLL_INTERVAL = 15000
 const MARKET_POLL_INTERVAL = 60000
@@ -278,7 +279,10 @@ export default function App() {
     : <UpgradeLock tab={tab} user={user} onUpgrade={() => setTab('pricing')} onLogin={() => { setAuthMode('register'); setShowAuth(true) }} />
 
   const navSections = user?.is_admin
-    ? [...NAV_SECTIONS, { title: 'Админ', items: [{ key: 'admin', label: 'Админка', icon: '🛠' }] }]
+    ? [...NAV_SECTIONS, { title: 'Админ', items: [
+        { key: 'admin', label: 'Админка', icon: '🛠' },
+        { key: 'channel_analyzer', label: 'Channel Analyzer', icon: '🔬' },
+      ] }]
     : NAV_SECTIONS
 
   return (
@@ -423,6 +427,7 @@ export default function App() {
           {tab === 'smarttrade_calc' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Smart Trade <span className="hot-tag">NEW</span></h1></div><SmartTrade /></section>}
           {tab === 'invite' && <ComingSoonPage tab="invite" />}
           {tab === 'admin' && user?.is_admin && <Admin />}
+          {tab === 'channel_analyzer' && user?.is_admin && <section className="section animate-in"><ChannelAnalyzer /></section>}
 
           {tab === 'overview' && (
             <div className="animate-in">
@@ -439,25 +444,17 @@ export default function App() {
                 <KPI label="Винрейт" value={stats?.all_time?.winrate ?? 0} suffix="%" sub="за всё время" />
               </div>
 
-              {/* Активный сигнал — ведём продуктом */}
+              {/* Активные сигналы — единая лента: собственный сканер + агрегированные потоки.
+                  Честность источника не теряется: SignalCard сам показывает блок "Источник"
+                  для сигналов с trader.source_type === 'telegram_aggregate'. */}
               <section className="section" style={{ marginTop: 28 }}>
                 <h2 className="section-title">Активный сигнал</h2>
                 {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal /> : (
                   <div className="signals-grid">
-                    {signals.filter(s => s.trader?.source_type !== 'telegram_aggregate').map(s => <SignalCard key={s.symbol} signal={s} />)}
+                    {signals.map(s => <SignalCard key={s.symbol} signal={s} />)}
                   </div>
                 )}
               </section>
-
-              {/* Внешние сигналы — мониторинг приватных Telegram-каналов, не наша стратегия */}
-              {signals.some(s => s.trader?.source_type === 'telegram_aggregate') && (
-                <section className="section" style={{ marginTop: 28 }}>
-                  <h2 className="section-title">Внешние сигналы (мониторинг приватных каналов)</h2>
-                  <div className="signals-grid">
-                    {signals.filter(s => s.trader?.source_type === 'telegram_aggregate').map(s => <SignalCard key={s.symbol} signal={s} />)}
-                  </div>
-                </section>
-              )}
 
               {/* Живые стратегии — реальные данные */}
               <div className="ts-block">
