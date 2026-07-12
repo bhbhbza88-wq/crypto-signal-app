@@ -19,6 +19,7 @@ White-Label: пользователь видит только внутренни
 
 import os
 import json
+import base64
 import asyncio
 
 import httpx
@@ -115,6 +116,49 @@ async def _extract_signal(text: str) -> dict | None:
     return parsed
 
 
+async def _extract_signal_from_image(image_bytes: bytes, caption: str = "") -> dict | None:
+    """Некоторые каналы публикуют сигнал как скриншот/баннер (цены нарисованы
+    на картинке) без подписи или с почти пустой подписью — такие посты раньше
+    вообще не попадали в анализ, потому что _extract_signal читает только
+    текст. Тот же промпт и та же схема ответа, просто по картинке вместо
+    текста (gpt-4o-mini умеет читать изображения)."""
+    if not OPENAI_API_KEY or not image_bytes:
+        return None
+    b64 = base64.b64encode(image_bytes).decode()
+    user_content = [
+        {"type": "text", "text": caption[:500] if caption.strip() else "Извлеки параметры сигнала со скриншота."},
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+    ]
+    payload = {
+        "model": AI_MODEL,
+        "max_tokens": 200,
+        "messages": [
+            {"role": "system", "content": EXTRACTOR_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        "response_format": {"type": "json_object"},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        parsed = json.loads(data["choices"][0]["message"]["content"])
+    except Exception as e:
+        print(f"[telegram_ingest] Ошибка извлечения сигнала с картинки: {e}")
+        return None
+
+    if not parsed.get("is_signal"):
+        return None
+    if any(parsed.get(k) is None for k in ("symbol", "side", "entry", "stop", "tp1")):
+        return None
+    return parsed
+
+
 def _derive_tp_ladder(side: str, entry: float, tp1: float) -> tuple[float, float]:
     """Канал почти никогда не называет TP2/TP3 отдельно — достраиваем их от TP1
     тем же шагом, что entry->TP1. Это наша механика частичного закрытия,
@@ -136,8 +180,24 @@ def _count_open_aggregated() -> int:
     )
 
 
-async def _handle_message(display_name: str, text: str):
-    parsed = await _extract_signal(text)
+async def _handle_message(display_name: str, msg):
+    """`msg` — Telethon Message или NewMessage.Event (оба дают .raw_text,
+    .photo, .download_media). Сначала пробуем текст/подпись; если текста нет
+    или он ничего не дал, а в сообщении есть фото — читаем сигнал с картинки
+    (скриншоты/баннеры с ценами без подписи иначе никогда бы не попали
+    в обработку вообще)."""
+    text = (msg.raw_text or "").strip() if hasattr(msg, "raw_text") else ""
+    parsed = await _extract_signal(text) if text else None
+
+    if not parsed and getattr(msg, "photo", None):
+        try:
+            image_bytes = await msg.download_media(file=bytes)
+        except Exception as e:
+            print(f"[telegram_ingest] {display_name}: не удалось скачать картинку — {e}")
+            image_bytes = None
+        if image_bytes:
+            parsed = await _extract_signal_from_image(image_bytes, text)
+
     if not parsed:
         return
 
@@ -205,7 +265,7 @@ async def _backfill_loop(client, channels: dict, last_ids: dict):
                     if msg.id > last_ids.get(username, 0):
                         last_ids[username] = msg.id
                     try:
-                        await _handle_message(display_name, msg.raw_text or "")
+                        await _handle_message(display_name, msg)
                     except Exception as e:
                         print(f"[telegram_ingest] Ошибка догоняющей обработки сообщения из {display_name}: {e}")
             except Exception as e:
@@ -229,7 +289,7 @@ async def run():
         username = (getattr(chat, "username", "") or "").lstrip("@")
         display_name = channels.get(username, "Сторонний агрегированный поток данных (Провайдер)")
         try:
-            await _handle_message(display_name, event.raw_text or "")
+            await _handle_message(display_name, event)
         except Exception as e:
             print(f"[telegram_ingest] Ошибка обработки сообщения из {display_name}: {e}")
 

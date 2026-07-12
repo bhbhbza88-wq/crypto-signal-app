@@ -27,7 +27,7 @@ import database as db
 from data_layer import exchange, api_call
 from telegram_ingest import (
     TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION,
-    _extract_signal, normalize_symbol,
+    _extract_signal, _extract_signal_from_image, normalize_symbol,
 )
 
 COMMISSION_PCT = 0.1          # 0.1% за сторону (вход + выход = 0.2% с сделки)
@@ -108,25 +108,41 @@ class SignalBacktester:
         since = datetime.now(timezone.utc) - timedelta(days=days)
         sem = asyncio.Semaphore(max(1, concurrency))
 
-        async def _extract_with_limit(msg):
+        async def _extract_with_limit(msg, client):
             async with sem:
                 try:
-                    return msg, await _extract_signal(msg.raw_text)
+                    if msg.raw_text and looks_like_signal(msg.raw_text):
+                        return msg, await _extract_signal(msg.raw_text)
+                    if msg.photo:
+                        # Пост-картинка (скриншот/баннер с ценами) без текста или с
+                        # подписью, которая не прошла текстовый пре-фильтр — раньше
+                        # такие сообщения выпадали из анализа целиком, хотя реальный
+                        # сигнал есть, просто нарисован на самой картинке.
+                        image_bytes = await client.download_media(msg, file=bytes)
+                        if not image_bytes:
+                            return msg, None
+                        return msg, await _extract_signal_from_image(image_bytes, msg.raw_text or "")
+                    return msg, None
                 except Exception as e:
                     print(f"[channel_backtest] {channel}#{msg.id}: ошибка извлечения — {e}")
                     return msg, None
 
         client = TelegramClient(StringSession(TELEGRAM_SESSION), int(TELEGRAM_API_ID), TELEGRAM_API_HASH)
         async with client:
-            all_messages = [m async for m in client.iter_messages(channel, offset_date=since, reverse=True) if m.raw_text]
+            all_messages = [m async for m in client.iter_messages(channel, offset_date=since, reverse=True)
+                             if m.raw_text or m.photo]
             # Локальный пре-фильтр — режем очевидный мусор (мемы, обсуждение без
             # чисел) ДО того, как он вообще попадёт в очередь на OpenAI. Экономит
-            # деньги на явно нерелевантных сообщениях без похода в сеть.
-            candidate_messages = [m for m in all_messages if looks_like_signal(m.raw_text)]
+            # деньги на явно нерелевантных сообщениях без похода в сеть. Картинки
+            # пре-фильтр пропустить не может (нечего проверять по тексту) — идут
+            # на распознавание все, это дороже, но иначе реальный сигнал-скриншот
+            # без подписи никогда бы не попал в анализ.
+            candidate_messages = [m for m in all_messages
+                                   if (m.raw_text and looks_like_signal(m.raw_text)) or m.photo]
             skipped_prefilter = len(all_messages) - len(candidate_messages)
             # asyncio.gather сохраняет порядок списка задач в результате — хронология не теряется,
             # хотя сами задачи выполняются параллельно (до `concurrency` штук одновременно).
-            results = await asyncio.gather(*[_extract_with_limit(m) for m in candidate_messages])
+            results = await asyncio.gather(*[_extract_with_limit(m, client) for m in candidate_messages])
 
         saved = 0
         skipped_dupes = 0
