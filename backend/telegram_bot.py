@@ -5,10 +5,71 @@ Telegram уведомления для NWICKI
   TELEGRAM_CHAT_ID=твой_chat_id
 """
 import os
+import hashlib
 import httpx
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# Канал, куда ведёт кнопка приветствия — первая точка контакта до перехода
+# в реальный канал (см. /api/telegram-webhook в main.py).
+CHANNEL_URL = "https://t.me/chlebchik"
+
+# Секрет для проверки, что POST на /api/telegram-webhook реально пришёл от
+# Telegram, а не от кого попало — детерминированно выводим из токена бота,
+# чтобы не заводить ещё одну переменную окружения на Railway.
+WEBHOOK_SECRET = hashlib.sha256(TELEGRAM_BOT_TOKEN.encode()).hexdigest()[:32] if TELEGRAM_BOT_TOKEN else ""
+
+
+async def set_webhook():
+    """Регистрирует вебхук в Telegram — вызывается один раз при старте приложения
+    (main.py lifespan). Идемпотентно: повторный вызов с тем же URL не ломает
+    ничего, просто подтверждает регистрацию заново на каждом деплое.
+    RAILWAY_PUBLIC_DOMAIN — переменная, которую Railway сам прокидывает в
+    контейнер для сервисов с публичным доменом, вручную задавать не нужно."""
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    if not domain:
+        print("[telegram_bot] RAILWAY_PUBLIC_DOMAIN не задан — вебхук не зарегистрирован "
+              "(ожидаемо при локальном запуске, не в проде)")
+        return
+    webhook_url = f"https://{domain}/api/telegram-webhook"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json={"url": webhook_url, "secret_token": WEBHOOK_SECRET})
+            data = resp.json()
+            if data.get("ok"):
+                print(f"[telegram_bot] Вебхук зарегистрирован: {webhook_url}")
+            else:
+                print(f"[telegram_bot] Ошибка регистрации вебхука: {data}")
+    except Exception as e:
+        print(f"[telegram_bot] Ошибка регистрации вебхука: {e}")
+
+
+async def send_welcome(chat_id: int):
+    """Приветствие для пользователя, который написал боту /start — первым делом
+    встречает его бот с кнопкой в реальный канал, а не голая ссылка."""
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    text = (
+        "👋 <b>Добро пожаловать в NWICKI!</b>\n\n"
+        "AI-сканер крипторынка: сигналы сканера, честный винрейт, прозрачная "
+        "история сделок. Без обещаний «иксов» — только реальные цифры.\n\n"
+        "Жми на кнопку ниже, чтобы перейти в канал 👇"
+    )
+    keyboard = {"inline_keyboard": [[{"text": "📊 Перейти в канал", "url": CHANNEL_URL}]]}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(url, json={
+                "chat_id": chat_id, "text": text,
+                "parse_mode": "HTML", "reply_markup": keyboard,
+            })
+    except Exception as e:
+        print(f"[telegram_bot] Ошибка отправки приветствия: {e}")
+
 
 async def send_telegram(text: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:

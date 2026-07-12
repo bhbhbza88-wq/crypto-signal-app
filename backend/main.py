@@ -14,7 +14,7 @@ import time as _time
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Header, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, Header, HTTPException, Depends, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -40,11 +40,30 @@ async def lifespan(app: FastAPI):
     start_background_scanner()
     if telegram_ingest.is_configured():
         asyncio.create_task(telegram_ingest.run())
+    asyncio.create_task(telegram_bot.set_webhook())
     yield
 
 
 app = FastAPI(title="Crypto Signal App V8", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.post("/api/telegram-webhook")
+async def telegram_webhook(request: Request,
+                            x_telegram_bot_api_secret_token: str | None = Header(default=None)):
+    """Вебхук для бота-приветствия: первая точка контакта, когда человек
+    пишет боту /start, до перехода в реальный канал (telegram_bot.send_welcome).
+    Заголовок с секретом Telegram ставит сам на каждый запрос, если мы задали
+    secret_token при регистрации вебхука (telegram_bot.set_webhook); запрос без
+    правильного секрета — не от Telegram, отклоняем сразу."""
+    if telegram_bot.WEBHOOK_SECRET and x_telegram_bot_api_secret_token != telegram_bot.WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret token")
+
+    update = await request.json()
+    message = update.get("message") or update.get("edited_message")
+    if message and str(message.get("text", "")).startswith("/start"):
+        await telegram_bot.send_welcome(message["chat"]["id"])
+    return {"ok": True}
 
 
 # ── Аутентификация / монетизация ──────────────────────────────────

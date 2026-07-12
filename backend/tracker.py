@@ -18,6 +18,14 @@ from nfi_strategy import (
 # live расходится с бэктестом.
 TIMEOUT_HOURS = 36
 
+# Pre-TP1 trailing: при 70% прогресса до TP1 подтягиваем стоп не на
+# фиксированный процент от Entry, а на PRE_TP1_TRAIL_LOCK_PCT (45%, середина
+# диапазона 40-50%) от уже пройденного расстояния Entry->TP1 — фиксируем
+# бОльшую часть движения вместо плоского буфера 0.3%, который не масштабировался
+# под волатильность конкретной монеты/сигнала.
+PRE_TP1_TRAIL_PROGRESS = 0.70
+PRE_TP1_TRAIL_LOCK_PCT = 0.45
+
 
 def pnl_pct(signal, entry, price):
     if not entry:
@@ -179,23 +187,28 @@ def check_trades():
             if not tp1_hit and not trade.get('pre_tp1_trail'):
                 dist_total = abs(tp1 - entry)
                 dist_done  = abs(price - entry)
-                if dist_total > 0 and dist_done / dist_total >= 0.70:
+                if dist_total > 0 and dist_done / dist_total >= PRE_TP1_TRAIL_PROGRESS:
+                    lock_dist = dist_total * PRE_TP1_TRAIL_LOCK_PCT
                     if signal == 'LONG':
-                        new_stop = entry * 1.003
+                        new_stop = entry + lock_dist
                         if new_stop > trade['stop']:
                             trade['stop'] = new_stop
                             trade['be_hit'] = True
                             trade['pre_tp1_trail'] = True
                             db.upsert_trade(symbol, trade)
-                            db.add_event(symbol, 'trail', "Стоп подтянут в +0.3% (70% до TP1)")
+                            db.add_event(symbol, 'trail',
+                                         f"Стоп подтянут в +{pnl_pct(signal, entry, new_stop):.1f}% "
+                                         f"({PRE_TP1_TRAIL_PROGRESS:.0%} до TP1)")
                     else:
-                        new_stop = entry * 0.997
+                        new_stop = entry - lock_dist
                         if new_stop < trade['stop']:
                             trade['stop'] = new_stop
                             trade['be_hit'] = True
                             trade['pre_tp1_trail'] = True
                             db.upsert_trade(symbol, trade)
-                            db.add_event(symbol, 'trail', "Стоп подтянут в -0.3% (70% до TP1)")
+                            db.add_event(symbol, 'trail',
+                                         f"Стоп подтянут в {pnl_pct(signal, entry, new_stop):+.1f}% "
+                                         f"({PRE_TP1_TRAIL_PROGRESS:.0%} до TP1)")
 
             # ── Стоп ──────────────────────────────────────────────
             if _hit(signal, price, stop, 'sl'):
