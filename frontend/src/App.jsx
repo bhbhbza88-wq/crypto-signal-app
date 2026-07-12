@@ -329,7 +329,7 @@ export default function App() {
             )}
           </div>
           <div className="topbar-right">
-            <a className="btn-tg-bot" href="https://t.me/nwicki_bot" target="_blank" rel="noopener noreferrer">
+            <a className="btn-tg-bot" href="https://t.me/trading4325_bot" target="_blank" rel="noopener noreferrer">
               🤖 <span className="btn-tg-label">Бот</span>
             </a>
             <button className="btn-trial" onClick={() => setTab('ai_assistant')}>✦ AI Ассистент</button>
