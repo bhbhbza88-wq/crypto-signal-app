@@ -8,12 +8,7 @@ import SignalCard from './SignalCard'
 import HistoryTable from './HistoryTable'
 import MarketView from './MarketView'
 import AIChat from './AIChat'
-import Backtest from './Backtest'
 import SmartTrade from './SmartTrade'
-import DryRunDashboard from './DryRunDashboard'
-import XSecDashboard from './XSecDashboard'
-import TrendDashboard from './TrendDashboard'
-import StrategiesCompare from './StrategiesCompare'
 import Admin from './Admin'
 import ChannelAnalyzer from './ChannelAnalyzer'
 
@@ -50,14 +45,7 @@ const NAV_SECTIONS = [
     { key: 'ai_assistant', label: 'AI Ассистент',  icon: '✦', badge: 'BETA' },
     { key: 'market',       label: 'Скринер',        icon: '◫' },
   ]},
-  { title: 'Стратегии', items: [
-    { key: 'compare',      label: 'Сравнение',      icon: '⚓', badge: 'LIVE' },
-    { key: 'dryrun',       label: 'Дальран',        icon: '🛰', badge: 'LIVE' },
-    { key: 'xsec',         label: 'Long-Short',     icon: '⚖', badge: 'NEW' },
-    { key: 'trend_ff',     label: 'Trend-Following', icon: '📈', badge: 'NEW' },
-  ]},
   { title: 'Инструменты', items: [
-    { key: 'backtest',     label: 'Бэктест',        icon: '📊' },
     { key: 'smarttrade_calc', label: 'Smart Trade', icon: '⚡', badge: 'NEW' },
     { key: 'history',      label: 'История',        icon: '📋' },
   ]},
@@ -66,13 +54,6 @@ const NAV_SECTIONS = [
     { key: 'invite',       label: 'Пригласить',     icon: '👥' },
   ]},
 ]
-
-// маршрут открытия дашборда конкретной стратегии с главной
-const STRATEGY_TAB = { momentum: 'dryrun', xsec: 'xsec', trend: 'trend_ff' }
-
-// вкладки, закрытые за Premium
-const GATED = new Set(['compare', 'dryrun', 'xsec', 'trend_ff'])
-const GATED_TITLES = { compare: 'Сравнение стратегий', dryrun: 'Дальран', xsec: 'Long-Short', trend_ff: 'Trend-Following' }
 
 function useLivePrices() {
   const [prices, setPrices] = useState(null)
@@ -94,18 +75,6 @@ function useLivePrices() {
     fp(); const id = setInterval(fp, 30000); return () => clearInterval(id)
   }, [])
   return prices
-}
-
-function MiniChart({ positive }) {
-  const pts = positive ? "0,50 30,40 60,28 90,18 120,10 150,5 180,3" : "0,3 30,8 60,18 90,28 120,38 150,45 180,50"
-  const color = positive ? '#00e5a8' : '#ff4f60'
-  return (
-    <svg width="100%" height="50" viewBox="0 0 180 55" preserveAspectRatio="none">
-      <defs><linearGradient id={`g${positive}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.25"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs>
-      <polygon points={`0,50 ${pts} 180,55 0,55`} fill={`url(#g${positive})`}/>
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
-    </svg>
-  )
 }
 
 // курсор-spotlight на карточке
@@ -157,29 +126,6 @@ function ComingSoonPage({ tab }) {
   )
 }
 
-function UpgradeLock({ tab, user, onUpgrade, onLogin }) {
-  return (
-    <div className="lock-card animate-in">
-      <div className="lock-icon">🔒</div>
-      <span className="lock-badge">Premium</span>
-      <div className="lock-title">{GATED_TITLES[tab] || 'Premium-раздел'}</div>
-      <div className="lock-desc">
-        {user
-          ? 'Этот раздел доступен на тарифе Premium. Открой все live-стратегии и дашборды в реальном времени.'
-          : 'Live-стратегии доступны на Premium. Зарегистрируйся — первые 3 дня Premium бесплатно, карта не нужна.'}
-      </div>
-      {user
-        ? <button className="lock-btn" onClick={onUpgrade}>Перейти на Premium →</button>
-        : <button className="lock-btn" onClick={onLogin}>Начать 3 дня бесплатно →</button>}
-      <div className="lock-feats">
-        {['Сравнение всех стратегий', 'Дальран в реальном времени', 'Long-Short и Trend-Following', 'AI-ассистент 50 вопросов/день'].map((f, i) => (
-          <span key={i} className="lock-feat">✓ {f}</span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function KPI({ label, value, suffix, sub, accent }) {
   return (
     <div className={`kpi-card spot ${accent ? 'accent' : ''}`} onMouseMove={onSpot}>
@@ -197,7 +143,6 @@ export default function App() {
   const [history, setHistory] = useState([])
   const [stats, setStats] = useState(null)
   const [market, setMarket] = useState(null)
-  const [strategies, setStrategies] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -260,23 +205,15 @@ export default function App() {
     finally { setLoading(false) }
   }, [])
 
-  const fetchStrategies = useCallback(async () => {
-    try { const r = await api.getStrategiesSummary(); setStrategies(r.strategies || []) } catch {}
-  }, [])
-
   const fetchMarket = useCallback(async () => { try { setMarket(await api.getMarket()) } catch {} }, [])
 
   useEffect(() => { fetchCore(); const id = setInterval(fetchCore, POLL_INTERVAL); return () => clearInterval(id) }, [fetchCore])
-  useEffect(() => { fetchStrategies(); const id = setInterval(fetchStrategies, MARKET_POLL_INTERVAL); return () => clearInterval(id) }, [fetchStrategies])
   useEffect(() => {
     if (tab !== 'market') return
     fetchMarket(); const id = setInterval(fetchMarket, MARKET_POLL_INTERVAL); return () => clearInterval(id)
   }, [tab, fetchMarket])
 
   const isPremium = !!user && (user.tier === 'premium' || user.tier === 'vip')
-  const gate = (node) => isPremium
-    ? node
-    : <UpgradeLock tab={tab} user={user} onUpgrade={() => setTab('pricing')} onLogin={() => { setAuthMode('register'); setShowAuth(true) }} />
 
   const navSections = user?.is_admin
     ? [...NAV_SECTIONS, { title: 'Админ', items: [
@@ -337,7 +274,6 @@ export default function App() {
                   {!sidebarCollapsed && <span className="nav-label">{t.label}</span>}
                   {!sidebarCollapsed && (
                     <div className="nav-right">
-                      {GATED.has(t.key) && !isPremium && <span className="nav-lock" title="Premium">🔒</span>}
                       {t.badge && <span className={`nav-badge ${
                         t.badge==='HOT' ? 'hot' :
                         t.badge==='AI' ? 'ai' :
@@ -426,12 +362,7 @@ export default function App() {
           {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat signals={signals} stats={stats} market={market} /></section>}
           {tab === 'market' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Скринер рынка</h1></div><MarketView market={market} /></section>}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
-          {tab === 'backtest' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Бэктест <span className="beta-tag">BETA</span></h1></div><Backtest isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
           {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} onUpgraded={(t) => setUser(u => u ? { ...u, tier: t } : u)} onNeedAuth={() => setShowAuth(true)} /></section>}
-          {tab === 'compare' && gate(<section className="section animate-in"><StrategiesCompare /></section>)}
-          {tab === 'dryrun' && gate(<section className="section animate-in"><DryRunDashboard /></section>)}
-          {tab === 'xsec' && gate(<section className="section animate-in"><XSecDashboard /></section>)}
-          {tab === 'trend_ff' && gate(<section className="section animate-in"><TrendDashboard /></section>)}
           {tab === 'smarttrade_calc' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Smart Trade <span className="hot-tag">NEW</span></h1></div><SmartTrade /></section>}
           {tab === 'invite' && <ComingSoonPage tab="invite" />}
           {tab === 'admin' && user?.is_admin && <Admin />}
@@ -441,13 +372,12 @@ export default function App() {
             <div className="animate-in">
               <div className="page-header">
                 <h1 className="page-title">Дашборд</h1>
-                <p className="page-subtitle">Живой обзор: сигналы сканера и бумажные стратегии в реальном времени.</p>
+                <p className="page-subtitle">Живой обзор: сигналы из каналов в реальном времени.</p>
               </div>
 
               {/* KPI — реальные цифры */}
               <div className="kpi-grid">
                 <KPI label="Активный сигнал" value={signals.length} sub={signals.length ? 'прямо сейчас' : 'сканер ищет'} accent />
-                <KPI label="Стратегии в работе" value={strategies ? strategies.length : 0} sub="бумажные, live" />
                 <KPI label="Сделок в истории" value={stats?.all_time?.total ?? history.length} sub="всего закрыто" />
                 <KPI label="Винрейт" value={stats?.all_time?.winrate ?? 0} suffix="%" sub="за всё время" />
               </div>
@@ -463,42 +393,6 @@ export default function App() {
                   </div>
                 )}
               </section>
-
-              {/* Живые стратегии — реальные данные */}
-              <div className="ts-block">
-                <div className="ts-header">
-                  <div>
-                    <h2 className="ts-title">Живые стратегии</h2>
-                    <p className="ts-sub">Реальные данные, бумажное исполнение — обновляется в реальном времени</p>
-                  </div>
-                  <button className="ts-more" onClick={() => setTab('compare')}>Сравнить все →</button>
-                </div>
-                <div className="ts-grid">
-                  {(strategies || []).map((s, i) => {
-                    const pos = (s.realized_pnl_pct ?? 0) >= 0
-                    return (
-                      <div key={i} className="ts-card spot" onMouseMove={onSpot} onClick={() => setTab(STRATEGY_TAB[s.key] || 'compare')}>
-                        <div className="ts-card-top">
-                          <div className="ts-name">{s.name}</div>
-                          <span className="ts-kind">{s.kind}</span>
-                        </div>
-                        <div className="ts-chart"><MiniChart positive={pos} /></div>
-                        <div className="ts-roi-row">
-                          <span className="ts-roi-label">PnL · paper</span>
-                          <span className={`ts-roi-val ${pos ? 'pos' : 'neg'}`}>{pos ? '+' : ''}{s.realized_pnl_pct}%</span>
-                        </div>
-                        <div className="ts-stats">
-                          <div className="ts-stat"><span className="ts-stat-label">Сделок</span><span className="ts-stat-val">{s.closed_trades}</span></div>
-                          <div className="ts-stat"><span className="ts-stat-label">Винрейт</span><span className="ts-stat-val">{s.winrate != null ? `${s.winrate}%` : '—'}</span></div>
-                          <div className="ts-stat"><span className="ts-stat-label">Открыто</span><span className="ts-stat-val">{s.open_positions}</span></div>
-                        </div>
-                        <button className="ts-btn">Открыть дашборд</button>
-                      </div>
-                    )
-                  })}
-                  {!strategies && [0,1,2].map(i => <div key={i} className="ts-card" style={{ minHeight: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>Загрузка...</div>)}
-                </div>
-              </div>
 
               {/* Рынок — виджеты ниже */}
               <section className="section" style={{ marginTop: 28 }}>
