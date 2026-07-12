@@ -388,6 +388,9 @@ export default function App() {
             )}
           </div>
           <div className="topbar-right">
+            <a className="btn-tg-bot" href="https://t.me/trading4325_bot" target="_blank" rel="noopener noreferrer">
+              🤖 Бот
+            </a>
             <button className="btn-trial" onClick={() => setTab('ai_assistant')}>✦ AI Ассистент</button>
             {user ? (
               <div className="auth-box">
@@ -579,6 +582,8 @@ export default function App() {
         .tp-div { width: 1px; height: 14px; background: var(--border); }
         .topbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
         .btn-trial { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 7px; box-shadow: 0 3px 10px rgba(77,140,245,0.3); white-space: nowrap; cursor: pointer; }
+        .btn-tg-bot { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 7px; white-space: nowrap; text-decoration: none; }
+        .btn-tg-bot:hover { background: var(--surface-hover); color: var(--text); }
         .plan-badge { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 500; padding: 5px 10px; border-radius: 7px; white-space: nowrap; cursor: pointer; }
         .theme-toggle-sm { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); width: 30px; height: 30px; border-radius: 7px; font-size: 14px; cursor: pointer; }
 
@@ -683,6 +688,7 @@ export default function App() {
           .topbar { padding: 0 12px; }
           .topbar-right { gap: 6px; }
           .topbar-right .btn-trial { display: none; }
+          .topbar-right .btn-tg-bot { display: none; }
           .auth-email { max-width: 64px; }
         }
         @media (max-width: 480px) {
