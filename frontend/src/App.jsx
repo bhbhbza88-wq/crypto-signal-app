@@ -338,7 +338,12 @@ export default function App() {
                   {!sidebarCollapsed && (
                     <div className="nav-right">
                       {GATED.has(t.key) && !isPremium && <span className="nav-lock" title="Premium">🔒</span>}
-                      {t.badge && <span className={`nav-badge ${t.badge==='HOT'?'hot':t.badge==='AI'?'ai':'beta'}`}>{t.badge}</span>}
+                      {t.badge && <span className={`nav-badge ${
+                        t.badge==='HOT' ? 'hot' :
+                        t.badge==='AI' ? 'ai' :
+                        t.badge==='LIVE' ? 'live' :
+                        t.badge==='NEW' ? 'new' : 'beta'
+                      }`}>{t.badge}</span>}
                       {tab === t.key && <span className="nav-pip" />}
                     </div>
                   )}
@@ -389,7 +394,7 @@ export default function App() {
           </div>
           <div className="topbar-right">
             <a className="btn-tg-bot" href="https://t.me/trading4325_bot" target="_blank" rel="noopener noreferrer">
-              🤖 Бот
+              🤖 <span className="btn-tg-label">Бот</span>
             </a>
             <button className="btn-trial" onClick={() => setTab('ai_assistant')}>✦ AI Ассистент</button>
             {user ? (
@@ -559,6 +564,8 @@ export default function App() {
         .nav-badge.hot { background: var(--short); }
         .nav-badge.ai { background: linear-gradient(135deg, var(--accent), var(--purple)); }
         .nav-badge.beta { background: var(--amber); }
+        .nav-badge.live { background: var(--long); }
+        .nav-badge.new { background: var(--accent); }
 
         .sidebar-bottom { padding: 10px 12px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
         .scan-status { display: flex; align-items: center; gap: 7px; }
@@ -582,8 +589,8 @@ export default function App() {
         .tp-div { width: 1px; height: 14px; background: var(--border); }
         .topbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
         .btn-trial { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 7px; box-shadow: 0 3px 10px rgba(77,140,245,0.3); white-space: nowrap; cursor: pointer; }
-        .btn-tg-bot { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 7px; white-space: nowrap; text-decoration: none; }
-        .btn-tg-bot:hover { background: var(--surface-hover); color: var(--text); }
+        .btn-tg-bot { display: inline-flex; align-items: center; gap: 5px; background: #229ED9; color: #fff; border: none; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 7px; box-shadow: 0 3px 10px rgba(34,158,217,0.3); white-space: nowrap; text-decoration: none; }
+        .btn-tg-bot:hover { background: #1e8bc0; }
         .plan-badge { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 500; padding: 5px 10px; border-radius: 7px; white-space: nowrap; cursor: pointer; }
         .theme-toggle-sm { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); width: 30px; height: 30px; border-radius: 7px; font-size: 14px; cursor: pointer; }
 
@@ -688,7 +695,8 @@ export default function App() {
           .topbar { padding: 0 12px; }
           .topbar-right { gap: 6px; }
           .topbar-right .btn-trial { display: none; }
-          .topbar-right .btn-tg-bot { display: none; }
+          .topbar-right .btn-tg-bot span.btn-tg-label { display: none; }
+          .topbar-right .btn-tg-bot { padding: 6px 9px; }
           .auth-email { max-width: 64px; }
         }
         @media (max-width: 480px) {
