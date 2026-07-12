@@ -181,6 +181,37 @@ def is_configured() -> bool:
     return bool(TELEGRAM_API_ID and TELEGRAM_API_HASH and TELEGRAM_SESSION and TELEGRAM_SOURCE_CHANNELS)
 
 
+BACKFILL_INTERVAL_SEC = 180
+
+
+async def _backfill_loop(client, channels: dict, last_ids: dict):
+    """events.NewMessage — чисто реактивный листенер: если соединение с Telegram
+    оборвётся хоть на секунды (сетевой блип, реконнект Telethon), сообщение,
+    опубликованное в этот момент, не долетит вообще без следа в логах — сам код
+    даже не узнает о его существовании. Реальный кейс: пост в binancekillers_vips
+    в 14:13 с чистым LONG-сигналом (entry/stop/TP всё было явно) не оставил ни
+    единой строки в логах — ни успеха, ни ошибки, ни пропуска по бирже, что
+    возможно только если событие вообще не сработало.
+    Догоняем каждые BACKFILL_INTERVAL_SEC: перечитываем историю каждого канала
+    после последнего виденного message id. Безопасно дублировать с live-хендлером —
+    open_signal() отбрасывает 'already_open' по символу, а не по id сообщения."""
+    while True:
+        await asyncio.sleep(BACKFILL_INTERVAL_SEC)
+        for username, display_name in channels.items():
+            try:
+                min_id = last_ids.get(username, 0)
+                messages = await client.get_messages(username, min_id=min_id, limit=50)
+                for msg in reversed(messages):
+                    if msg.id > last_ids.get(username, 0):
+                        last_ids[username] = msg.id
+                    try:
+                        await _handle_message(display_name, msg.raw_text or "")
+                    except Exception as e:
+                        print(f"[telegram_ingest] Ошибка догоняющей обработки сообщения из {display_name}: {e}")
+            except Exception as e:
+                print(f"[telegram_ingest] Ошибка догоняющего опроса {display_name}: {e}")
+
+
 async def run():
     if not is_configured():
         print("[telegram_ingest] Не сконфигурирован (нужны TELEGRAM_API_ID/HASH/SESSION/SOURCE_CHANNELS) — пропуск запуска")
@@ -203,5 +234,16 @@ async def run():
             print(f"[telegram_ingest] Ошибка обработки сообщения из {display_name}: {e}")
 
     await client.start()
+
+    last_ids = {}
+    for username in channels:
+        try:
+            latest = await client.get_messages(username, limit=1)
+            last_ids[username] = latest[0].id if latest else 0
+        except Exception as e:
+            print(f"[telegram_ingest] Не удалось получить последний message id для {channels[username]}: {e}")
+            last_ids[username] = 0
+    asyncio.create_task(_backfill_loop(client, channels, last_ids))
+
     print(f"[telegram_ingest] Запущен, слушаю каналы: {', '.join(channels.values())}")
     await client.run_until_disconnected()

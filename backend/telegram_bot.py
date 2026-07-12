@@ -13,7 +13,8 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # Канал, куда ведёт кнопка приветствия — первая точка контакта до перехода
 # в реальный канал (см. /api/telegram-webhook в main.py).
-CHANNEL_URL = "https://t.me/chlebchik"
+CHANNEL_URL = "https://t.me/nwicki_signals"
+SITE_URL = "https://terrific-expression-production.up.railway.app"
 
 # Секрет для проверки, что POST на /api/telegram-webhook реально пришёл от
 # Telegram, а не от кого попало — детерминированно выводим из токена бота,
@@ -55,12 +56,19 @@ async def send_welcome(chat_id: int):
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     text = (
-        "👋 <b>Добро пожаловать в NWICKI!</b>\n\n"
-        "AI-сканер крипторынка: сигналы сканера, честный винрейт, прозрачная "
-        "история сделок. Без обещаний «иксов» — только реальные цифры.\n\n"
-        "Жми на кнопку ниже, чтобы перейти в канал 👇"
+        "👋 <b>Привет! Это NWICKI.</b>\n\n"
+        "AI-сканер анализирует крипторынок каждые 2 минуты и находит точки входа "
+        "с уровнями TP/SL — без магии, на технических индикаторах (EMA, RSI, ADX, ATR).\n\n"
+        "Чем мы отличаемся от других каналов с сигналами:\n"
+        "🎯 Показываем <b>реальный винрейт</b> — не только удачные сделки\n"
+        "📊 Три независимые стратегии торгуют <b>на бумаге</b>, прежде чем на реальные деньги\n"
+        "🚫 Никаких обещаний «иксов» и гарантированной прибыли\n\n"
+        "Жми на кнопку ниже — увидишь сигналы и статистику 👇"
     )
-    keyboard = {"inline_keyboard": [[{"text": "📊 Перейти в канал", "url": CHANNEL_URL}]]}
+    keyboard = {"inline_keyboard": [
+        [{"text": "📡 Канал с сигналами", "url": CHANNEL_URL}],
+        [{"text": "📈 Открыть платформу", "url": SITE_URL}],
+    ]}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             await client.post(url, json={
