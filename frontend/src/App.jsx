@@ -377,7 +377,7 @@ export default function App() {
 
               {/* KPI — реальные цифры */}
               <div className="kpi-grid">
-                <KPI label="Активный сигнал" value={signals.length} sub={signals.length ? 'прямо сейчас' : 'сканер ищет'} accent />
+                <KPI label="Активные сигналы" value={signals.length} sub={signals.length ? 'прямо сейчас' : 'ждём новых'} accent />
                 <KPI label="Сделок в истории" value={stats?.all_time?.total ?? history.length} sub="всего закрыто" />
                 <KPI label="Винрейт" value={stats?.all_time?.winrate ?? 0} suffix="%" sub="за всё время" />
               </div>
@@ -386,7 +386,7 @@ export default function App() {
                   Честность источника не теряется: SignalCard сам показывает блок "Источник"
                   для сигналов с trader.source_type === 'telegram_aggregate'. */}
               <section className="section" style={{ marginTop: 28 }}>
-                <h2 className="section-title">Активный сигнал</h2>
+                <h2 className="section-title">Активные сигналы</h2>
                 {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal /> : (
                   <div className="signals-grid">
                     {signals.map(s => <SignalCard key={s.symbol} signal={s} />)}
@@ -624,8 +624,8 @@ function EmptySignal() {
     <div className="empty-signal animate-in">
       <div className="empty-icon">🔍</div>
       <div className="empty-title">Сигналов нет</div>
-      <div className="empty-desc">Сканер анализирует 32 пары на Bybit. Когда найдёт точку входа — сигнал появится здесь автоматически.</div>
-      <div className="empty-pulse"><span style={{width:7,height:7,borderRadius:'50%',background:'var(--long)',animation:'pulse 2s infinite',display:'inline-block'}} />Сканирование каждые 2 минуты</div>
+      <div className="empty-desc">Следим за каналами с сигналами. Как только появится новый вход — он отобразится здесь автоматически.</div>
+      <div className="empty-pulse"><span style={{width:7,height:7,borderRadius:'50%',background:'var(--long)',animation:'pulse 2s infinite',display:'inline-block'}} />Проверяем каналы каждые несколько минут</div>
     </div>
   )
 }
