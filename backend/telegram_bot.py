@@ -1,5 +1,5 @@
 """
-Telegram уведомления для NWICKI
+Telegram уведомления для NOWICKI
 Добавь в Railway переменные окружения:
   TELEGRAM_BOT_TOKEN=твой_токен
   TELEGRAM_CHAT_ID=твой_chat_id
@@ -56,7 +56,7 @@ async def send_welcome(chat_id: int):
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     text = (
-        "👋 <b>Привет! Это NWICKI.</b>\n\n"
+        "👋 <b>Привет! Это NOWICKI.</b>\n\n"
         "AI-сканер анализирует крипторынок каждые 2 минуты и находит точки входа "
         "с уровнями TP/SL — без магии, на технических индикаторах (EMA, RSI, ADX, ATR).\n\n"
         "Чем мы отличаемся от других каналов с сигналами:\n"
@@ -110,7 +110,7 @@ async def notify_new_signal(signal: dict):
     conf_emoji = "🔥" if conf >= 80 else "⚡" if conf >= 60 else "⚠️"
 
     text = (
-        f"{emoji} <b>NWICKI SIGNAL — {side}</b>\n"
+        f"{emoji} <b>NOWICKI SIGNAL — {side}</b>\n"
         f"━━━━━━━━━━━━━━━━\n"
         f"📊 <b>{sym}</b> · Bybit\n"
         f"{conf_emoji} Уверенность: <b>{conf}%</b> (Score {score}/20)\n"
@@ -146,7 +146,7 @@ async def notify_manual_signal(signal: dict, source: str):
 
     emoji = "🟢" if side == "LONG" else "🔴"
     text = (
-        f"{emoji} <b>NWICKI SIGNAL — {side}</b>\n"
+        f"{emoji} <b>NOWICKI SIGNAL — {side}</b>\n"
         f"━━━━━━━━━━━━━━━━\n"
         f"📊 <b>{sym}</b> · Bybit\n"
         f"✍️ Автор: <b>{source}</b>\n"
@@ -173,16 +173,19 @@ async def notify_signal_closed(signal: dict, result: str, pnl: float):
         "tp3": "TP3 достигнут 🎯🎯🎯",
         "sl":  "Стоп-лосс ❌",
         "be":  "Безубыток ↔️",
+        "potential": "Закрыто по потере потенциала ⚠️",
+        "timeout": "Закрыто по таймауту ⏱",
+        "channel_closed": "Закрыто источником сигнала 📡",
     }
 
     text = (
-        f"{emoji} <b>NWICKI — Сделка закрыта</b>\n"
+        f"{emoji} <b>NOWICKI — Сделка закрыта</b>\n"
         f"━━━━━━━━━━━━━━━━\n"
         f"📊 <b>{sym}</b> · {side}\n"
         f"📋 Результат: <b>{result_labels.get(result, result)}</b>\n"
         f"💵 PnL: <b>{pnl_str}</b>\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"<i>NWICKI Crypto Scanner</i>"
+        f"<i>NOWICKI Crypto Scanner</i>"
     )
 
     await send_telegram(text)
@@ -192,7 +195,7 @@ async def notify_market_phase(old_phase: str, new_phase: str, details: dict):
     labels = {'UPTREND': 'АПТРЕНД 📈', 'DOWNTREND': 'ДАУНТРЕНД 📉', 'SIDEWAYS': 'БОКОВИК ↔️'}
     emoji = {'UPTREND': '🟢', 'DOWNTREND': '🔴', 'SIDEWAYS': '🟡'}.get(new_phase, '🔵')
     text = (
-        f"{emoji} <b>NWICKI — Смена фазы рынка</b>\n"
+        f"{emoji} <b>NOWICKI — Смена фазы рынка</b>\n"
         f"━━━━━━━━━━━━━━━━\n"
         f"Было: <b>{labels.get(old_phase, old_phase)}</b>\n"
         f"Стало: <b>{labels.get(new_phase, new_phase)}</b>\n"
@@ -240,7 +243,7 @@ async def send_daily_summary(stats: dict):
     emoji = "📈" if pnl > 0 else "📉"
 
     text = (
-        f"{emoji} <b>NWICKI — Итоги дня</b>\n"
+        f"{emoji} <b>NOWICKI — Итоги дня</b>\n"
         f"━━━━━━━━━━━━━━━━\n"
         f"📊 Сделок: <b>{total}</b>\n"
         f"🎯 Винрейт: <b>{winrate}%</b>\n"
@@ -250,7 +253,7 @@ async def send_daily_summary(stats: dict):
         f"TP2+: {today.get('tp2_plus', 0)} | "
         f"Стоп: {today.get('stops', 0)} | "
         f"Б/У: {today.get('breakeven', 0)}\n"
-        f"<i>NWICKI Crypto Scanner</i>"
+        f"<i>NOWICKI Crypto Scanner</i>"
     )
 
     await send_telegram(text)

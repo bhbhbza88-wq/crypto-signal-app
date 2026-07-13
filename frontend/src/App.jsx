@@ -241,7 +241,7 @@ export default function App() {
   const fetchCore = useCallback(async () => {
     try {
       const [s, h, st] = await Promise.all([api.getSignals(), api.getHistory(50), api.getStats()])
-      if (s.length > 0 && prevRef.current.length === 0) sendPush(`🚨 NWICKI: ${s[0].signal} ${s[0].symbol}`, `Score ${s[0].score}/20`)
+      if (s.length > 0 && prevRef.current.length === 0) sendPush(`🚨 NOWICKI: ${s[0].signal} ${s[0].symbol}`, `Score ${s[0].score}/20`)
       prevRef.current = s; setSignals(s); setHistory(h); setStats(st); setError(null)
     } catch { setError('Нет связи с сервером.') }
     finally { setLoading(false) }
@@ -274,7 +274,7 @@ export default function App() {
             {!sidebarCollapsed && (
               <><div className="logo-icon"><span className="logo-n">N</span></div>
               <div className="logo-text-wrap">
-                <span className="logo-name gradient-text">NWICKI</span>
+                <span className="logo-name gradient-text">NOWICKI</span>
                 <span className="logo-sub">Crypto Scanner</span>
               </div></>
             )}

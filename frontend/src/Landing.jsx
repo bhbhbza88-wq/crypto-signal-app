@@ -132,16 +132,16 @@ const FEATURES = [
 const HONEST = [
   'Живой винрейт открыт всем — реальный трек-рекорд, а не красивые скриншоты.',
   'Метрики (PF, винрейт, equity) показываем как есть, без приукрашивания.',
-  'NWICKI не имеет доступа к твоим средствам — только анализ рынка.',
+  'NOWICKI не имеет доступа к твоим средствам — только анализ рынка.',
   'Каждая стратегия проходит бэктест на полной истории перед запуском.',
 ]
 
 const FAQ = [
   { q: 'Это реальная торговля или бэктест?', a: 'Стратегии работают в режиме бумажной торговли на живых данных Bybit — реальные цены, виртуальный депозит. Это честный дальран перед реальными деньгами.' },
-  { q: 'Насколько точны сигналы NWICKI?', a: 'Сканер использует EMA, RSI, ADX и ATR. Каждый сигнал имеет Score от 0 до 20 — чем выше, тем сильнее сетап. Полная статистика — в разделе История.' },
-  { q: 'Может ли NWICKI торговать автоматически?', a: 'Сейчас NWICKI находит точки входа и уведомляет тебя — решение принимаешь ты. Автоисполнение через API Bybit в разработке.' },
-  { q: 'Безопасно ли использовать NWICKI?', a: 'NWICKI не имеет доступа к твоим средствам. Для просмотра сигналов API-ключи не нужны.' },
-  { q: 'Сколько стоит NWICKI?', a: 'Базовый доступ (обзор рынка, бэктест) бесплатный навсегда. Premium и VIP открывают все стратегии в реальном времени и Telegram-алерты — смотри раздел Тарифы.' },
+  { q: 'Насколько точны сигналы NOWICKI?', a: 'Сканер использует EMA, RSI, ADX и ATR. Каждый сигнал имеет Score от 0 до 20 — чем выше, тем сильнее сетап. Полная статистика — в разделе История.' },
+  { q: 'Может ли NOWICKI торговать автоматически?', a: 'Сейчас NOWICKI находит точки входа и уведомляет тебя — решение принимаешь ты. Автоисполнение через API Bybit в разработке.' },
+  { q: 'Безопасно ли использовать NOWICKI?', a: 'NOWICKI не имеет доступа к твоим средствам. Для просмотра сигналов API-ключи не нужны.' },
+  { q: 'Сколько стоит NOWICKI?', a: 'Базовый доступ (обзор рынка, бэктест) бесплатный навсегда. Premium и VIP открывают все стратегии в реальном времени и Telegram-алерты — смотри раздел Тарифы.' },
 ]
 
 const SCAN_COINS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK']
@@ -177,7 +177,7 @@ function LiveShowcase({ prices, curve, visibleCurve, xsecRoi, chartPeriod, setCh
     <div className="showcase reveal">
       <div className="sh-chrome">
         <span className="sh-dot r" /><span className="sh-dot a" /><span className="sh-dot g" />
-        <span className="sh-url">nwicki.app/strategies</span>
+        <span className="sh-url">nowicki.trade/strategies</span>
         <span className="sh-live"><span className="scan-dot-sm" />LIVE</span>
         {prices && (
           <span className="sh-prices">
@@ -282,7 +282,7 @@ export default function Landing() {
       {/* ── ANNOUNCEMENT BAR — информационная полоса, без CTA (кнопки есть в навбаре и hero) ── */}
       <div className="announce-bar">
         <span className="announce-dot" />
-        <span>✦ NWICKI — AI сканирует рынок и объясняет каждый сигнал в реальном времени</span>
+        <span>✦ NOWICKI — AI сканирует рынок и объясняет каждый сигнал в реальном времени</span>
       </div>
 
       {/* ── NAVBAR ── */}
@@ -290,7 +290,7 @@ export default function Landing() {
         <div className="nav-inner">
           <div className="nav-logo" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
             <div className="nav-logo-icon">N</div>
-            <span className="nav-logo-text gradient-text">NWICKI</span>
+            <span className="nav-logo-text gradient-text">NOWICKI</span>
           </div>
 
           <div className={`nav-links ${menuOpen ? 'open' : ''}`}>
@@ -438,7 +438,7 @@ export default function Landing() {
       <section id="honest" className="honest-section">
         <div className="section-inner honest-inner">
           <div className="honest-text reveal">
-            <div className="section-label">Почему NWICKI</div>
+            <div className="section-label">Почему NOWICKI</div>
             <h2 className="section-heading">Честность вместо<br/>обещаний «иксов»</h2>
             <p className="section-sub" style={{ margin: '14px 0 24px' }}>
               Большинство сигнальных сервисов скрывают реальную доходность. Мы делаем наоборот — показываем всё как есть.
@@ -493,7 +493,7 @@ export default function Landing() {
           <div className="sec-head reveal"><div className="section-label">Как начать</div><h2 className="section-heading center">За 3 простых шага</h2></div>
           <div className="steps-grid">
             {[
-              { n: 1, t: 'Открой платформу', d: 'Зайди на NWICKI — работает прямо в браузере, регистрация для просмотра не нужна.' },
+              { n: 1, t: 'Открой платформу', d: 'Зайди на NOWICKI — работает прямо в браузере, регистрация для просмотра не нужна.' },
               { n: 2, t: 'Следи за сигналами', d: 'Сканер анализирует 32 пары и показывает точки входа с уровнями TP и SL.' },
               { n: 3, t: 'Спроси AI', d: 'AI объяснит каждый сигнал — почему вошли, какие риски, что делать дальше.' },
             ].map((s, i) => (
@@ -512,7 +512,7 @@ export default function Landing() {
         <div className="section-inner">
           <div className="community-card reveal">
             <div className="community-text">
-              <h2 className="section-heading">Присоединяйся к сообществу<br/>NWICKI</h2>
+              <h2 className="section-heading">Присоединяйся к сообществу<br/>NOWICKI</h2>
               <p className="community-sub">Сигналы, разборы стратегий и поддержка — в Telegram и Discord.</p>
               <div style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'center'}}>
                 <button className="community-btn tg" disabled style={{opacity:0.55,cursor:'default'}}>✈ Telegram</button>
@@ -575,7 +575,7 @@ export default function Landing() {
             <div className="footer-brand">
               <div className="nav-logo" style={{marginBottom:12}}>
                 <div className="nav-logo-icon">N</div>
-                <span className="nav-logo-text gradient-text">NWICKI</span>
+                <span className="nav-logo-text gradient-text">NOWICKI</span>
               </div>
               <p className="footer-desc">AI-платформа для поиска крипто-сигналов на Bybit. Только алгоритм, никаких эмоций.</p>
               <div className="footer-socials">
@@ -598,7 +598,7 @@ export default function Landing() {
             </div>
           </div>
           <div className="footer-bottom">
-            <span>© 2026 NWICKI. Не является финансовой рекомендацией.</span>
+            <span>© 2026 NOWICKI. Не является финансовой рекомендацией.</span>
             <span>Поддержка · Живой чат 24/7</span>
             <button className="theme-btn" onClick={() => setDark(d => !d)}>{dark ? '☀ Светлая' : '☾ Тёмная'}</button>
           </div>

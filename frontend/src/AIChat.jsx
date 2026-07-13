@@ -70,7 +70,7 @@ export default function AIChat() {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: '👋 Привет! Я AI-ассистент NWICKI. Могу объяснить текущий сигнал, риски, стратегию сканера или ответить на любой вопрос о торговле. Спрашивай!'
+      content: '👋 Привет! Я AI-ассистент NOWICKI. Могу объяснить текущий сигнал, риски, стратегию сканера или ответить на любой вопрос о торговле. Спрашивай!'
     }
   ])
   const [input, setInput] = useState('')
@@ -111,7 +111,7 @@ export default function AIChat() {
         <div className="chat-header-left">
           <div className="ai-avatar">AI</div>
           <div>
-            <span className="chat-title">NWICKI AI</span>
+            <span className="chat-title">NOWICKI AI</span>
             <span className="chat-sub">Знает текущие сигналы и рынок</span>
           </div>
         </div>
