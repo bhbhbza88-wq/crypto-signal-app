@@ -136,6 +136,48 @@ function KPI({ label, value, suffix, sub, accent }) {
   )
 }
 
+const RESULT_LABEL = { tp1: 'TP1', tp2: 'TP2', tp3: 'TP3', sl: 'Стоп', be: 'Б/У', potential: 'Закрыт', timeout: 'Закрыт', timeout_closed: 'Закрыт' }
+
+// Лента последних закрытых сигналов на дашборде — то, что всегда наполнено
+// (в отличие от активных сигналов, которых в моменте может не быть). Premium
+// видит реальные строки; free видит их же под блюром с тизером — винрейт и
+// сам факт трек-рекорда открыты, но глубина (вся история, PnL по дням) — за
+// подпиской, как и в разделе «История».
+function RecentSignals({ history, isPremium, onUpgrade, onSeeAll }) {
+  const rows = (history || []).slice(0, 6)
+  if (!rows.length) return null
+  return (
+    <div className="rs-card">
+      {isPremium && (
+        <div className="rs-head">
+          <button className="rs-more" onClick={onSeeAll}>Вся история →</button>
+        </div>
+      )}
+      <div className="rs-list-wrap">
+        <div className={`rs-list ${!isPremium ? 'rs-blur' : ''}`}>
+          {rows.map((t) => (
+            <div className="rs-row" key={t.id}>
+              <span className="rs-sym mono">{t.symbol.replace('/USDT', '')}</span>
+              <span className={`rs-dir ${t.signal === 'LONG' ? 'long' : 'short'}`}>{t.signal}</span>
+              <span className="rs-res">{RESULT_LABEL[t.result] || t.result}</span>
+              <span className={`rs-pnl mono ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}`}>
+                {t.pnl > 0 ? '+' : ''}{t.pnl}%
+              </span>
+            </div>
+          ))}
+        </div>
+        {!isPremium && (
+          <div className="rs-lock">
+            <span className="rs-lock-icon">🔒</span>
+            <span className="rs-lock-text">Полная лента сделок и PnL по дням — на Premium</span>
+            <button className="rs-lock-btn" onClick={onUpgrade}>Открыть за Premium →</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const navigate = useNavigate()
   const [tab, setTab] = useState('overview')
@@ -294,8 +336,8 @@ export default function App() {
             <div className="scan-status">
               <span className="scan-dot" />
               <div>
-                <span className="scan-text">Сканирую рынок</span>
-                <span className="scan-sub">каждые 2 мин</span>
+                <span className="scan-text">Слежу за каналами</span>
+                <span className="scan-sub">обновление каждые неск. минут</span>
               </div>
             </div>
           )}
@@ -380,6 +422,7 @@ export default function App() {
                 <KPI label="Активные сигналы" value={signals.length} sub={signals.length ? 'прямо сейчас' : 'ждём новых'} accent />
                 <KPI label="Сделок в истории" value={stats?.all_time?.total ?? history.length} sub="всего закрыто" />
                 <KPI label="Винрейт" value={stats?.all_time?.winrate ?? 0} suffix="%" sub="за всё время" />
+                <KPI label="Средний PnL" value={stats?.all_time?.avg_pnl ?? 0} suffix="%" sub="на сделку" />
               </div>
 
               {/* Активные сигналы — единая лента: собственный сканер + агрегированные потоки.
@@ -393,6 +436,20 @@ export default function App() {
                   </div>
                 )}
               </section>
+
+              {/* Последние сигналы — всегда наполненный блок (в отличие от активных).
+                  Premium видит реальную ленту, free — тизер под блюром. */}
+              {history.length > 0 && (
+                <section className="section" style={{ marginTop: 28 }}>
+                  <h2 className="section-title">Последние сигналы</h2>
+                  <RecentSignals
+                    history={history}
+                    isPremium={isPremium}
+                    onSeeAll={() => setTab('history')}
+                    onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))}
+                  />
+                </section>
+              )}
 
               {/* Рынок — виджеты ниже */}
               <section className="section" style={{ marginTop: 28 }}>
@@ -513,6 +570,28 @@ export default function App() {
         .kpi-val { font-family: var(--font-mono); font-size: 30px; font-weight: 800; color: var(--text); line-height: 1.1; margin: 8px 0 4px; }
         .kpi-sub { font-size: 11px; color: var(--text-secondary); }
 
+        /* RECENT SIGNALS */
+        .rs-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); padding: 8px 8px 4px; }
+        .rs-head { display: flex; justify-content: flex-end; padding: 6px 10px 2px; }
+        .rs-more { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 12px; padding: 5px 11px; border-radius: 7px; cursor: pointer; transition: all 0.15s; }
+        .rs-more:hover { border-color: var(--accent); color: var(--accent); }
+        .rs-list-wrap { position: relative; }
+        .rs-list { display: flex; flex-direction: column; }
+        .rs-list.rs-blur { filter: blur(5px); pointer-events: none; user-select: none; }
+        .rs-row { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+        .rs-row:last-child { border-bottom: none; }
+        .rs-sym { font-weight: 700; color: var(--text); font-size: 14px; }
+        .rs-dir { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px; font-family: var(--font-mono); justify-self: start; }
+        .rs-dir.long { background: var(--long-soft); color: var(--long); }
+        .rs-dir.short { background: var(--short-soft); color: var(--short); }
+        .rs-res { font-size: 12px; color: var(--text-secondary); justify-self: start; }
+        .rs-pnl { font-weight: 700; font-size: 14px; }
+        .rs-lock { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 20px; background: color-mix(in srgb, var(--surface) 55%, transparent); }
+        .rs-lock-icon { font-size: 26px; }
+        .rs-lock-text { font-size: 13px; color: var(--text); font-weight: 600; max-width: 300px; }
+        .rs-lock-btn { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; border-radius: var(--radius-md); padding: 10px 22px; font-size: 13px; font-weight: 700; cursor: pointer; transition: opacity 0.15s; }
+        .rs-lock-btn:hover { opacity: 0.88; }
+
         /* LIVE STRATEGIES */
         .ts-block { margin: 28px 0 0; }
         .ts-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
@@ -567,8 +646,8 @@ export default function App() {
         .sk-bar { height: 4px; } .sk-content { padding: 22px; display: flex; flex-direction: column; gap: 14px; }
         .sk-row { display: flex; gap: 12px; align-items: center; } .sk-circle { width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0; }
         .sk-line { height: 14px; border-radius: 6px; flex: 1; } .sk-chart { height: 180px; border-radius: 8px; }
-        .empty-signal { padding: 48px 32px; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); display: flex; flex-direction: column; align-items: center; gap: 14px; }
-        .empty-icon { font-size: 40px; opacity: 0.4; } .empty-title { font-size: 16px; font-weight: 600; color: var(--text-secondary); }
+        .empty-signal { padding: 22px 28px; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); display: flex; flex-direction: column; align-items: center; gap: 8px; }
+        .empty-icon { font-size: 24px; opacity: 0.4; } .empty-title { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
         .empty-desc { font-size: 13px; color: var(--text-tertiary); line-height: 1.6; max-width: 320px; }
         .empty-pulse { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--long); background: var(--long-soft); padding: 8px 16px; border-radius: 20px; }
 
