@@ -5,7 +5,7 @@ FastAPI + Python backend, React + Vite frontend, SQLite, Bybit через ccxt, 
 
 **Прод:**
 - Backend: https://crypto-signal-app-production-f37c.up.railway.app
-- Frontend: https://terrific-expression-production.up.railway.app
+- Frontend: https://nowicki.trade (custom domain → Railway `terrific-expression-production.up.railway.app`)
 
 ## Идея проекта
 

@@ -14,7 +14,7 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 # Канал, куда ведёт кнопка приветствия — первая точка контакта до перехода
 # в реальный канал (см. /api/telegram-webhook в main.py).
 CHANNEL_URL = "https://t.me/chlebchik"
-SITE_URL = "https://terrific-expression-production.up.railway.app"
+SITE_URL = "https://nowicki.trade"
 
 # Секрет для проверки, что POST на /api/telegram-webhook реально пришёл от
 # Telegram, а не от кого попало — детерминированно выводим из токена бота,
