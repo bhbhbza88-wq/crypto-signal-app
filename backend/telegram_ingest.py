@@ -28,6 +28,7 @@ import httpx
 import database as db
 import data_layer
 import tracker
+import telegram_bot
 from signal_ingest import normalize_symbol, open_signal
 
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "")
@@ -269,6 +270,11 @@ async def _try_close_from_channel(display_name: str, text: str):
         db.add_to_history(symbol, trade['signal'], trade['entry'], 'channel_closed', pnl, trade.get('trader_id'))
         db.remove_trade(symbol)
         print(f"[telegram_ingest] {symbol} закрыт по сигналу канала {display_name} ({reason}, {pnl:+.1f}%)")
+        try:
+            await telegram_bot.notify_signal_closed(
+                {"symbol": symbol, "signal": trade['signal']}, 'channel_closed', pnl)
+        except Exception as e:
+            print(f"[telegram_ingest] Ошибка публикации закрытия в TG-канал: {e}")
 
 
 async def _handle_message(display_name: str, msg):
@@ -327,6 +333,18 @@ async def _handle_message(display_name: str, msg):
     db.add_event(opened_symbol, "telegram_aggregate_signal",
                  f"{display_name}: {side} {opened_symbol} @ {entry}")
     print(f"[telegram_ingest] Открыт сигнал {opened_symbol} от {display_name}")
+
+    # Публикуем в наш собственный TG-канал тем же путём, что ручные сигналы
+    # админа и TradingView-вебхук (telegram_bot.notify_manual_signal) — источник
+    # честно указан как display_name (внутренний алиас), а не реальный канал.
+    try:
+        await telegram_bot.notify_manual_signal({
+            "symbol": opened_symbol, "signal": side,
+            "entry": entry, "stop": stop,
+            "tp1": tp1, "tp2": tp2, "tp3": tp3,
+        }, display_name)
+    except Exception as e:
+        print(f"[telegram_ingest] Ошибка публикации в TG-канал: {e}")
 
 
 def is_configured() -> bool:

@@ -3,15 +3,31 @@ Trade Tracker — TP1/TP2/TP3, стоп, Chandelier Exit trailing.
 Новое: Chandelier Exit, cooldown после стопа, daily loss recording.
 """
 
+import asyncio
 import pandas as pd
 from datetime import datetime
 import database as db
 import nfi_strategy
+import telegram_bot
 from data_layer import fetch_data_cached, build_features, fetch_ticker
 from nfi_strategy import (
     set_cooldown, record_daily_loss,
     calc_chandelier_exit, calc_supertrend
 )
+
+
+def _notify_closed(symbol, signal, result, pnl):
+    """check_trades() — синхронный код в фоновом потоке сканера, а
+    notify_signal_closed — async (шлёт HTTP в Telegram) — поднимаем свой
+    короткоживущий event loop, как уже делает scanner.py для notify_new_signal.
+    Не должно ронять трекинг, если Telegram недоступен — только предупреждение."""
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(telegram_bot.notify_signal_closed(
+            {"symbol": symbol, "signal": signal}, result, pnl))
+        loop.close()
+    except Exception as e:
+        print(f"⚠️ Telegram (закрытие {symbol}): {e}")
 
 # Выход по времени — должен совпадать с таймаутом бэктеста (36 свечей 1h).
 # Для momentum это ОСНОВНОЙ механизм выхода (TP недостижимы), без него
@@ -179,6 +195,7 @@ def check_trades():
                     record_daily_loss(pnl)
                     db.add_to_history(symbol, signal, entry, 'potential', pnl, trader_id)
                     db.remove_trade(symbol)
+                    _notify_closed(symbol, signal, 'potential', pnl)
                     if pnl < -0.5:
                         set_cooldown(symbol)
                     continue
@@ -217,6 +234,7 @@ def check_trades():
                 record_daily_loss(pnl)
                 db.add_to_history(symbol, signal, entry, result, pnl, trader_id)
                 db.remove_trade(symbol)
+                _notify_closed(symbol, signal, result, pnl)
                 if result == 'sl':
                     set_cooldown(symbol)   # cooldown только после реального стопа
                 continue
@@ -233,6 +251,7 @@ def check_trades():
                     record_daily_loss(pnl)
                     db.add_to_history(symbol, signal, entry, 'timeout', pnl, trader_id)
                     db.remove_trade(symbol)
+                    _notify_closed(symbol, signal, 'timeout', pnl)
                     continue
 
             # ── TP1 — фиксируем 50%, стоп в б/у ──────────────────
@@ -270,6 +289,7 @@ def check_trades():
                 db.add_event(symbol, 'tp3', f"TP3 достигнут (+{pnl_tp3:.1f}%)")
                 db.add_to_history(symbol, signal, entry, 'tp3', pnl_tp3, trader_id)
                 db.remove_trade(symbol)
+                _notify_closed(symbol, signal, 'tp3', pnl_tp3)
                 continue
 
         except Exception as e:
