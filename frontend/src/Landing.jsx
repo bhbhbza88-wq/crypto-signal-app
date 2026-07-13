@@ -4,21 +4,34 @@ import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts'
 import { api } from './api'
 
 /* ─────────────────────────── DATA HOOKS ─────────────────────────── */
-function useLiveStrategies() {
-  const [strategies, setStrategies] = useState(null)
+// Реальные цифры вместо "бумажных стратегий": винрейт/PnL из /api/stats,
+// кумулятивный PnL по дням и последние сигналы — из /api/history (то же,
+// что показывает дашборд, никаких отдельных "витринных" данных для лендинга).
+function useLiveStats() {
+  const [stats, setStats] = useState(null)
   const [curve, setCurve] = useState([])
+  const [recent, setRecent] = useState([])
   useEffect(() => {
     async function load() {
       try {
-        const [summary, xh] = await Promise.all([api.getStrategiesSummary(), api.getXsecHistory()])
-        setStrategies(summary.strategies || [])
-        setCurve(xh.equity_curve || [])
+        const [s, h] = await Promise.all([api.getStats(), api.getHistory(200)])
+        setStats(s)
+        setRecent(h.slice(0, 6))
+        const byDay = {}
+        h.slice().reverse().forEach(t => {
+          const day = t.date || '—'
+          byDay[day] = (byDay[day] || 0) + parseFloat(t.pnl || 0)
+        })
+        let cum = 0
+        setCurve(Object.keys(byDay).sort().map(day => { cum += byDay[day]; return { date: day, equity: cum } }))
       } catch {}
     }
     load(); const id = setInterval(load, 60000); return () => clearInterval(id)
   }, [])
-  return { strategies, curve }
+  return { stats, curve, recent }
 }
+
+const RESULT_LABEL = { tp1: 'TP1', tp2: 'TP2', tp3: 'TP3', sl: 'Стоп', be: 'Б/У', potential: 'Закрыт', timeout: 'Закрыт', timeout_closed: 'Закрыт', channel_closed: 'Закрыт каналом' }
 
 const CHART_PERIODS = [
   { key: 'week', label: '7д', days: 7 },
@@ -103,12 +116,17 @@ function onSpot(e) {
 }
 
 /* ─────────────────────────── STATIC CONTENT ─────────────────────────── */
-const STATS = [
-  { value: '3', label: 'Независимые бумажные стратегии' },
-  { value: '32', label: 'Пар на Bybit' },
-  { value: '2', suffix: ' мин', label: 'Интервал сканирования' },
-  { value: '24/7', label: 'Сканер без выходных' },
-]
+// Реальные цифры вместо статики — если данные ещё не загрузились, показываем
+// «—», а не нарисованные placeholder-числа.
+function buildStats(stats) {
+  const at = stats?.all_time
+  return [
+    { value: at ? String(at.winrate ?? 0) : '—', suffix: at ? '%' : '', label: 'Винрейт за всё время' },
+    { value: at ? String(at.total ?? 0) : '—', label: 'Сделок закрыто' },
+    { value: '32', label: 'Пар в скринере' },
+    { value: '24/7', label: 'Мониторинг каналов' },
+  ]
+}
 
 const EXCHANGES = [
   { name: 'Bybit', active: true },
@@ -120,28 +138,28 @@ const EXCHANGES = [
 
 // Возможности (Toolkit + Benefits, отобрано сильнейшее)
 const FEATURES = [
-  { icon: '◈', title: 'Сигнал-сканер', desc: 'Сканирует 32 пары на Bybit каждые 2 минуты по EMA, RSI, ADX и ATR и сам находит лучший сетап. Сердце платформы.', wide: true },
-  { icon: '✦', title: 'AI Ассистент', desc: 'AI знает текущие сигналы и рынок. Спроси «почему вошли?» — получи ответ за секунду.', badge: 'AI' },
+  { icon: '📡', title: 'Ретрансляция сигналов', desc: 'Слушаем проверенные Telegram-каналы — как только выходит пост (текст или картинка), AI достаёт entry/stop/TP и публикует на сайте. Сердце платформы.', wide: true },
+  { icon: '✦', title: 'AI Ассистент', desc: 'AI знает текущие сигналы и рынок. Спроси «почему открыли?» — получи ответ за секунду.', badge: 'AI' },
   { icon: '⬡', title: 'Скринер рынка', desc: 'Тепловая карта 32 пар с режимами и ADX. TradingView-график по клику.' },
   { icon: '≡', title: 'История & аналитика', desc: 'Винрейт открыт всем. PnL по дням, каждая сделка и разбивка TP/SL — на Premium.' },
-  { icon: '📊', title: 'Бэктест на полной истории', desc: 'Проверяй любую стратегию на исторических данных перед запуском.' },
+  { icon: '🤖', title: 'Свой Telegram-бот', desc: 'Каждое открытие и закрытие сделки дублируется в наш канал — не нужно держать сайт открытым.' },
   { icon: '⚡', title: 'Smart Trade калькулятор', desc: 'Размер позиции, риск и R:R по TP-уровням — посчитай сделку до входа.', badge: 'NEW' },
 ]
 
 // Почему мы честнее (Reasons + Security, слитые в один блок доверия)
 const HONEST = [
   'Живой винрейт открыт всем — реальный трек-рекорд, а не красивые скриншоты.',
-  'Метрики (PF, винрейт, equity) показываем как есть, без приукрашивания.',
-  'NOWICKI не имеет доступа к твоим средствам — только анализ рынка.',
-  'Каждая стратегия проходит бэктест на полной истории перед запуском.',
+  'Метрики (винрейт, PnL) показываем как есть, без приукрашивания.',
+  'NOWICKI не имеет доступа к твоим средствам — мы только показываем сигналы, вход и решение всегда за тобой.',
+  'Если канал сам закрывает сделку — статус на сайте обновляется автоматически, без ручных правок задним числом.',
 ]
 
 const FAQ = [
-  { q: 'Это реальная торговля или бэктест?', a: 'Стратегии работают в режиме бумажной торговли на живых данных Bybit — реальные цены, виртуальный депозит. Это честный дальран перед реальными деньгами.' },
-  { q: 'Насколько точны сигналы NOWICKI?', a: 'Сканер использует EMA, RSI, ADX и ATR. Каждый сигнал имеет Score от 0 до 20 — чем выше, тем сильнее сетап. Полная статистика — в разделе История.' },
-  { q: 'Может ли NOWICKI торговать автоматически?', a: 'Сейчас NOWICKI находит точки входа и уведомляет тебя — решение принимаешь ты. Автоисполнение через API Bybit в разработке.' },
+  { q: 'Как вы находите сигналы?', a: 'Слушаем сигнальные Telegram-каналы через AI — распознаём и текст, и картинки, достаём entry/stop/TP и публикуем на сайте и в нашем канале без ручной модерации.' },
+  { q: 'Насколько точны сигналы?', a: 'Мы не меняем и не улучшаем то, что публикует канал — только извлекаем уровни и сверяем результат с реальными ценами Bybit. Если канал сам закрыл сделку — статус обновится автоматически.' },
+  { q: 'Может ли NOWICKI торговать автоматически?', a: 'Нет — NOWICKI только показывает сигналы и уведомляет тебя, решение и вход всегда твои. Автоисполнение не планируется.' },
   { q: 'Безопасно ли использовать NOWICKI?', a: 'NOWICKI не имеет доступа к твоим средствам. Для просмотра сигналов API-ключи не нужны.' },
-  { q: 'Сколько стоит NOWICKI?', a: 'Базовый доступ (обзор рынка, бэктест) бесплатный навсегда. Premium и VIP открывают все стратегии в реальном времени и Telegram-алерты — смотри раздел Тарифы.' },
+  { q: 'Сколько стоит NOWICKI?', a: 'Базовый доступ (обзор рынка, скринер, лента сигналов, винрейт) бесплатный навсегда. Premium открывает полную историю сделок и PnL по дням — смотри раздел Тарифы.' },
 ]
 
 const SCAN_COINS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK']
@@ -165,19 +183,19 @@ function MiniChart({ positive, width = 160, height = 60 }) {
   )
 }
 
-/* Живой showcase — центр сцены: радар-сканер + реальная equity-кривая */
-function LiveShowcase({ prices, curve, visibleCurve, xsecRoi, chartPeriod, setChartPeriod, navigate }) {
+/* Живой showcase — центр сцены: индикатор мониторинга каналов + реальная кривая PnL */
+function LiveShowcase({ prices, curve, visibleCurve, totalRoi, chartPeriod, setChartPeriod, navigate }) {
   const [scanIdx, setScanIdx] = useState(0)
   useEffect(() => {
     const id = setInterval(() => setScanIdx(i => (i + 1) % SCAN_COINS.length), 1100)
     return () => clearInterval(id)
   }, [])
-  const up = xsecRoi == null ? null : xsecRoi >= 0
+  const up = totalRoi == null ? null : totalRoi >= 0
   return (
     <div className="showcase reveal">
       <div className="sh-chrome">
         <span className="sh-dot r" /><span className="sh-dot a" /><span className="sh-dot g" />
-        <span className="sh-url">nowicki.trade/strategies</span>
+        <span className="sh-url">nowicki.trade/app</span>
         <span className="sh-live"><span className="scan-dot-sm" />LIVE</span>
         {prices && (
           <span className="sh-prices">
@@ -205,15 +223,15 @@ function LiveShowcase({ prices, curve, visibleCurve, xsecRoi, chartPeriod, setCh
             })}
           </div>
           <div className="sh-scan-text">
-            <div className="sh-scan-now"><span className="scan-dot-sm" />Сканирую <b>{SCAN_COINS[scanIdx]}/USDT</b></div>
-            <div className="sh-scan-sub">32 пары · EMA · RSI · ADX · ATR · каждые 2 мин</div>
+            <div className="sh-scan-now"><span className="scan-dot-sm" />Отслеживаю <b>{SCAN_COINS[scanIdx]}/USDT</b></div>
+            <div className="sh-scan-sub">Каналы · AI-разбор текста и картинок · публикуем сразу</div>
           </div>
         </div>
 
-        {/* Реальная equity-кривая */}
+        {/* Реальная кривая PnL по всем сигналам */}
         <div className="sh-equity">
           <div className="sh-eq-top">
-            <span className="sh-eq-label">Long-Short · реальные данные</span>
+            <span className="sh-eq-label">Все сигналы · реальные данные</span>
             <div className="bv-period-switch">
               {CHART_PERIODS.map(p => (
                 <button key={p.key} className={`bv-period-btn ${chartPeriod === p.key ? 'active' : ''}`} onClick={() => setChartPeriod(p.key)}>{p.label}</button>
@@ -221,9 +239,9 @@ function LiveShowcase({ prices, curve, visibleCurve, xsecRoi, chartPeriod, setCh
             </div>
           </div>
           <div className="sh-eq-roi" style={{ color: up == null ? 'var(--text-tertiary)' : up ? 'var(--long)' : 'var(--short)' }}>
-            {xsecRoi != null ? `${up ? '+' : ''}${xsecRoi.toFixed(1)}%` : '—'}
+            {totalRoi != null ? `${up ? '+' : ''}${totalRoi.toFixed(1)}%` : '—'}
           </div>
-          <div className="sh-eq-cap">изменение бумажного депозита</div>
+          <div className="sh-eq-cap">суммарный PnL, % (все закрытые сделки)</div>
           <div className="sh-eq-chart">
             {visibleCurve.length > 1 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -245,11 +263,17 @@ function LiveShowcase({ prices, curve, visibleCurve, xsecRoi, chartPeriod, setCh
 export default function Landing() {
   const navigate = useNavigate()
   const prices = useLivePrices()
-  const { strategies, curve } = useLiveStrategies()
+  const { stats, curve, recent } = useLiveStats()
+  const STATS = buildStats(stats)
   const [chartPeriod, setChartPeriod] = useState('all')
   const periodDays = CHART_PERIODS.find(p => p.key === chartPeriod)?.days
   const visibleCurve = filterCurveByPeriod(curve, periodDays)
-  const xsecRoi = visibleCurve.length > 1 ? ((visibleCurve[visibleCurve.length - 1].equity / visibleCurve[0].equity - 1) * 100) : null
+  // curve — кумулятивный PnL (%) по ВСЕЙ истории; чтобы получить изменение
+  // только за выбранный период, вычитаем значение на точке ПЕРЕД началом
+  // видимого окна (а не делим, это не мультипликативный equity).
+  const cutIdx = curve.length - visibleCurve.length
+  const baseline = cutIdx > 0 ? curve[cutIdx - 1].equity : 0
+  const totalRoi = visibleCurve.length ? (visibleCurve[visibleCurve.length - 1].equity - baseline) : null
   const [menuOpen, setMenuOpen] = useState(false)
   const [openFaq, setOpenFaq] = useState(null)
   const [dark, setDark] = useState(() => {
@@ -258,7 +282,7 @@ export default function Landing() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches
   })
 
-  useReveal([strategies])
+  useReveal([stats])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
@@ -266,7 +290,7 @@ export default function Landing() {
   }, [dark])
 
   const NAV = [
-    { label: 'Стратегии', href: '#strategies' },
+    { label: 'Сигналы', href: '#signals' },
     { label: 'Возможности', href: '#features' },
     { label: 'Честность', href: '#honest' },
     { label: 'Тарифы', href: '#faq' },
@@ -282,7 +306,7 @@ export default function Landing() {
       {/* ── ANNOUNCEMENT BAR — информационная полоса, без CTA (кнопки есть в навбаре и hero) ── */}
       <div className="announce-bar">
         <span className="announce-dot" />
-        <span>✦ NOWICKI — AI сканирует рынок и объясняет каждый сигнал в реальном времени</span>
+        <span>✦ NOWICKI — AI разбирает сигналы из каналов и объясняет каждый в реальном времени</span>
       </div>
 
       {/* ── NAVBAR ── */}
@@ -325,11 +349,11 @@ export default function Landing() {
           </div>
 
           <h1 className="hero-title animate-in">
-            Видишь рынок<br/>
-            <span className="gradient-text">так, как видит алгоритм</span>
+            Сигналы из каналов,<br/>
+            <span className="gradient-text">которым можно верить</span>
           </h1>
           <p className="hero-sub animate-in">
-            Сканер анализирует 32 пары на Bybit каждые 2 минуты, 3 стратегии торгуют вживую на бумаге, AI объясняет каждый сигнал. Всё публично — без обещаний «иксов».
+            Собираем сигналы из проверенных Telegram-каналов, AI достаёт entry/stop/TP и сверяет результат с реальными ценами Bybit. Винрейт и PnL — как есть, без обещаний «иксов».
           </p>
 
           <div className="hero-actions animate-in">
@@ -337,8 +361,8 @@ export default function Landing() {
               <span>Начать бесплатно</span>
               <span className="btn-arrow">→</span>
             </button>
-            <button className="btn-hero-secondary" onClick={() => document.querySelector('#strategies')?.scrollIntoView({ behavior: 'smooth' })}>
-              Смотреть стратегии
+            <button className="btn-hero-secondary" onClick={() => document.querySelector('#signals')?.scrollIntoView({ behavior: 'smooth' })}>
+              Смотреть сигналы
             </button>
           </div>
 
@@ -350,7 +374,7 @@ export default function Landing() {
           </div>
 
           <LiveShowcase
-            prices={prices} curve={curve} visibleCurve={visibleCurve} xsecRoi={xsecRoi}
+            prices={prices} curve={curve} visibleCurve={visibleCurve} totalRoi={totalRoi}
             chartPeriod={chartPeriod} setChartPeriod={setChartPeriod} navigate={navigate}
           />
         </div>
@@ -379,36 +403,35 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ── STRATEGIES (real data) ── */}
-      <section id="strategies" className="strategies-section">
+      {/* ── SIGNALS (real data) ── */}
+      <section id="signals" className="strategies-section">
         <div className="section-inner">
           <div className="sec-head reveal">
-            <div className="section-label">Живые стратегии</div>
-            <h2 className="section-heading center">3 стратегии торгуют прямо сейчас</h2>
-            <p className="section-sub center">Реальные данные с Bybit, бумажное исполнение. Цифры обновляются в реальном времени — ничего не нарисовано.</p>
+            <div className="section-label">Живая лента</div>
+            <h2 className="section-heading center">Последние сигналы — реальные результаты</h2>
+            <p className="section-sub center">Каждый сигнал — реальная сделка с реальным входом и выходом на Bybit. Ничего не нарисовано и не подправлено задним числом.</p>
           </div>
           <div className="strategy-scroll reveal">
-            {(strategies || []).map((s, i) => {
-              const pos = (s.realized_pnl_pct ?? 0) >= 0
+            {(recent || []).map((t, i) => {
+              const pos = (t.pnl ?? 0) >= 0
               return (
-                <div key={i} className="strategy-card spot" onMouseMove={onSpot}>
+                <div key={t.id ?? i} className="strategy-card spot" onMouseMove={onSpot}>
                   <div className="sc-header">
-                    <div className="sc-name">{s.name}</div>
-                    <div className="sc-tags"><span className="sc-exchange">{s.kind}</span></div>
+                    <div className="sc-name">{t.symbol.replace('/USDT', '')}</div>
+                    <div className="sc-tags"><span className="sc-exchange">{t.signal}</span></div>
                   </div>
-                  <div className="sc-roi">PnL <span className={`sc-roi-val ${pos ? 'pos' : 'neg'}`}>{pos ? '+' : ''}{s.realized_pnl_pct}%</span></div>
+                  <div className="sc-roi">PnL <span className={`sc-roi-val ${pos ? 'pos' : 'neg'}`}>{pos ? '+' : ''}{t.pnl}%</span></div>
                   <div className="sc-chart"><MiniChart positive={pos} /></div>
                   <div className="sc-stats">
-                    <div className="sc-stat"><span>Сделок</span><span>{s.closed_trades}</span></div>
-                    <div className="sc-stat"><span>Винрейт</span><span>{s.winrate != null ? `${s.winrate}%` : '—'}</span></div>
-                    <div className="sc-stat"><span>Открыто</span><span>{s.open_positions}</span></div>
-                    <div className="sc-stat"><span>Режим</span><span style={{fontSize:10}}>Paper</span></div>
+                    <div className="sc-stat"><span>Результат</span><span>{RESULT_LABEL[t.result] || t.result}</span></div>
+                    <div className="sc-stat"><span>Вход</span><span>{t.entry}</span></div>
+                    <div className="sc-stat"><span>Дата</span><span style={{fontSize:10}}>{t.date}</span></div>
                   </div>
                   <button className="sc-btn" onClick={() => navigate('/app')}>▶ Открыть</button>
                 </div>
               )
             })}
-            {!strategies && <div className="strategy-card" style={{display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text-tertiary)',fontSize:13}}>Загрузка...</div>}
+            {!recent.length && <div className="strategy-card" style={{display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text-tertiary)',fontSize:13}}>Загрузка...</div>}
           </div>
         </div>
       </section>
@@ -453,29 +476,29 @@ export default function Landing() {
           <div className="honest-visual reveal">
             <div className="bv-card spot" onMouseMove={onSpot}>
               <div className="bv-top">
-                <span className="bv-eyebrow">LONG-SHORT · РЕАЛЬНЫЕ ДАННЫЕ</span>
+                <span className="bv-eyebrow">ВСЕ СИГНАЛЫ · РЕАЛЬНЫЕ ДАННЫЕ</span>
                 <div className="bv-period-switch">
                   {CHART_PERIODS.map(p => (
                     <button key={p.key} className={`bv-period-btn ${chartPeriod === p.key ? 'active' : ''}`} onClick={() => setChartPeriod(p.key)}>{p.label}</button>
                   ))}
                 </div>
               </div>
-              <div className="bv-roi" style={{ color: xsecRoi == null ? 'var(--text-tertiary)' : xsecRoi >= 0 ? 'var(--long)' : 'var(--short)' }}>
-                {xsecRoi != null ? `${xsecRoi >= 0 ? '+' : ''}${xsecRoi.toFixed(1)}%` : '—'}
+              <div className="bv-roi" style={{ color: totalRoi == null ? 'var(--text-tertiary)' : totalRoi >= 0 ? 'var(--long)' : 'var(--short)' }}>
+                {totalRoi != null ? `${totalRoi >= 0 ? '+' : ''}${totalRoi.toFixed(1)}%` : '—'}
               </div>
-              <div className="bv-cap">Изменение бумажного депозита</div>
+              <div className="bv-cap">Суммарный PnL, % (все закрытые сделки)</div>
               {visibleCurve.length > 1 ? (
                 <div style={{ width: '100%', height: 90 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={visibleCurve}>
                       <YAxis hide domain={['auto', 'auto']} />
-                      <Line type="monotone" dataKey="equity" stroke={xsecRoi >= 0 ? 'var(--long)' : 'var(--short)'} strokeWidth={2.5} dot={false} animationDuration={1400} />
+                      <Line type="monotone" dataKey="equity" stroke={totalRoi >= 0 ? 'var(--long)' : 'var(--short)'} strokeWidth={2.5} dot={false} animationDuration={1400} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
               ) : <div style={{ fontSize: 12, color: 'var(--text-tertiary)', height: 90, display: 'flex', alignItems: 'center' }}>Накопление данных...</div>}
               <div className="bv-mini-grid">
-                {[['Стратегия','Long-Short'],['Тип','Market-neutral'],['Ребалансов', String(visibleCurve.length)],['Режим','Paper']].map(([l,v],i)=>(
+                {[['Источник','Telegram-каналы'],['Мониторинг','24/7'],['Сделок', String(stats?.all_time?.total ?? '—')],['Винрейт', stats?.all_time?.winrate != null ? `${stats.all_time.winrate}%` : '—']].map(([l,v],i)=>(
                   <div key={i} className="bv-mini">
                     <div className="bv-mini-l">{l}</div>
                     <div className="bv-mini-v">{v}</div>
@@ -494,7 +517,7 @@ export default function Landing() {
           <div className="steps-grid">
             {[
               { n: 1, t: 'Открой платформу', d: 'Зайди на NOWICKI — работает прямо в браузере, регистрация для просмотра не нужна.' },
-              { n: 2, t: 'Следи за сигналами', d: 'Сканер анализирует 32 пары и показывает точки входа с уровнями TP и SL.' },
+              { n: 2, t: 'Следи за сигналами', d: 'Канал публикует вход — AI достаёт entry/stop/TP и показывает на сайте и в Telegram.' },
               { n: 3, t: 'Спроси AI', d: 'AI объяснит каждый сигнал — почему вошли, какие риски, что делать дальше.' },
             ].map((s, i) => (
               <div key={i} className="step reveal spot" onMouseMove={onSpot} style={{ transitionDelay: `${i * 90}ms` }}>
@@ -554,7 +577,7 @@ export default function Landing() {
             <div className="cta-glow-2" />
             <div className="cta-eyebrow">🚀 Бесплатно · Без регистрации</div>
             <h2 className="cta-title">Начни торговать<br/><span className="gradient-text">умнее прямо сейчас</span></h2>
-            <p className="cta-sub">Сканер уже работает. Открой платформу и увидь первый сигнал.</p>
+            <p className="cta-sub">Каналы уже публикуют сигналы. Открой платформу и посмотри последний.</p>
             <button className="btn-hero-primary" style={{fontSize:16,padding:'16px 36px'}} onClick={() => navigate('/app')}>
               Открыть платформу →
             </button>
@@ -584,7 +607,7 @@ export default function Landing() {
             </div>
             <div className="footer-cols">
               {[
-                { title: 'Платформа', links: [['Стратегии','#strategies'],['Возможности','#features'],['Честность','#honest'],['FAQ','#faq']] },
+                { title: 'Платформа', links: [['Сигналы','#signals'],['Возможности','#features'],['Честность','#honest'],['FAQ','#faq']] },
                 { title: 'Продукт', links: [['Открыть приложение','app'],['Тарифы','app'],['История','app'],['AI Ассистент','app']] },
                 { title: 'Компания', links: [['О нас','app'],['Безопасность','#honest'],['Поддержка','app']] },
               ].map((col, i) => (
