@@ -18,6 +18,7 @@ White-Label: пользователь видит только внутренни
 """
 
 import os
+import re
 import json
 import base64
 import asyncio
@@ -26,6 +27,7 @@ import httpx
 
 import database as db
 import data_layer
+import tracker
 from signal_ingest import normalize_symbol, open_signal
 
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "")
@@ -180,6 +182,95 @@ def _count_open_aggregated() -> int:
     )
 
 
+CLOSE_KEYWORDS_RE = re.compile(
+    r'\b(закры\w*|вышл\w*|зафиксировал\w*|фикс\w*|profit\s?taken|stopped\s?out|'
+    r'close[ds]?|closing|exit(ed)?)\b',
+    re.IGNORECASE,
+)
+
+CLOSE_SYSTEM_PROMPT = (
+    "Тебе дают тикер уже открытой позиции и текст сообщения из крипто-канала. "
+    "Определи: объявляет ли это сообщение о закрытии/выходе именно из ЭТОЙ позиции "
+    "(канал сам вручную закрыл/вышел) — а не апдейт по стопу/цели без закрытия, "
+    "не разговор про другую монету, не общий комментарий. "
+    'Верни ТОЛЬКО JSON: {"is_close": bool, "reason": "profit"|"loss"|"manual"|"unknown"}.'
+)
+
+
+async def _extract_close_signal(text: str, symbol_base: str) -> dict | None:
+    if not OPENAI_API_KEY or not text.strip():
+        return None
+    payload = {
+        "model": AI_MODEL,
+        "max_tokens": 100,
+        "messages": [
+            {"role": "system", "content": CLOSE_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Тикер открытой позиции: {symbol_base}\n\nСообщение канала:\n{text[:1500]}"},
+        ],
+        "response_format": {"type": "json_object"},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        parsed = json.loads(data["choices"][0]["message"]["content"])
+    except Exception as e:
+        print(f"[telegram_ingest] Ошибка проверки закрытия: {e}")
+        return None
+    if not parsed.get("is_close"):
+        return None
+    return parsed
+
+
+async def _try_close_from_channel(display_name: str, text: str):
+    """Канал сам объявляет о закрытии позиции (ручной выход) — без этого наш
+    трекер продолжал бы вести сделку по своей логике (TP/SL/таймаут), хотя
+    источник сигнала её уже закрыл на своей стороне. Дёшево: сначала смотрим,
+    есть ли для ЭТОГО канала вообще открытая позиция и упоминается ли её тикер
+    в тексте, и только тогда идём в OpenAI за подтверждением — не на каждое
+    сообщение подряд."""
+    if not text.strip() or not CLOSE_KEYWORDS_RE.search(text):
+        return
+
+    trader_id = db.get_or_create_source_trader(
+        display_name, source_url=None, source_type=SOURCE_TYPE,
+        bio="Автоматический импорт из внешнего потока данных (Premium Aggregator Feed)",
+    )
+    open_trades = db.load_trades()
+    candidates = [(symbol, trade) for symbol, trade in open_trades.items()
+                  if trade.get('trader_id') == trader_id]
+    if not candidates:
+        return
+
+    for symbol, trade in candidates:
+        base = symbol.split('/')[0]
+        if not re.search(rf'\b{re.escape(base)}\b', text, re.IGNORECASE):
+            continue
+
+        parsed = await _extract_close_signal(text, base)
+        if not parsed:
+            continue
+
+        ticker = await asyncio.to_thread(data_layer.fetch_ticker, symbol)
+        if not ticker or ticker.get('last') is None:
+            print(f"[telegram_ingest] {display_name}: не удалось получить цену для закрытия {symbol}")
+            continue
+
+        price = ticker['last']
+        pnl = tracker.pnl_pct(trade['signal'], trade['entry'], price)
+        reason = parsed.get('reason', 'unknown')
+        db.add_event(symbol, 'channel_closed',
+                     f"{display_name} сообщил о закрытии позиции ({reason}), PnL {pnl:+.1f}%")
+        db.add_to_history(symbol, trade['signal'], trade['entry'], 'channel_closed', pnl, trade.get('trader_id'))
+        db.remove_trade(symbol)
+        print(f"[telegram_ingest] {symbol} закрыт по сигналу канала {display_name} ({reason}, {pnl:+.1f}%)")
+
+
 async def _handle_message(display_name: str, msg):
     """`msg` — Telethon Message или NewMessage.Event (оба дают .raw_text,
     .photo, .download_media). Сначала пробуем текст/подпись; если текста нет
@@ -199,6 +290,7 @@ async def _handle_message(display_name: str, msg):
             parsed = await _extract_signal_from_image(image_bytes, text)
 
     if not parsed:
+        await _try_close_from_channel(display_name, text)
         return
 
     side = str(parsed["side"]).upper().strip()

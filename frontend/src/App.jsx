@@ -136,7 +136,7 @@ function KPI({ label, value, suffix, sub, accent }) {
   )
 }
 
-const RESULT_LABEL = { tp1: 'TP1', tp2: 'TP2', tp3: 'TP3', sl: 'Стоп', be: 'Б/У', potential: 'Закрыт', timeout: 'Закрыт', timeout_closed: 'Закрыт' }
+const RESULT_LABEL = { tp1: 'TP1', tp2: 'TP2', tp3: 'TP3', sl: 'Стоп', be: 'Б/У', potential: 'Закрыт', timeout: 'Закрыт', timeout_closed: 'Закрыт', channel_closed: 'Закрыт каналом' }
 
 // Лента последних закрытых сигналов на дашборде — то, что всегда наполнено
 // (в отличие от активных сигналов, которых в моменте может не быть). Premium
