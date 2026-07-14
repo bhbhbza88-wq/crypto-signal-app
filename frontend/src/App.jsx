@@ -371,8 +371,8 @@ export default function App() {
             )}
           </div>
           <div className="topbar-right">
-            <a className="btn-tg-bot" href="https://t.me/chlebchik" target="_blank" rel="noopener noreferrer">
-              🤖 <span className="btn-tg-label">Канал</span>
+            <a className="btn-tg-bot" href="https://web.telegram.org/k/#@trading4325_bot" target="_blank" rel="noopener noreferrer">
+              🤖 <span className="btn-tg-label">Бот</span>
             </a>
             <button className="btn-trial" onClick={() => setTab('ai_assistant')}>✦ AI Ассистент</button>
             {user ? (
