@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { api, getToken, setToken } from './api'
 import AuthModal from './AuthModal'
 import Pricing from './Pricing'
-import StatsHero from './StatsHero'
 import SignalCard from './SignalCard'
 import HistoryTable from './HistoryTable'
 import MarketView from './MarketView'
@@ -451,11 +450,6 @@ export default function App() {
                 </section>
               )}
 
-              {/* Рынок — виджеты ниже */}
-              <section className="section" style={{ marginTop: 28 }}>
-                <h2 className="section-title">Рынок</h2>
-                <StatsHero stats={stats} loading={loading} />
-              </section>
             </div>
           )}
           </ErrorBoundary>
@@ -548,7 +542,7 @@ export default function App() {
         /* CONTENT */
         .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 99; }
         .main-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-        .content { flex: 1; max-width: 1040px; width: 100%; margin: 0 auto; padding: 24px 24px 80px; display: flex; flex-direction: column; gap: 0; }
+        .content { flex: 1; max-width: 1360px; width: 100%; margin: 0 auto; padding: 24px 32px 80px; display: flex; flex-direction: column; gap: 0; }
         .section { display: flex; flex-direction: column; gap: 14px; }
         .section-title { font-size: 10px; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.1em; display: flex; align-items: center; gap: 8px; }
         .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
