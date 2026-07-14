@@ -14,6 +14,15 @@ exchange = ccxt.bybit({
     'timeout': 15000,
 })
 
+# Резервный клиент для монет без перпетуал-контракта (только спот на Bybit) —
+# каналы иногда постят такие тикеры (напр. THE/USDT), и раньше они считались
+# "не торгуются на Bybit" и терялись, хотя реально доступны в споте.
+_exchange_spot = ccxt.bybit({
+    'options': {'defaultType': 'spot'},
+    'enableRateLimit': True,
+    'timeout': 15000,
+})
+
 CACHE_TTL = 180
 _data_cache = {}
 
@@ -46,6 +55,12 @@ def fetch_data(symbol):
     d1h = api_call(exchange.fetch_ohlcv, symbol, '1h', limit=100)
     d30m = api_call(exchange.fetch_ohlcv, symbol, '30m', limit=150)
     if not d4h or not d1h or not d30m:
+        # Как и в fetch_ticker — монета может быть только в споте, без
+        # перпетуал-контракта на linear-рынке.
+        d4h = d4h or api_call(_exchange_spot.fetch_ohlcv, symbol, '4h', limit=120)
+        d1h = d1h or api_call(_exchange_spot.fetch_ohlcv, symbol, '1h', limit=100)
+        d30m = d30m or api_call(_exchange_spot.fetch_ohlcv, symbol, '30m', limit=150)
+    if not d4h or not d1h or not d30m:
         return None
     df4h = pd.DataFrame(d4h, columns=cols)
     df1h = pd.DataFrame(d1h, columns=cols)
@@ -68,7 +83,10 @@ def fetch_data_cached(symbol):
 
 
 def fetch_ticker(symbol):
-    return api_call(exchange.fetch_ticker, symbol)
+    ticker = api_call(exchange.fetch_ticker, symbol)
+    if ticker is not None:
+        return ticker
+    return api_call(_exchange_spot.fetch_ticker, symbol)
 
 
 def build_features(df):
