@@ -210,20 +210,38 @@ export default function Landing() {
       <section id="signals" className="section">
         <div className="inner">
           <h2 className="sec-title reveal">Последние сигналы сканера</h2>
-          <p className="sec-sub reveal">Живые сетапы с уровнями и результатом на Bybit.</p>
-          <div className="signal-rows reveal">
-            {recent.map((t) => {
-              const pos = (t.pnl ?? 0) >= 0
-              return (
-                <button type="button" key={t.id} className="sig-row" onClick={() => navigate('/app/history')}>
-                  <span className="mono">{t.symbol.replace('/USDT', '')}</span>
-                  <span className={`dir ${t.signal === 'LONG' ? 'long' : 'short'}`}>{t.signal}</span>
-                  <span className="muted">{RESULT_LABEL[t.result] || t.result}</span>
-                  <span className={`mono ${pos ? 'pos' : 'neg'}`}>{pos ? '+' : ''}{t.pnl}%</span>
+          <p className="sec-sub reveal">Живые сетапы с уровнями и результатом на Bybit. Полная лента — на Premium.</p>
+          <div className="signal-lock-wrap reveal">
+            <div className="signal-rows signal-blur">
+              {recent.map((t) => {
+                const pos = (t.pnl ?? 0) >= 0
+                return (
+                  <div key={t.id} className="sig-row" aria-hidden="true">
+                    <span className="mono">{t.symbol.replace('/USDT', '')}</span>
+                    <span className={`dir ${t.signal === 'LONG' ? 'long' : 'short'}`}>{t.signal}</span>
+                    <span className="muted">{RESULT_LABEL[t.result] || t.result}</span>
+                    <span className={`mono ${pos ? 'pos' : 'neg'}`}>{pos ? '+' : ''}{t.pnl}%</span>
+                  </div>
+                )
+              })}
+              {!recent.length && <div className="muted pad">Сканер готовит ленту…</div>}
+            </div>
+            {!!recent.length && (
+              <div className="signal-lock">
+                <span className="signal-lock-icon">🔒</span>
+                <span className="signal-lock-text">Полная история сделок и PnL — на Premium</span>
+                <button
+                  type="button"
+                  className="btn-solid"
+                  onClick={() => window.open(`${TG_BOT}?start=premium`, '_blank', 'noopener,noreferrer')}
+                >
+                  Открыть за Premium →
                 </button>
-              )
-            })}
-            {!recent.length && <div className="muted pad">Сканер готовит ленту…</div>}
+                <button type="button" className="btn-ghost" onClick={() => navigate('/app/pricing?auth=register')}>
+                  3 дня триала на сайте
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -383,10 +401,18 @@ export default function Landing() {
         .sec-title { font-family: var(--font-display); font-size: clamp(26px, 3.5vw, 36px); font-weight: 800; letter-spacing: -.02em; margin: 0 0 10px; }
         .sec-sub { color: var(--text-secondary); max-width: 48ch; margin: 0 0 24px; line-height: 1.5; }
 
-        .signal-rows { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--surface); }
+        .signal-lock-wrap { position: relative; }
+        .signal-rows { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--surface); min-height: 180px; }
+        .signal-rows.signal-blur { filter: blur(5px); pointer-events: none; user-select: none; }
         .sig-row { display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 12px; align-items: center; padding: 14px 16px; border: none; border-bottom: 1px solid var(--border); background: transparent; color: inherit; text-align: left; font-size: 14px; }
         .sig-row:last-child { border-bottom: none; }
-        .sig-row:hover { background: var(--surface-hover); }
+        .signal-lock {
+          position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+          text-align: center; padding: 24px; border-radius: 14px;
+          background: color-mix(in srgb, var(--bg) 72%, transparent); backdrop-filter: blur(2px);
+        }
+        .signal-lock-icon { font-size: 22px; opacity: .75; }
+        .signal-lock-text { font-size: 14px; font-weight: 650; color: var(--text); max-width: 320px; }
         .dir { font-size: 11px; font-weight: 700; font-family: var(--font-mono); padding: 3px 8px; border-radius: 6px; }
         .dir.long { background: var(--long-soft); color: var(--long); }
         .dir.short { background: var(--short-soft); color: var(--short); }
