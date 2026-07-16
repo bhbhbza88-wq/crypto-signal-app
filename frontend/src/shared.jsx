@@ -10,8 +10,8 @@ export const RESULT_LABEL = {
 }
 
 export const APP_SECTIONS = [
-  'overview', 'ai_assistant', 'market', 'smarttrade_calc',
-  'history', 'pricing', 'invite', 'admin', 'channel_analyzer',
+  'overview', 'ai_assistant', 'history',
+  'pricing', 'invite', 'admin', 'channel_analyzer',
 ]
 
 /** Единый display-PnL для лендинга, дашборда и вкладки История. */

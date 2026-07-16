@@ -8,14 +8,11 @@ import './App.css'
 
 const Pricing = lazy(() => import('./Pricing'))
 const HistoryTable = lazy(() => import('./HistoryTable'))
-const MarketView = lazy(() => import('./MarketView'))
 const AIChat = lazy(() => import('./AIChat'))
-const SmartTrade = lazy(() => import('./SmartTrade'))
 const Admin = lazy(() => import('./Admin'))
 const ChannelAnalyzer = lazy(() => import('./ChannelAnalyzer'))
 
 const POLL_INTERVAL = 15000
-const MARKET_POLL_INTERVAL = 60000
 const VALID_TABS = new Set(APP_SECTIONS)
 
 // Ошибка в одной вкладке не должна ронять всё приложение в белый экран
@@ -45,12 +42,8 @@ class ErrorBoundary extends Component {
 const NAV_SECTIONS = [
   { title: 'Главное', items: [
     { key: 'overview',     label: 'Дашборд',       icon: '◈' },
-    { key: 'ai_assistant', label: 'AI Ассистент',  icon: '✦', badge: 'BETA' },
-    { key: 'market',       label: 'Скринер',        icon: '◫' },
-  ]},
-  { title: 'Инструменты', items: [
-    { key: 'smarttrade_calc', label: 'Smart Trade', icon: '⚡', badge: 'NEW' },
     { key: 'history',      label: 'История',        icon: '📋' },
+    { key: 'ai_assistant', label: 'AI Ассистент',  icon: '✦', badge: 'BETA' },
   ]},
   { title: 'Аккаунт', items: [
     { key: 'pricing',      label: 'Тарифы',         icon: '💎' },
@@ -134,7 +127,6 @@ export default function App() {
   const [signals, setSignals] = useState([])
   const [history, setHistory] = useState([])
   const [stats, setStats] = useState(null)
-  const [market, setMarket] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -209,13 +201,7 @@ export default function App() {
     finally { setLoading(false) }
   }, [])
 
-  const fetchMarket = useCallback(async () => { try { setMarket(await api.getMarket()) } catch {} }, [])
-
   useEffect(() => { fetchCore(); const id = setInterval(fetchCore, POLL_INTERVAL); return () => clearInterval(id) }, [fetchCore])
-  useEffect(() => {
-    if (tab !== 'market') return
-    fetchMarket(); const id = setInterval(fetchMarket, MARKET_POLL_INTERVAL); return () => clearInterval(id)
-  }, [tab, fetchMarket])
 
   const isPremium = !!user && (user.tier === 'premium' || user.tier === 'vip')
 
@@ -365,10 +351,8 @@ export default function App() {
           <ErrorBoundary resetKey={tab}>
           <Suspense fallback={<div className="section animate-in" style={{ padding: 40, color: 'var(--text-tertiary)' }}>Загрузка раздела…</div>}>
           {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat /></section>}
-          {tab === 'market' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Скринер рынка</h1></div><MarketView market={market} /></section>}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
-          {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} onUpgraded={(t) => { setUser(u => u ? { ...u, tier: t } : u); setTab('history') }} onNeedAuth={() => { setAuthMode('register'); setShowAuth(true) }} /></section>}
-          {tab === 'smarttrade_calc' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Smart Trade <span className="hot-tag">NEW</span></h1></div><SmartTrade /></section>}
+          {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} /></section>}
           {tab === 'invite' && <ComingSoonPage tab="invite" />}
           {tab === 'admin' && user?.is_admin && <Admin />}
           {tab === 'channel_analyzer' && user?.is_admin && <section className="section animate-in"><ChannelAnalyzer /></section>}

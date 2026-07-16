@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api } from './api'
+import { TG_BOT } from './shared'
 
 const PERIODS = [
   { key: 'month', label: 'Месяц', mult: 1, discount: 0 },
@@ -10,19 +10,14 @@ const PERIODS = [
 // features: строка — уже работает; { label, soon: true } — честно помечаем «СКОРО»
 const TIERS = [
   {
-    key: 'free', name: 'Free', price: 0, lifetime: 0, period: 'навсегда',
-    features: ['Активные сигналы и живая лента', 'Винрейт за всё время — открыт всем', 'Скринер рынка (32 пары)', 'AI-ассистент (5 вопросов/день)'],
-    cta: 'Текущий', accent: 'var(--text-tertiary)',
+    key: 'free', name: 'Free', price: 0, lifetime: 0,
+    features: ['Активные сигналы и живая лента', 'Винрейт за всё время — открыт всем', 'AI-ассистент (5 вопросов/день)'],
+    cta: 'Бесплатно', accent: 'var(--text-tertiary)',
   },
   {
     key: 'premium', name: 'Premium', price: 29, lifetime: 299,
     features: ['Полная история сделок', 'PnL по дням и разбивка по TP/SL', 'AI-ассистент (50 вопросов/день)', { label: 'Push-алерты', soon: true }],
-    cta: 'Выбрать Premium', accent: 'var(--accent)', popular: true,
-  },
-  {
-    key: 'vip', name: 'VIP', price: 79, lifetime: 799,
-    features: ['Всё из Premium', 'AI-ассистент (200 вопросов/день)', { label: 'Приоритетные сигналы', soon: true }, { label: 'Личная поддержка', soon: true }],
-    cta: 'Выбрать VIP', accent: 'var(--accent)',
+    cta: 'Оформить в Telegram', accent: 'var(--accent)', popular: true,
   },
 ]
 
@@ -30,13 +25,11 @@ const FAQ = [
   { q: 'Это реальная торговля или бэктест?', a: 'Каждая сделка в истории — вход и выход по актуальным ценам Bybit. Сигналы формирует наш AI-сканер.' },
   { q: 'Как считается винрейт?', a: 'Доля закрытых сделок с положительным PnL от общего числа закрытых — учитываются TP, стоп и таймаут.' },
   { q: 'Как сканер выбирает монеты?', a: 'Анализируем тренд, силу движения, волатильность и объём. Сигнал появляется только когда условия сходятся и уровни entry/stop/TP согласованы.' },
-  { q: 'Можно ли отменить подписку?', a: 'Да, в любой момент из настройки аккаунта. Списания пока в тестовом режиме — реальный платёж подключим отдельным шагом.' },
+  { q: 'Как оплатить Premium?', a: 'Нажми «Оформить в Telegram» — бот примет оплату криптой на адрес. После подтверждения откроем Premium на аккаунте.' },
   { q: 'На какой бирже работает платформа?', a: 'Сейчас — Bybit. Поддержка других бирж в планах.' },
 ]
 
-export default function Pricing({ user, onUpgraded, onNeedAuth }) {
-  const [busy, setBusy] = useState(null)
-  const [msg, setMsg] = useState(null)
+export default function Pricing({ user }) {
   const [period, setPeriod] = useState('month')
   const [openFaq, setOpenFaq] = useState(null)
 
@@ -48,19 +41,9 @@ export default function Pricing({ user, onUpgraded, onNeedAuth }) {
     return { amount: total, suffix: period === 'month' ? '/мес' : ` /${p.mult}мес` }
   }
 
-  async function choose(tier) {
-    if (!user) { onNeedAuth?.(); return }
+  function choose(tier) {
     if (tier === 'free') return
-    setBusy(tier); setMsg(null)
-    try {
-      const res = await api.upgrade(tier)
-      onUpgraded?.(res.tier)
-      setMsg(`Тариф ${res.tier.toUpperCase()} активен. Открываем историю сделок…`)
-    } catch (e) {
-      setMsg(e.message)
-    } finally {
-      setBusy(null)
-    }
+    window.open(TG_BOT, '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -72,9 +55,7 @@ export default function Pricing({ user, onUpgraded, onNeedAuth }) {
         </p>
       </div>
 
-      <div className="pr-banner">⚠️ Оплата в тестовом режиме — кнопки меняют тариф мгновенно, реальный платёж подключим позже.</div>
-
-      {msg && <div className="pr-msg">{msg}</div>}
+      <div className="pr-banner">Оплата Premium — в Telegram-боте криптой. После оплаты откроем доступ вручную.</div>
 
       <div className="pr-period-switch">
         {PERIODS.map(p => (
@@ -86,7 +67,7 @@ export default function Pricing({ user, onUpgraded, onNeedAuth }) {
 
       <div className="pr-grid">
         {TIERS.map(t => {
-          const current = (user?.base_tier ?? user?.tier) === t.key
+          const current = (user?.base_tier ?? user?.tier) === t.key || (t.key === 'premium' && (user?.tier === 'premium' || user?.tier === 'vip'))
           const { amount, suffix } = priceFor(t)
           return (
             <div key={t.key} className={`pr-card ${t.popular ? 'popular' : ''}`} style={{ borderColor: current ? t.accent : undefined }}>
@@ -108,17 +89,15 @@ export default function Pricing({ user, onUpgraded, onNeedAuth }) {
               <button
                 className="pr-cta"
                 style={{ background: current ? 'var(--surface-2)' : t.accent, color: current ? 'var(--text-secondary)' : '#fff' }}
-                disabled={current || busy === t.key}
+                disabled={current || t.key === 'free'}
                 onClick={() => choose(t.key)}
               >
-                {current ? 'Ваш тариф' : busy === t.key ? '...' : t.cta}
+                {current ? 'Ваш тариф' : t.cta}
               </button>
             </div>
           )
         })}
       </div>
-
-      {!user && <p className="pr-hint">Войдите, чтобы выбрать тариф.</p>}
 
       <div className="pr-exchange-note">Работает на <strong>Bybit</strong> · реальные рыночные данные, бумажное исполнение</div>
 
@@ -136,9 +115,8 @@ export default function Pricing({ user, onUpgraded, onNeedAuth }) {
       </div>
 
       <style>{`
-        .pr-banner { background: var(--amber-soft); border: 1px solid var(--amber); border-radius: var(--radius-md); padding: 10px 14px; font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; }
-        .pr-msg { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: 10px 14px; font-size: 13px; color: var(--text); margin-bottom: 14px; }
-        .pr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+        .pr-banner { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: 10px 14px; font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; }
+        .pr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; max-width: 640px; }
         .pr-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; box-shadow: var(--shadow-card); display: flex; flex-direction: column; transition: border-color 0.2s, transform 0.2s; }
         .pr-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
         .pr-card.popular { box-shadow: var(--shadow-lg); border-color: var(--accent); }
@@ -151,7 +129,6 @@ export default function Pricing({ user, onUpgraded, onNeedAuth }) {
         .pr-soon { font-size: 9px; font-weight: 800; letter-spacing: 0.08em; color: var(--text-tertiary); border: 1px solid var(--border); border-radius: 8px; padding: 1px 6px; margin-left: 6px; vertical-align: 1px; }
         .pr-cta { border: none; border-radius: var(--radius-sm); padding: 12px; font-size: 14px; font-weight: 700; cursor: pointer; }
         .pr-cta:disabled { cursor: default; }
-        .pr-hint { text-align: center; color: var(--text-tertiary); font-size: 13px; margin-top: 16px; }
 
         .pr-period-switch { display: inline-flex; gap: 2px; background: var(--surface-2); border-radius: 10px; padding: 3px; margin-bottom: 18px; }
         .pr-period-btn { border: none; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: 8px; display: flex; align-items: center; gap: 6px; }

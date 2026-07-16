@@ -39,13 +39,12 @@ const FAQ = [
   { q: 'Как NOWICKI находит сигналы?', a: 'AI-сканер круглосуточно анализирует рынок на Bybit: тренд, волатильность, объём и уровни. Когда условия сходятся — появляется сигнал с entry, stop и целями.' },
   { q: 'Откуда берётся статистика?', a: 'Каждая сделка сверяется с реальными ценами Bybit. На платформе видно открытие, цели и итог — решение входить всегда за тобой.' },
   { q: 'Может ли NOWICKI торговать за меня?', a: 'Нет. Мы даём сигналы и аналитику — вход и риск-менеджмент остаются у тебя.' },
-  { q: 'Сколько стоит?', a: 'Базовый доступ бесплатный. Premium открывает полную историю и PnL по дням.' },
+  { q: 'Сколько стоит?', a: 'Базовый доступ бесплатный. Premium — $29/мес, оплата криптой через Telegram-бота.' },
 ]
 
 const TIERS = [
-  { key: 'free', name: 'Free', price: '0', unit: 'навсегда', features: ['Живая лента сигналов', 'Скринер рынка', 'Базовый AI'] },
+  { key: 'free', name: 'Free', price: '0', unit: 'навсегда', features: ['Живая лента сигналов', 'Винрейт открыт всем', 'Базовый AI'] },
   { key: 'premium', name: 'Premium', price: '29', unit: '/мес', features: ['Полная история сделок', 'PnL и аналитика', 'Расширенный AI'], popular: true },
-  { key: 'vip', name: 'VIP', price: '79', unit: '/мес', features: ['Всё из Premium', 'Приоритетный AI', 'Ранний доступ к фичам'] },
 ]
 
 function LiveScanner({ prices }) {
@@ -261,9 +260,12 @@ export default function Landing() {
                 <button
                   type="button"
                   className="btn-solid"
-                  onClick={() => navigate(t.key === 'free' ? '/app/overview' : '/app/pricing?auth=register')}
+                  onClick={() => {
+                    if (t.key === 'free') navigate('/app/overview')
+                    else window.open(TG_BOT, '_blank', 'noopener,noreferrer')
+                  }}
                 >
-                  {t.key === 'free' ? 'Открыть Free' : `Выбрать ${t.name}`}
+                  {t.key === 'free' ? 'Открыть Free' : 'Оформить в Telegram'}
                 </button>
               </div>
             ))}
