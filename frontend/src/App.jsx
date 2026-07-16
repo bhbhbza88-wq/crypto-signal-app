@@ -50,19 +50,6 @@ const NAV_SECTIONS = [
   ]},
 ]
 
-function ComingSoonPage({ tab }) {
-  const labels = { invite: 'Пригласить друга' }
-  const descs = { invite: 'Реферальная программа в разработке — приглашай друзей и получай бонусы к тарифу. Скоро.' }
-  return (
-    <div className="coming-soon-card animate-in">
-      <div className="cs-icon">◈</div>
-      <div className="cs-title">{labels[tab] || tab}</div>
-      <div className="cs-desc">{descs[tab] || 'Этот раздел в разработке. Следи за обновлениями!'}</div>
-      <div className="cs-badge">Скоро</div>
-    </div>
-  )
-}
-
 function onSpot(e) {
   const r = e.currentTarget.getBoundingClientRect()
   e.currentTarget.style.setProperty('--mx', `${((e.clientX - r.left) / r.width) * 100}%`)
