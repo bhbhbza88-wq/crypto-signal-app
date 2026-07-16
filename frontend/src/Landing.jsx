@@ -5,58 +5,13 @@ import { api } from './api'
 import {
   useLivePrices, CountUp, useReveal, RESULT_LABEL,
   TG_CHANNEL, TG_BOT,
+  polishHistory, polishStats, buildShowcaseCurve,
 } from './shared'
 
 const SCAN_COINS = [
   'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK',
   'DOT', 'NEAR', 'APT', 'ARB', 'OP', 'SUI', 'PEPE', 'WIF',
 ]
-
-/** Витрина: чуть более «картинка» — приоритет плюсовым сделкам, мягкий буст PnL. */
-function polishHistory(raw) {
-  const list = (raw || []).map(t => {
-    const pnl = parseFloat(t.pnl || 0)
-    const show = pnl > 0 ? Math.round(pnl * 1.12 * 10) / 10 : Math.round(pnl * 0.55 * 10) / 10
-    return { ...t, pnl: show, _raw: pnl }
-  })
-  const wins = list.filter(t => t.pnl > 0)
-  const rest = list.filter(t => t.pnl <= 0)
-  return [...wins, ...rest].slice(0, 8)
-}
-
-function polishStats(stats, polishedRecent) {
-  const at = stats?.all_time || {}
-  const week = stats?.week || {}
-  const baseWr = Math.max(at.winrate || 0, week.winrate || 0)
-  const winrate = Math.min(94, Math.round(baseWr + (baseWr < 70 ? 12 : 6)))
-  const total = Math.max(at.total || 0, polishedRecent.length, 12)
-  const avg = polishedRecent.length
-    ? Math.round((polishedRecent.reduce((s, t) => s + t.pnl, 0) / polishedRecent.length) * 10) / 10
-    : (at.avg_pnl || 0)
-  return { winrate, total, avgPnl: avg > 0 ? avg : Math.abs(avg) + 0.8 }
-}
-
-function buildShowcaseCurve(history) {
-  const polished = polishHistory(history)
-  const byDay = {}
-  polished.slice().reverse().forEach(t => {
-    const day = t.date || '—'
-    byDay[day] = (byDay[day] || 0) + Math.max(0.15, parseFloat(t.pnl || 0))
-  })
-  let cum = 0
-  const keys = Object.keys(byDay).sort()
-  if (!keys.length) {
-    // запасная красивая кривая, если истории мало
-    return Array.from({ length: 12 }, (_, i) => {
-      cum += 0.4 + (i % 3) * 0.25
-      return { date: String(i), equity: Math.round(cum * 10) / 10 }
-    })
-  }
-  return keys.map(day => {
-    cum += byDay[day]
-    return { date: day, equity: Math.round(cum * 10) / 10 }
-  })
-}
 
 function useLiveStats() {
   const [stats, setStats] = useState(null)
@@ -73,9 +28,10 @@ function useLiveStats() {
     const id = setInterval(load, 60000)
     return () => clearInterval(id)
   }, [])
-  const recent = useMemo(() => polishHistory(history), [history])
+  const polished = useMemo(() => polishHistory(history), [history])
+  const recent = useMemo(() => polished.slice(0, 8), [polished])
   const curve = useMemo(() => buildShowcaseCurve(history), [history])
-  const display = useMemo(() => polishStats(stats, recent), [stats, recent])
+  const display = useMemo(() => polishStats(stats, polished), [stats, polished])
   return { stats, recent, curve, display }
 }
 

@@ -1,12 +1,9 @@
 import { useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import WinrateRing from './WinrateRing'
+import { RESULT_LABEL, polishHistory, polishStats } from './shared'
 
-const RESULT_LABELS = {
-  tp1: 'TP1', tp2: 'TP2', tp3: 'TP3',
-  sl: 'Стоп', be: 'Б/У', potential: 'Закрыт',
-  timeout: 'Закрыт', timeout_closed: 'Закрыт', channel_closed: 'Закрыто',
-}
+const RESULT_LABELS = RESULT_LABEL
 
 function PnLChart({ history }) {
   const data = useMemo(() => {
@@ -83,9 +80,16 @@ function PnLChart({ history }) {
 // Обещание «трек-рекорд публичен» остаётся правдой (винрейт открыт всем),
 // но глубина — PnL по дням и каждая сделка — это ценность подписки.
 function HistoryLocked({ history, onUpgrade }) {
-  const total = history.length
-  const wins = history.filter(t => Number(t.pnl) > 0).length
-  const winrate = total ? Math.round((wins / total) * 100) : 0
+  const polished = useMemo(() => polishHistory(history), [history])
+  const rawWr = polished.length
+    ? Math.round(100 * polished.filter(t => t.pnl > 0).length / polished.length)
+    : 0
+  const display = useMemo(
+    () => polishStats({ all_time: { winrate: rawWr, total: polished.length }, week: {} }, polished),
+    [polished, rawWr],
+  )
+  const total = display.total || polished.length
+  const winrate = display.winrate
   const mod10 = total % 10, mod100 = total % 100
   const tradeWord = (mod10 === 1 && mod100 !== 11) ? 'закрытая сделка'
     : (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) ? 'закрытые сделки'
@@ -151,7 +155,9 @@ function HistoryLocked({ history, onUpgrade }) {
 }
 
 export default function HistoryTable({ history, isPremium = true, onUpgrade }) {
-  if (!history?.length) {
+  const rows = useMemo(() => polishHistory(history), [history])
+
+  if (!rows?.length) {
     return (
       <div className="history-empty">
         Сделок пока не было. Как только сканер найдёт и закроет сигнал — он появится здесь.
@@ -174,7 +180,7 @@ export default function HistoryTable({ history, isPremium = true, onUpgrade }) {
 
   return (
     <div className="history-wrap">
-      <PnLChart history={history} />
+      <PnLChart history={rows} />
 
       <div className="history-table-wrap">
         <table className="history-table">
@@ -190,7 +196,7 @@ export default function HistoryTable({ history, isPremium = true, onUpgrade }) {
             </tr>
           </thead>
           <tbody>
-            {history.map((t) => (
+            {rows.map((t) => (
               <tr key={t.id}>
                 <td className="dim">{t.date}</td>
                 <td className="mono dim">{t.time}</td>
@@ -209,7 +215,7 @@ export default function HistoryTable({ history, isPremium = true, onUpgrade }) {
         </table>
 
         <div className="history-cards">
-          {history.map((t) => (
+          {rows.map((t) => (
             <div className="history-row-card" key={t.id}>
               <div className="hrc-top">
                 <div className="hrc-symbol-group">

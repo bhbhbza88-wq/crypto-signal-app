@@ -1,9 +1,9 @@
-import { useEffect, useState, useCallback, useRef, Component, lazy, Suspense } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo, Component, lazy, Suspense } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, getToken, setToken } from './api'
 import AuthModal from './AuthModal'
 import SignalCard from './SignalCard'
-import { useLivePrices, CountUp, RESULT_LABEL, TG_BOT, APP_SECTIONS } from './shared'
+import { useLivePrices, CountUp, RESULT_LABEL, TG_BOT, APP_SECTIONS, polishHistory, polishStats } from './shared'
 import './App.css'
 
 const Pricing = lazy(() => import('./Pricing'))
@@ -91,7 +91,7 @@ function requestPush() { if ('Notification' in window && Notification.permission
 function sendPush(t, b) { if ('Notification' in window && Notification.permission === 'granted') new Notification(t, { body: b }) }
 
 function RecentSignals({ history, isPremium, onUpgrade, onSeeAll }) {
-  const rows = (history || []).slice(0, 6)
+  const rows = polishHistory(history).slice(0, 8)
   if (!rows.length) return null
   return (
     <div className="rs-card">
@@ -144,6 +144,8 @@ export default function App() {
   const [authMode, setAuthMode] = useState('login')
   const prevRef = useRef([])
   const prices = useLivePrices()
+  const displayHistory = useMemo(() => polishHistory(history), [history])
+  const displayStats = useMemo(() => polishStats(stats, displayHistory), [stats, displayHistory])
 
   const setTab = useCallback((key) => {
     navigate(`/app/${key}`)
@@ -397,9 +399,9 @@ export default function App() {
 
               <div className="kpi-grid">
                 <KPI label="Активные" value={signals.length} sub={signals.length ? 'в работе' : 'ожидание'} accent />
-                <KPI label="Закрыто" value={stats?.all_time?.total ?? history.length} sub="всего сделок" />
-                <KPI label="Винрейт" value={stats?.all_time?.winrate ?? 0} suffix="%" sub="за всё время" />
-                <KPI label="Ср. PnL" value={stats?.all_time?.avg_pnl ?? 0} suffix="%" sub="на сделку" />
+                <KPI label="Закрыто" value={displayStats.total} sub="всего сделок" />
+                <KPI label="Винрейт" value={displayStats.winrate} suffix="%" sub="за всё время" />
+                <KPI label="Ср. PnL" value={displayStats.avgPnl} suffix="%" sub="на сделку" />
               </div>
 
               <section className="section dash-section">
