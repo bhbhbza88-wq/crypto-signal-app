@@ -1,8 +1,11 @@
 """
-Telegram уведомления для NOWICKI
-Добавь в Railway переменные окружения:
-  TELEGRAM_BOT_TOKEN=твой_токен
-  TELEGRAM_CHAT_ID=твой_chat_id
+Telegram уведомления и диалог с пользователем для NOWICKI.
+Env:
+  TELEGRAM_BOT_TOKEN
+  TELEGRAM_CHAT_ID
+  CRYPTO_PAY_ADDRESS   — USDT-адрес (TRC20/TON и т.п.)
+  CRYPTO_PAY_NETWORK   — подпись сети, по умолчанию USDT TRC20
+  CRYPTO_PAY_AMOUNT    — сумма за месяц, по умолчанию 29
 """
 import os
 import hashlib
@@ -11,23 +14,31 @@ import httpx
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
-# Канал, куда ведёт кнопка приветствия — первая точка контакта до перехода
-# в реальный канал (см. /api/telegram-webhook в main.py).
 CHANNEL_URL = "https://t.me/chlebchik"
 SITE_URL = "https://nowicki.trade"
 
-# Секрет для проверки, что POST на /api/telegram-webhook реально пришёл от
-# Telegram, а не от кого попало — детерминированно выводим из токена бота,
-# чтобы не заводить ещё одну переменную окружения на Railway.
+CRYPTO_PAY_ADDRESS = os.getenv("CRYPTO_PAY_ADDRESS", "").strip()
+CRYPTO_PAY_NETWORK = os.getenv("CRYPTO_PAY_NETWORK", "USDT TRC20").strip() or "USDT TRC20"
+CRYPTO_PAY_AMOUNT = os.getenv("CRYPTO_PAY_AMOUNT", "29").strip() or "29"
+
 WEBHOOK_SECRET = hashlib.sha256(TELEGRAM_BOT_TOKEN.encode()).hexdigest()[:32] if TELEGRAM_BOT_TOKEN else ""
 
 
+async def _api(method: str, payload: dict | None = None):
+    if not TELEGRAM_BOT_TOKEN:
+        return None
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{method}"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=payload or {})
+            return resp.json()
+    except Exception as e:
+        print(f"[telegram_bot] {method} error: {e}")
+        return None
+
+
 async def set_webhook():
-    """Регистрирует вебхук в Telegram — вызывается один раз при старте приложения
-    (main.py lifespan). Идемпотентно: повторный вызов с тем же URL не ломает
-    ничего, просто подтверждает регистрацию заново на каждом деплое.
-    RAILWAY_PUBLIC_DOMAIN — переменная, которую Railway сам прокидывает в
-    контейнер для сервисов с публичным доменом, вручную задавать не нужно."""
+    """Регистрирует вебхук + меню команд при старте приложения."""
     if not TELEGRAM_BOT_TOKEN:
         return
     domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
@@ -36,62 +47,159 @@ async def set_webhook():
               "(ожидаемо при локальном запуске, не в проде)")
         return
     webhook_url = f"https://{domain}/api/telegram-webhook"
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook"
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json={"url": webhook_url, "secret_token": WEBHOOK_SECRET})
-            data = resp.json()
-            if data.get("ok"):
-                print(f"[telegram_bot] Вебхук зарегистрирован: {webhook_url}")
-            else:
-                print(f"[telegram_bot] Ошибка регистрации вебхука: {data}")
-    except Exception as e:
-        print(f"[telegram_bot] Ошибка регистрации вебхука: {e}")
+    data = await _api("setWebhook", {"url": webhook_url, "secret_token": WEBHOOK_SECRET})
+    if data and data.get("ok"):
+        print(f"[telegram_bot] Вебхук зарегистрирован: {webhook_url}")
+    else:
+        print(f"[telegram_bot] Ошибка регистрации вебхука: {data}")
+
+    cmds = await _api("setMyCommands", {
+        "commands": [
+            {"command": "start", "description": "Старт и ссылки"},
+            {"command": "help", "description": "Что умеет бот"},
+            {"command": "premium", "description": "Оплата Premium криптой"},
+            {"command": "status", "description": "Статистика и сайт"},
+        ]
+    })
+    if cmds and cmds.get("ok"):
+        print("[telegram_bot] Меню команд обновлено")
 
 
-async def send_welcome(chat_id: int):
-    """Приветствие для пользователя, который написал боту /start — первым делом
-    встречает его бот с кнопкой в реальный канал, а не голая ссылка."""
-    if not TELEGRAM_BOT_TOKEN:
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    text = (
-        "👋 <b>Привет! Это NOWICKI.</b>\n\n"
-        "AI-сканер анализирует крипторынок каждые 2 минуты и находит точки входа "
-        "с уровнями TP/SL — без магии, на технических индикаторах (EMA, RSI, ADX, ATR).\n\n"
-        "Чем мы отличаемся от других каналов с сигналами:\n"
-        "🎯 Показываем <b>реальный винрейт</b> — не только удачные сделки\n"
-        "📊 Три независимые стратегии торгуют <b>на бумаге</b>, прежде чем на реальные деньги\n"
-        "🚫 Никаких обещаний «иксов» и гарантированной прибыли\n\n"
-        "Жми на кнопку ниже — увидишь сигналы и статистику 👇"
-    )
-    keyboard = {"inline_keyboard": [
+async def send_message(chat_id: int, text: str, reply_markup: dict | None = None):
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    await _api("sendMessage", payload)
+
+
+def _main_keyboard():
+    return {"inline_keyboard": [
         [{"text": "📡 Канал с сигналами", "url": CHANNEL_URL}],
         [{"text": "📈 Открыть платформу", "url": SITE_URL}],
+        [{"text": "💎 Premium", "callback_data": "premium"}],
     ]}
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(url, json={
-                "chat_id": chat_id, "text": text,
-                "parse_mode": "HTML", "reply_markup": keyboard,
-            })
-    except Exception as e:
-        print(f"[telegram_bot] Ошибка отправки приветствия: {e}")
+
+
+async def send_welcome(chat_id: int, start_payload: str = ""):
+    if start_payload.strip().lower() in ("premium", "pay", "vip"):
+        await send_premium(chat_id)
+        return
+    text = (
+        "👋 <b>Привет! Это NOWICKI.</b>\n\n"
+        "AI-сканер ищет точки входа с уровнями TP/SL.\n"
+        "На сайте — живая лента, винрейт и история сделок.\n\n"
+        "Команды: /premium · /status · /help"
+    )
+    await send_message(chat_id, text, _main_keyboard())
+
+
+async def send_help(chat_id: int):
+    text = (
+        "📖 <b>Команды NOWICKI</b>\n\n"
+        "/start — приветствие и ссылки\n"
+        "/premium — оплата Premium криптой\n"
+        "/status — статистика и сайт\n"
+        "/help — это меню\n\n"
+        f"Канал: {CHANNEL_URL}\n"
+        f"Платформа: {SITE_URL}"
+    )
+    await send_message(chat_id, text, _main_keyboard())
+
+
+async def send_premium(chat_id: int):
+    if CRYPTO_PAY_ADDRESS:
+        addr_block = (
+            f"Сеть: <b>{CRYPTO_PAY_NETWORK}</b>\n"
+            f"Адрес:\n<code>{CRYPTO_PAY_ADDRESS}</code>\n\n"
+            "После оплаты напиши сюда:\n"
+            "1) email аккаунта на nowicki.trade\n"
+            "2) скрин / tx hash перевода\n\n"
+            "Активируем Premium вручную в течение дня."
+        )
+    else:
+        addr_block = (
+            "Адрес для оплаты скоро появится здесь.\n"
+            "Пока напиши нам email аккаунта на nowicki.trade — "
+            "подскажем, куда перевести."
+        )
+    text = (
+        f"💎 <b>NOWICKI Premium — ${CRYPTO_PAY_AMOUNT}/мес</b>\n\n"
+        "• Полная история сделок и PnL\n"
+        "• AI-ассистент 50 запросов/день\n"
+        "• Приоритетный доступ к фичам\n\n"
+        f"{addr_block}\n\n"
+        "⚠️ Не является финансовым советом"
+    )
+    keyboard = {"inline_keyboard": [
+        [{"text": "📈 Открыть платформу", "url": f"{SITE_URL}/app/pricing"}],
+        [{"text": "📡 Канал", "url": CHANNEL_URL}],
+    ]}
+    await send_message(chat_id, text, keyboard)
+
+
+async def send_status(chat_id: int):
+    text = (
+        "📊 <b>Статус NOWICKI</b>\n\n"
+        "Сканер онлайн · сигналы публикуются в канал и на сайт.\n"
+        "Актуальный винрейт и история — на платформе.\n\n"
+        f"👉 {SITE_URL}\n"
+        f"📡 {CHANNEL_URL}\n\n"
+        "Premium: /premium"
+    )
+    await send_message(chat_id, text, _main_keyboard())
+
+
+async def handle_update(update: dict):
+    """Роутер команд и callback-кнопок из webhook."""
+    cb = update.get("callback_query")
+    if cb:
+        chat_id = cb.get("message", {}).get("chat", {}).get("id")
+        data = (cb.get("data") or "").strip().lower()
+        if chat_id and data in ("premium", "pay"):
+            await send_premium(chat_id)
+            await _api("answerCallbackQuery", {"callback_query_id": cb.get("id")})
+        return
+
+    message = update.get("message") or update.get("edited_message")
+    if not message:
+        return
+    chat_id = message.get("chat", {}).get("id")
+    text = str(message.get("text") or "").strip()
+    if not chat_id or not text:
+        return
+
+    cmd, _, payload = text.partition(" ")
+    cmd = cmd.split("@", 1)[0].lower()
+
+    if cmd == "/start":
+        await send_welcome(chat_id, payload)
+    elif cmd in ("/help", "/menu"):
+        await send_help(chat_id)
+    elif cmd in ("/premium", "/pay"):
+        await send_premium(chat_id)
+    elif cmd in ("/status", "/stats"):
+        await send_status(chat_id)
+    else:
+        await send_message(
+            chat_id,
+            "Не понял команду. Напиши /help — покажу доступные опции.",
+        )
 
 
 async def send_telegram(text: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(url, json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": text,
-                "parse_mode": "HTML"
-            })
-    except Exception as e:
-        print(f"[Telegram] Ошибка отправки: {e}")
+    await _api("sendMessage", {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+    })
+
 
 async def notify_new_signal(signal: dict):
     sym   = signal.get("symbol", "")
@@ -106,7 +214,7 @@ async def notify_new_signal(signal: dict):
     reasons = signal.get("entry_reasons", [])
 
     emoji = "🟢" if side == "LONG" else "🔴"
-    conf  = round((score / 20) * 100)
+    conf  = round((score / 20) * 100) if score else 0
     conf_emoji = "🔥" if conf >= 80 else "⚡" if conf >= 60 else "⚠️"
 
     text = (
@@ -130,12 +238,11 @@ async def notify_new_signal(signal: dict):
             text += f"• {r}\n"
 
     text += "\n⚠️ <i>Не является финансовым советом</i>"
-
     await send_telegram(text)
 
+
 async def notify_manual_signal(signal: dict, source: str):
-    """Сигнал от трейдера (ручной ввод в админке) или внешнего источника
-    (вебхук TradingView) — без V8 score/confidence, это чужая сделка, не наш скан."""
+    """Сигнал от трейдера / внешнего источника — без V8 score."""
     sym   = signal.get("symbol", "")
     side  = signal.get("signal", "")
     entry = signal.get("entry", 0)
@@ -187,11 +294,10 @@ async def notify_signal_closed(signal: dict, result: str, pnl: float):
         f"━━━━━━━━━━━━━━━━\n"
         f"<i>NOWICKI Crypto Scanner</i>"
     )
-
     await send_telegram(text)
 
+
 async def notify_market_phase(old_phase: str, new_phase: str, details: dict):
-    """Смена фазы рынка (информационный, редкий и ценный сигнал)."""
     labels = {'UPTREND': 'АПТРЕНД 📈', 'DOWNTREND': 'ДАУНТРЕНД 📉', 'SIDEWAYS': 'БОКОВИК ↔️'}
     emoji = {'UPTREND': '🟢', 'DOWNTREND': '🔴', 'SIDEWAYS': '🟡'}.get(new_phase, '🔵')
     text = (
@@ -211,7 +317,6 @@ async def notify_market_phase(old_phase: str, new_phase: str, details: dict):
 
 
 async def notify_trend_signal(symbol: str, action: str, price: float, pnl: float = None):
-    """Вход/выход Trend-Following по монете (редкие позиционные сделки)."""
     sym = symbol.replace('/USDT', '')
     if action == 'enter':
         text = (
@@ -255,5 +360,4 @@ async def send_daily_summary(stats: dict):
         f"Б/У: {today.get('breakeven', 0)}\n"
         f"<i>NOWICKI Crypto Scanner</i>"
     )
-
     await send_telegram(text)

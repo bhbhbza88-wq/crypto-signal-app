@@ -47,7 +47,6 @@ const NAV_SECTIONS = [
   ]},
   { title: 'Аккаунт', items: [
     { key: 'pricing',      label: 'Тарифы',         icon: '💎' },
-    { key: 'invite',       label: 'Пригласить',     icon: '👥' },
   ]},
 ]
 
@@ -343,7 +342,7 @@ export default function App() {
 
           {user?.on_trial && (
             <div className="trial-banner animate-in">
-              <span>✦ <strong>Premium-триал активен</strong> — осталось {user.trial_days_left} {user.trial_days_left === 1 ? 'день' : 'дн.'}. Все стратегии открыты.</span>
+              <span>✦ <strong>Premium-триал активен</strong> — осталось {user.trial_days_left} {user.trial_days_left === 1 ? 'день' : 'дн.'}. История и Premium-фичи открыты.</span>
               <button onClick={() => setTab('pricing')}>Оформить Premium</button>
             </div>
           )}
@@ -353,7 +352,6 @@ export default function App() {
           {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat /></section>}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
           {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} /></section>}
-          {tab === 'invite' && <ComingSoonPage tab="invite" />}
           {tab === 'admin' && user?.is_admin && <Admin />}
           {tab === 'channel_analyzer' && user?.is_admin && <section className="section animate-in"><ChannelAnalyzer /></section>}
           </Suspense>

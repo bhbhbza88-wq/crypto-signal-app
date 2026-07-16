@@ -64,7 +64,7 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
       >
         <button type="button" className="am-close" onClick={onClose} aria-label="Закрыть">✕</button>
         <h2 id="am-title" className="am-title">{mode === 'login' ? 'Вход' : 'Регистрация'}</h2>
-        <p className="am-sub">{mode === 'login' ? 'Войдите в аккаунт NOWICKI' : 'Первые 3 дня Premium бесплатно — карта не нужна'}</p>
+        <p className="am-sub">{mode === 'login' ? 'Войдите в аккаунт NOWICKI' : 'Первые 3 дня Premium бесплатно. Дальше — оплата криптой в Telegram-боте'}</p>
 
         <form onSubmit={submit} className="am-form">
           <label className="am-label" htmlFor="am-email">Email</label>

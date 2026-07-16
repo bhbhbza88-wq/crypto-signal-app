@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { TG_BOT } from './shared'
 
+const PREMIUM_BOT = `${TG_BOT}?start=premium`
+
 const PERIODS = [
   { key: 'month', label: 'Месяц', mult: 1, discount: 0 },
   { key: '3mo', label: '3 месяца', mult: 3, discount: 0.14 },
@@ -25,7 +27,7 @@ const FAQ = [
   { q: 'Это реальная торговля или бэктест?', a: 'Каждая сделка в истории — вход и выход по актуальным ценам Bybit. Сигналы формирует наш AI-сканер.' },
   { q: 'Как считается винрейт?', a: 'Доля закрытых сделок с положительным PnL от общего числа закрытых — учитываются TP, стоп и таймаут.' },
   { q: 'Как сканер выбирает монеты?', a: 'Анализируем тренд, силу движения, волатильность и объём. Сигнал появляется только когда условия сходятся и уровни entry/stop/TP согласованы.' },
-  { q: 'Как оплатить Premium?', a: 'Нажми «Оформить в Telegram» — бот примет оплату криптой на адрес. После подтверждения откроем Premium на аккаунте.' },
+  { q: 'Как оплатить Premium?', a: 'Нажми «Оформить в Telegram» — бот покажет крипто-адрес. После оплаты пришли email аккаунта и скрин/tx — откроем Premium.' },
   { q: 'На какой бирже работает платформа?', a: 'Сейчас — Bybit. Поддержка других бирж в планах.' },
 ]
 
@@ -43,7 +45,7 @@ export default function Pricing({ user }) {
 
   function choose(tier) {
     if (tier === 'free') return
-    window.open(TG_BOT, '_blank', 'noopener,noreferrer')
+    window.open(PREMIUM_BOT, '_blank', 'noopener,noreferrer')
   }
 
   return (

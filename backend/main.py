@@ -51,18 +51,13 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 @app.post("/api/telegram-webhook")
 async def telegram_webhook(request: Request,
                             x_telegram_bot_api_secret_token: str | None = Header(default=None)):
-    """Вебхук для бота-приветствия: первая точка контакта, когда человек
-    пишет боту /start, до перехода в реальный канал (telegram_bot.send_welcome).
-    Заголовок с секретом Telegram ставит сам на каждый запрос, если мы задали
-    secret_token при регистрации вебхука (telegram_bot.set_webhook); запрос без
-    правильного секрета — не от Telegram, отклоняем сразу."""
+    """Вебхук бота: /start, /help, /premium, /status и callback-кнопки.
+    secret_token проверяем, чтобы принимать только запросы от Telegram."""
     if telegram_bot.WEBHOOK_SECRET and x_telegram_bot_api_secret_token != telegram_bot.WEBHOOK_SECRET:
         raise HTTPException(status_code=403, detail="Invalid secret token")
 
     update = await request.json()
-    message = update.get("message") or update.get("edited_message")
-    if message and str(message.get("text", "")).startswith("/start"):
-        await telegram_bot.send_welcome(message["chat"]["id"])
+    await telegram_bot.handle_update(update)
     return {"ok": True}
 
 

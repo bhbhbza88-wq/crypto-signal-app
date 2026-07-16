@@ -11,7 +11,7 @@ export const RESULT_LABEL = {
 
 export const APP_SECTIONS = [
   'overview', 'ai_assistant', 'history',
-  'pricing', 'invite', 'admin', 'channel_analyzer',
+  'pricing', 'admin', 'channel_analyzer',
 ]
 
 /** Единый display-PnL для лендинга, дашборда и вкладки История. */

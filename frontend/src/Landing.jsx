@@ -43,8 +43,8 @@ const FAQ = [
 ]
 
 const TIERS = [
-  { key: 'free', name: 'Free', price: '0', unit: 'навсегда', features: ['Живая лента сигналов', 'Винрейт открыт всем', 'Базовый AI'] },
-  { key: 'premium', name: 'Premium', price: '29', unit: '/мес', features: ['Полная история сделок', 'PnL и аналитика', 'Расширенный AI'], popular: true },
+  { key: 'free', name: 'Free', price: '0', unit: 'навсегда', features: ['Живая лента сигналов', 'Винрейт открыт всем', 'AI-ассистент (5/день)'] },
+  { key: 'premium', name: 'Premium', price: '29', unit: '/мес', features: ['Полная история сделок', 'PnL по дням и TP/SL', 'AI-ассистент (50/день)'], popular: true },
 ]
 
 function LiveScanner({ prices }) {
@@ -249,7 +249,7 @@ export default function Landing() {
       <section id="pricing" className="section">
         <div className="inner">
           <h2 className="sec-title reveal">Тарифы</h2>
-          <p className="sec-sub reveal">3 дня Premium при регистрации.</p>
+          <p className="sec-sub reveal">3 дня Premium при регистрации. Дальше — оплата криптой в боте.</p>
           <div className="price-grid reveal">
             {TIERS.map(t => (
               <div key={t.key} className={`price-card ${t.popular ? 'popular' : ''}`}>
@@ -262,7 +262,7 @@ export default function Landing() {
                   className="btn-solid"
                   onClick={() => {
                     if (t.key === 'free') navigate('/app/overview')
-                    else window.open(TG_BOT, '_blank', 'noopener,noreferrer')
+                    else window.open(`${TG_BOT}?start=premium`, '_blank', 'noopener,noreferrer')
                   }}
                 >
                   {t.key === 'free' ? 'Открыть Free' : 'Оформить в Telegram'}
@@ -397,7 +397,7 @@ export default function Landing() {
         .honest-list li::before { content: ''; position: absolute; left: 0; top: .55em; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
         .honest-cta { display: flex; flex-direction: column; gap: 10px; }
 
-        .price-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .price-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 320px)); gap: 16px; justify-content: center; }
         .price-card { position: relative; border: 1px solid var(--border); border-radius: 16px; padding: 24px; background: var(--surface); display: flex; flex-direction: column; gap: 12px; }
         .price-card.popular { border-color: var(--accent); }
         .pop { position: absolute; top: -10px; left: 20px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 3px 10px; border-radius: 6px; }
