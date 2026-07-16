@@ -1,18 +1,21 @@
-import { useEffect, useState, useCallback, useRef, Component } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState, useCallback, useRef, Component, lazy, Suspense } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, getToken, setToken } from './api'
 import AuthModal from './AuthModal'
-import Pricing from './Pricing'
 import SignalCard from './SignalCard'
-import HistoryTable from './HistoryTable'
-import MarketView from './MarketView'
-import AIChat from './AIChat'
-import SmartTrade from './SmartTrade'
-import Admin from './Admin'
-import ChannelAnalyzer from './ChannelAnalyzer'
+import { useLivePrices, CountUp, RESULT_LABEL, TG_BOT, APP_SECTIONS } from './shared'
+
+const Pricing = lazy(() => import('./Pricing'))
+const HistoryTable = lazy(() => import('./HistoryTable'))
+const MarketView = lazy(() => import('./MarketView'))
+const AIChat = lazy(() => import('./AIChat'))
+const SmartTrade = lazy(() => import('./SmartTrade'))
+const Admin = lazy(() => import('./Admin'))
+const ChannelAnalyzer = lazy(() => import('./ChannelAnalyzer'))
 
 const POLL_INTERVAL = 15000
 const MARKET_POLL_INTERVAL = 60000
+const VALID_TABS = new Set(APP_SECTIONS)
 
 // Ошибка в одной вкладке не должна ронять всё приложение в белый экран
 class ErrorBoundary extends Component {
@@ -54,75 +57,23 @@ const NAV_SECTIONS = [
   ]},
 ]
 
-function useLivePrices() {
-  const [prices, setPrices] = useState(null)
-  useEffect(() => {
-    async function fp() {
-      try {
-        const [b, e] = await Promise.all([
-          fetch('https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT'),
-          fetch('https://api.bybit.com/v5/market/tickers?category=spot&symbol=ETHUSDT'),
-        ])
-        const btc = (await b.json())?.result?.list?.[0]
-        const eth = (await e.json())?.result?.list?.[0]
-        if (btc && eth) setPrices({
-          btc: { price: parseFloat(btc.lastPrice).toLocaleString('en-US', { maximumFractionDigits: 0 }), change: (parseFloat(btc.price24hPcnt)*100).toFixed(2), positive: parseFloat(btc.price24hPcnt) >= 0 },
-          eth: { price: parseFloat(eth.lastPrice).toLocaleString('en-US', { maximumFractionDigits: 0 }), change: (parseFloat(eth.price24hPcnt)*100).toFixed(2), positive: parseFloat(eth.price24hPcnt) >= 0 },
-        })
-      } catch {}
-    }
-    fp(); const id = setInterval(fp, 30000); return () => clearInterval(id)
-  }, [])
-  return prices
-}
-
-// курсор-spotlight на карточке
-function onSpot(e) {
-  const r = e.currentTarget.getBoundingClientRect()
-  e.currentTarget.style.setProperty('--mx', `${((e.clientX - r.left) / r.width) * 100}%`)
-  e.currentTarget.style.setProperty('--my', `${((e.clientY - r.top) / r.height) * 100}%`)
-}
-
-// число с count-up анимацией
-function CountUp({ value, suffix = '' }) {
-  const isNum = typeof value === 'number' && isFinite(value)
-  const [disp, setDisp] = useState(isNum ? 0 : value)
-  const prev = useRef(0)
-  useEffect(() => {
-    if (!isNum) { setDisp(value); return }
-    const from = prev.current, to = value, t0 = performance.now(), dur = 900
-    let raf
-    const tick = (t) => {
-      const p = Math.min(1, (t - t0) / dur)
-      const eased = 1 - Math.pow(1 - p, 3)
-      setDisp(Math.round((from + (to - from) * eased) * 10) / 10)
-      if (p < 1) raf = requestAnimationFrame(tick)
-      else prev.current = to
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [value, isNum])
-  const out = isNum ? (Number.isInteger(disp) ? disp : disp.toFixed(1)) : disp
-  return <>{out}{suffix}</>
-}
-
-function requestPush() { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission() }
-function sendPush(t, b) { if ('Notification' in window && Notification.permission === 'granted') new Notification(t, { body: b }) }
-
-// ── PAGES ──────────────────────────────────────────────────────
-
 function ComingSoonPage({ tab }) {
-  const icons = { invite: '👥' }
   const labels = { invite: 'Пригласить друга' }
   const descs = { invite: 'Реферальная программа в разработке — приглашай друзей и получай бонусы к тарифу. Скоро.' }
   return (
     <div className="coming-soon-card animate-in">
-      <div className="cs-icon">{icons[tab] || '◈'}</div>
+      <div className="cs-icon">◈</div>
       <div className="cs-title">{labels[tab] || tab}</div>
       <div className="cs-desc">{descs[tab] || 'Этот раздел в разработке. Следи за обновлениями!'}</div>
       <div className="cs-badge">Скоро</div>
     </div>
   )
+}
+
+function onSpot(e) {
+  const r = e.currentTarget.getBoundingClientRect()
+  e.currentTarget.style.setProperty('--mx', `${((e.clientX - r.left) / r.width) * 100}%`)
+  e.currentTarget.style.setProperty('--my', `${((e.clientY - r.top) / r.height) * 100}%`)
 }
 
 function KPI({ label, value, suffix, sub, accent }) {
@@ -135,13 +86,9 @@ function KPI({ label, value, suffix, sub, accent }) {
   )
 }
 
-const RESULT_LABEL = { tp1: 'TP1', tp2: 'TP2', tp3: 'TP3', sl: 'Стоп', be: 'Б/У', potential: 'Закрыт', timeout: 'Закрыт', timeout_closed: 'Закрыт', channel_closed: 'Закрыт каналом' }
+function requestPush() { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission() }
+function sendPush(t, b) { if ('Notification' in window && Notification.permission === 'granted') new Notification(t, { body: b }) }
 
-// Лента последних закрытых сигналов на дашборде — то, что всегда наполнено
-// (в отличие от активных сигналов, которых в моменте может не быть). Premium
-// видит реальные строки; free видит их же под блюром с тизером — винрейт и
-// сам факт трек-рекорда открыты, но глубина (вся история, PnL по дням) — за
-// подпиской, как и в разделе «История».
 function RecentSignals({ history, isPremium, onUpgrade, onSeeAll }) {
   const rows = (history || []).slice(0, 6)
   if (!rows.length) return null
@@ -179,7 +126,10 @@ function RecentSignals({ history, isPremium, onUpgrade, onSeeAll }) {
 
 export default function App() {
   const navigate = useNavigate()
-  const [tab, setTab] = useState('overview')
+  const { section } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab = VALID_TABS.has(section) ? section : 'overview'
+
   const [signals, setSignals] = useState([])
   const [history, setHistory] = useState([])
   const [stats, setStats] = useState(null)
@@ -194,6 +144,15 @@ export default function App() {
   const prevRef = useRef([])
   const prices = useLivePrices()
 
+  const setTab = useCallback((key) => {
+    navigate(`/app/${key}`)
+    setSidebarOpen(false)
+  }, [navigate])
+
+  useEffect(() => {
+    if (!VALID_TABS.has(section)) navigate('/app/overview', { replace: true })
+  }, [section, navigate])
+
   // восстановление сессии по сохранённому токену
   useEffect(() => {
     if (getToken()) {
@@ -201,14 +160,15 @@ export default function App() {
     }
   }, [])
 
-  // CTA с лендинга: /app?auth=register|login — открываем модалку, если не залогинен
+  // CTA с лендинга: /app/... ?auth=register|login
   useEffect(() => {
-    const wanted = new URLSearchParams(window.location.search).get('auth')
+    const wanted = searchParams.get('auth')
     if (wanted === 'register' || wanted === 'login') {
       if (!getToken()) { setAuthMode(wanted); setShowAuth(true) }
-      window.history.replaceState({}, '', window.location.pathname)
+      searchParams.delete('auth')
+      setSearchParams(searchParams, { replace: true })
     }
-  }, [])
+  }, [searchParams, setSearchParams])
 
   const logout = async () => {
     try { await api.logout() } catch {}
@@ -274,7 +234,7 @@ export default function App() {
               <><div className="logo-icon"><span className="logo-n">N</span></div>
               <div className="logo-text-wrap">
                 <span className="logo-name gradient-text">NOWICKI</span>
-                <span className="logo-sub">Crypto Scanner</span>
+                <span className="logo-sub">Signal Relay</span>
               </div></>
             )}
             {sidebarCollapsed && <div className="logo-icon"><span className="logo-n">N</span></div>}
@@ -308,7 +268,7 @@ export default function App() {
                 <button
                   key={t.key}
                   className={`nav-item ${tab === t.key ? 'active' : ''}`}
-                  onClick={() => { setTab(t.key); setSidebarOpen(false) }}
+                  onClick={() => setTab(t.key)}
                   title={sidebarCollapsed ? t.label : ''}
                 >
                   <span className="nav-icon">{t.icon}</span>
@@ -370,10 +330,10 @@ export default function App() {
             )}
           </div>
           <div className="topbar-right">
-            <a className="btn-tg-bot" href="https://telegram.me/trading4325_bot" target="_blank" rel="noopener noreferrer">
-              🤖 <span className="btn-tg-label">Бот</span>
+            <a className="btn-tg-bot" href={TG_BOT} target="_blank" rel="noopener noreferrer" aria-label="Telegram бот">
+              TG <span className="btn-tg-label">Бот</span>
             </a>
-            <button className="btn-trial" onClick={() => setTab('ai_assistant')}>✦ AI Ассистент</button>
+            <button className="btn-trial" onClick={() => setTab('ai_assistant')}>AI Ассистент</button>
             {user ? (
               <div className="auth-box">
                 <button className={`plan-badge tier-${user.tier}`} onClick={() => setTab('pricing')} title="Сменить тариф">
@@ -400,15 +360,16 @@ export default function App() {
           )}
 
           <ErrorBoundary resetKey={tab}>
-          {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat signals={signals} stats={stats} market={market} /></section>}
+          <Suspense fallback={<div className="section animate-in" style={{ padding: 40, color: 'var(--text-tertiary)' }}>Загрузка раздела…</div>}>
+          {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat /></section>}
           {tab === 'market' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Скринер рынка</h1></div><MarketView market={market} /></section>}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
-          {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} onUpgraded={(t) => setUser(u => u ? { ...u, tier: t } : u)} onNeedAuth={() => setShowAuth(true)} /></section>}
+          {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} onUpgraded={(t) => { setUser(u => u ? { ...u, tier: t } : u); setTab('history') }} onNeedAuth={() => { setAuthMode('register'); setShowAuth(true) }} /></section>}
           {tab === 'smarttrade_calc' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">Smart Trade <span className="hot-tag">NEW</span></h1></div><SmartTrade /></section>}
           {tab === 'invite' && <ComingSoonPage tab="invite" />}
           {tab === 'admin' && user?.is_admin && <Admin />}
           {tab === 'channel_analyzer' && user?.is_admin && <section className="section animate-in"><ChannelAnalyzer /></section>}
-
+          </Suspense>
           {tab === 'overview' && (
             <div className="animate-in">
               <div className="page-header">
@@ -465,7 +426,7 @@ export default function App() {
         .auth-login-btn { background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 7px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
         .plan-badge.tier-free { color: var(--text-secondary); }
         .plan-badge.tier-premium { color: var(--accent); border-color: var(--accent); }
-        .plan-badge.tier-vip { color: var(--purple); border-color: var(--purple); }
+        .plan-badge.tier-vip { color: var(--amber); border-color: var(--amber); }
         .layout { display: flex; min-height: 100vh; background: var(--bg); }
         .layout.sidebar-collapsed .sidebar { width: 56px; }
         .layout.sidebar-collapsed .content { max-width: 100%; }
@@ -480,7 +441,7 @@ export default function App() {
         .sidebar { width: 230px; flex-shrink: 0; background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; z-index: 100; overflow-y: auto; overflow-x: hidden; transition: width 0.2s ease; }
         .sidebar-top { display: flex; align-items: center; justify-content: space-between; padding: 14px 10px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
         .sidebar-logo { display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 1; min-width: 0; }
-        .logo-icon { width: 32px; height: 32px; background: linear-gradient(135deg, var(--accent), var(--purple)); border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .logo-icon { width: 32px; height: 32px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .logo-n { color: #fff; font-size: 17px; font-weight: 900; }
         .logo-text-wrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
         .logo-name { font-size: 14px; font-weight: 900; letter-spacing: 0.04em; line-height: 1; }
@@ -507,7 +468,7 @@ export default function App() {
         .nav-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
         .nav-badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; color: #fff; }
         .nav-badge.hot { background: var(--short); }
-        .nav-badge.ai { background: linear-gradient(135deg, var(--accent), var(--purple)); }
+        .nav-badge.ai { background: var(--accent); }
         .nav-badge.beta { background: var(--amber); }
         .nav-badge.live { background: var(--long); }
         .nav-badge.new { background: var(--accent); }
@@ -533,7 +494,7 @@ export default function App() {
         .tp-chg.pos { color: var(--long); } .tp-chg.neg { color: var(--short); }
         .tp-div { width: 1px; height: 14px; background: var(--border); }
         .topbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-        .btn-trial { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 7px; box-shadow: 0 3px 10px rgba(77,140,245,0.3); white-space: nowrap; cursor: pointer; }
+        .btn-trial { background: var(--accent); color: #fff; border: none; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 7px; white-space: nowrap; cursor: pointer; }
         .btn-tg-bot { display: inline-flex; align-items: center; gap: 5px; background: #229ED9; color: #fff; border: none; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 7px; box-shadow: 0 3px 10px rgba(34,158,217,0.3); white-space: nowrap; text-decoration: none; }
         .btn-tg-bot:hover { background: #1e8bc0; }
         .plan-badge { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 500; padding: 5px 10px; border-radius: 7px; white-space: nowrap; cursor: pointer; }
@@ -583,7 +544,7 @@ export default function App() {
         .rs-lock { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 20px; background: color-mix(in srgb, var(--surface) 55%, transparent); }
         .rs-lock-icon { font-size: 26px; }
         .rs-lock-text { font-size: 13px; color: var(--text); font-weight: 600; max-width: 300px; }
-        .rs-lock-btn { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; border-radius: var(--radius-md); padding: 10px 22px; font-size: 13px; font-weight: 700; cursor: pointer; transition: opacity 0.15s; }
+        .rs-lock-btn { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-md); padding: 10px 22px; font-size: 13px; font-weight: 700; cursor: pointer; transition: opacity 0.15s; }
         .rs-lock-btn:hover { opacity: 0.88; }
 
         /* LIVE STRATEGIES */
@@ -613,8 +574,8 @@ export default function App() {
         .nav-lock { font-size: 10px; opacity: 0.6; }
 
         /* TRIAL BANNER */
-        .trial-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: linear-gradient(135deg, var(--accent-soft), var(--purple-soft)); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: 10px 16px; font-size: 13px; color: var(--text); margin-bottom: 20px; }
-        .trial-banner button { background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; border-radius: 7px; padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+        .trial-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: 10px 16px; font-size: 13px; color: var(--text); margin-bottom: 20px; }
+        .trial-banner button { background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
 
         /* UPGRADE LOCK */
         .lock-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 56px 32px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; box-shadow: var(--shadow-card); position: relative; overflow: hidden; }

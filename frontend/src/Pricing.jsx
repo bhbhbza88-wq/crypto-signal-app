@@ -22,7 +22,7 @@ const TIERS = [
   {
     key: 'vip', name: 'VIP', price: 79, lifetime: 799,
     features: ['Всё из Premium', 'AI-ассистент (200 вопросов/день)', { label: 'Закрытый VIP Telegram-канал', soon: true }, { label: 'Личная поддержка', soon: true }],
-    cta: 'Выбрать VIP', accent: 'var(--purple)',
+    cta: 'Выбрать VIP', accent: 'var(--accent)',
   },
 ]
 
@@ -55,7 +55,7 @@ export default function Pricing({ user, onUpgraded, onNeedAuth }) {
     try {
       const res = await api.upgrade(tier)
       onUpgraded?.(res.tier)
-      setMsg(`Тариф изменён на ${res.tier.toUpperCase()} (тестовый режим — реальная оплата позже)`)
+      setMsg(`Тариф ${res.tier.toUpperCase()} активен. Открываем историю сделок…`)
     } catch (e) {
       setMsg(e.message)
     } finally {
