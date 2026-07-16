@@ -134,11 +134,17 @@ function HistoryLocked({ history, onUpgrade }) {
         .hist-lock-feats { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 6px; }
         .hist-lock-feat { font-size: 13px; color: var(--text-secondary); }
         .hist-lock-btn {
-          background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff;
-          border: none; border-radius: var(--radius-md); padding: 12px 28px;
+          background: var(--accent); color: #fff;
+          border: none; border-radius: 10px; padding: 12px 28px;
           font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity 0.15s;
         }
         .hist-lock-btn:hover { opacity: 0.88; }
+        .hist-public-card, .hist-lock-card, .pnl-chart-card {
+          border-radius: 16px;
+        }
+        .pnl-chart-title, .hist-lock-title {
+          font-family: var(--font-display);
+        }
       `}</style>
     </div>
   )

@@ -176,24 +176,24 @@ export default function AIChat() {
         .ai-chat {
           display: flex; flex-direction: column;
           background: var(--surface); border: 1px solid var(--border);
-          border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
-          height: 600px; overflow: hidden;
+          border-radius: 16px; box-shadow: var(--shadow-card);
+          height: min(640px, 75vh); overflow: hidden;
         }
         .chat-header {
           padding: 16px 20px; border-bottom: 1px solid var(--border);
           display: flex; justify-content: space-between; align-items: center;
-          flex-shrink: 0;
+          flex-shrink: 0; background: var(--surface-hover);
         }
         .chat-header-left { display: flex; align-items: center; gap: 12px; }
         .chat-header-right { display: flex; align-items: center; gap: 10px; }
         .ai-avatar {
-          width: 38px; height: 38px; border-radius: 10px;
-          background: linear-gradient(135deg, #10a37f, #1a7f64);
+          width: 40px; height: 40px; border-radius: 12px;
+          background: var(--accent);
           display: flex; align-items: center; justify-content: center;
-          color: #fff; font-size: 13px; font-weight: 700;
-          box-shadow: 0 4px 12px rgba(16,163,127,0.3); flex-shrink: 0;
+          color: #fff; font-size: 12px; font-weight: 800;
+          font-family: var(--font-display); flex-shrink: 0;
         }
-        .chat-title { display: block; font-size: 15px; font-weight: 700; color: var(--text); }
+        .chat-title { display: block; font-size: 15px; font-weight: 800; color: var(--text); font-family: var(--font-display); letter-spacing: -0.02em; }
         .chat-sub { display: block; font-size: 11px; color: var(--text-tertiary); }
         .ai-status { display: flex; align-items: center; gap: 6px; }
         .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--long); animation: pulse 2s infinite; }
@@ -208,9 +208,10 @@ export default function AIChat() {
         .message.user { flex-direction: row-reverse; }
         .msg-avatar {
           width: 30px; height: 30px; border-radius: 8px;
-          background: linear-gradient(135deg, #10a37f, #1a7f64);
+          background: var(--accent);
           display: flex; align-items: center; justify-content: center;
-          color: #fff; font-size: 11px; font-weight: 700; flex-shrink: 0;
+          color: #fff; font-size: 10px; font-weight: 800; flex-shrink: 0;
+          font-family: var(--font-display);
         }
         .msg-bubble {
           max-width: 75%; padding: 12px 16px;

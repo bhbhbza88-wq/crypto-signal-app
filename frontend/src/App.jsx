@@ -4,6 +4,7 @@ import { api, getToken, setToken } from './api'
 import AuthModal from './AuthModal'
 import SignalCard from './SignalCard'
 import { useLivePrices, CountUp, RESULT_LABEL, TG_BOT, APP_SECTIONS } from './shared'
+import './App.css'
 
 const Pricing = lazy(() => import('./Pricing'))
 const HistoryTable = lazy(() => import('./HistoryTable'))
@@ -371,25 +372,41 @@ export default function App() {
           {tab === 'channel_analyzer' && user?.is_admin && <section className="section animate-in"><ChannelAnalyzer /></section>}
           </Suspense>
           {tab === 'overview' && (
-            <div className="animate-in">
-              <div className="page-header">
-                <h1 className="page-title">Дашборд</h1>
-                <p className="page-subtitle">Живой обзор: сигналы AI-сканера в реальном времени.</p>
+            <div className="animate-in dash">
+              <div className="dash-hero">
+                <div className="dash-hero-text">
+                  <span className="live-chip">Scanner live</span>
+                  <h1 className="page-title">Дашборд</h1>
+                  <p className="page-subtitle">AI ищет точки входа. Открытые сетапы и свежий трек-рекорд — ниже.</p>
+                </div>
+                {prices && (
+                  <div className="dash-ticker app-panel">
+                    <div className="dt-row">
+                      <span>BTC</span>
+                      <b>${prices.btc.price}</b>
+                      <i className={prices.btc.positive ? 'pos' : 'neg'}>{prices.btc.positive ? '+' : ''}{prices.btc.change}%</i>
+                    </div>
+                    <div className="dt-row">
+                      <span>ETH</span>
+                      <b>${prices.eth.price}</b>
+                      <i className={prices.eth.positive ? 'pos' : 'neg'}>{prices.eth.positive ? '+' : ''}{prices.eth.change}%</i>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* KPI — реальные цифры */}
               <div className="kpi-grid">
-                <KPI label="Активные сигналы" value={signals.length} sub={signals.length ? 'прямо сейчас' : 'ждём новых'} accent />
-                <KPI label="Сделок в истории" value={stats?.all_time?.total ?? history.length} sub="всего закрыто" />
+                <KPI label="Активные" value={signals.length} sub={signals.length ? 'в работе' : 'ожидание'} accent />
+                <KPI label="Закрыто" value={stats?.all_time?.total ?? history.length} sub="всего сделок" />
                 <KPI label="Винрейт" value={stats?.all_time?.winrate ?? 0} suffix="%" sub="за всё время" />
-                <KPI label="Средний PnL" value={stats?.all_time?.avg_pnl ?? 0} suffix="%" sub="на сделку" />
+                <KPI label="Ср. PnL" value={stats?.all_time?.avg_pnl ?? 0} suffix="%" sub="на сделку" />
               </div>
 
-              {/* Активные сигналы — единая лента: собственный сканер + агрегированные потоки.
-                  Честность источника не теряется: SignalCard сам показывает блок "Источник"
-                  для сигналов с trader.source_type === 'telegram_aggregate'. */}
-              <section className="section" style={{ marginTop: 28 }}>
-                <h2 className="section-title">Активные сигналы</h2>
+              <section className="section dash-section">
+                <div className="app-panel-head" style={{ paddingLeft: 0, paddingRight: 0, border: 'none' }}>
+                  <h2 className="section-title" style={{ margin: 0, flex: 1 }}>Активные сигналы</h2>
+                  <span className="sec-count">{signals.length}</span>
+                </div>
                 {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal /> : (
                   <div className="signals-grid">
                     {signals.map(s => <SignalCard key={s.symbol} signal={s} />)}
@@ -397,11 +414,11 @@ export default function App() {
                 )}
               </section>
 
-              {/* Последние сигналы — всегда наполненный блок (в отличие от активных).
-                  Premium видит реальную ленту, free — тизер под блюром. */}
               {history.length > 0 && (
-                <section className="section" style={{ marginTop: 28 }}>
-                  <h2 className="section-title">Последние сигналы</h2>
+                <section className="section dash-section">
+                  <div className="app-panel-head" style={{ paddingLeft: 0, paddingRight: 0, border: 'none' }}>
+                    <h2 className="section-title" style={{ margin: 0, flex: 1 }}>Последние сигналы</h2>
+                  </div>
                   <RecentSignals
                     history={history}
                     isPremium={isPremium}
@@ -410,7 +427,6 @@ export default function App() {
                   />
                 </section>
               )}
-
             </div>
           )}
           </ErrorBoundary>
@@ -419,223 +435,7 @@ export default function App() {
 
       {showAuth && <AuthModal initialMode={authMode} onClose={() => setShowAuth(false)} onAuth={setUser} />}
 
-      <style>{`
-        .auth-box { display: flex; align-items: center; gap: 8px; }
-        .auth-email { font-size: 12px; color: var(--text-secondary); max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .auth-logout { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-tertiary); cursor: pointer; padding: 3px 7px; font-size: 13px; }
-        .auth-login-btn { background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 7px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
-        .plan-badge.tier-free { color: var(--text-secondary); }
-        .plan-badge.tier-premium { color: var(--accent); border-color: var(--accent); }
-        .plan-badge.tier-vip { color: var(--amber); border-color: var(--amber); }
-        .layout { display: flex; min-height: 100vh; background: var(--bg); }
-        .layout.sidebar-collapsed .sidebar { width: 56px; }
-        .layout.sidebar-collapsed .content { max-width: 100%; }
 
-        /* SPOTLIGHT */
-        .spot { position: relative; overflow: hidden; }
-        .spot::after { content: ''; position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(360px circle at var(--mx,50%) var(--my,50%), var(--accent-soft), transparent 55%); opacity: 0; transition: opacity 0.35s; pointer-events: none; z-index: 0; }
-        .spot:hover::after { opacity: 1; }
-        .spot > * { position: relative; z-index: 1; }
-
-        /* SIDEBAR */
-        .sidebar { width: 230px; flex-shrink: 0; background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; z-index: 100; overflow-y: auto; overflow-x: hidden; transition: width 0.2s ease; }
-        .sidebar-top { display: flex; align-items: center; justify-content: space-between; padding: 14px 10px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-        .sidebar-logo { display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 1; min-width: 0; }
-        .logo-icon { width: 32px; height: 32px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .logo-n { color: #fff; font-size: 17px; font-weight: 900; }
-        .logo-text-wrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-        .logo-name { font-size: 14px; font-weight: 900; letter-spacing: 0.04em; line-height: 1; }
-        .logo-sub { font-size: 9px; color: var(--text-tertiary); letter-spacing: 0.08em; text-transform: uppercase; }
-        .sidebar-collapse-btn { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); width: 24px; height: 24px; border-radius: 6px; font-size: 14px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-
-        .sidebar-prices { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; background: var(--surface-hover); flex-shrink: 0; flex-wrap: wrap; }
-        .sp-item { display: flex; align-items: center; gap: 4px; }
-        .sp-sym { font-size: 9px; color: var(--text-tertiary); font-weight: 600; }
-        .sp-val { font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--text); }
-        .sp-chg { font-family: var(--font-mono); font-size: 9px; font-weight: 600; }
-        .sp-chg.pos { color: var(--long); } .sp-chg.neg { color: var(--short); }
-        .sp-div { width: 1px; height: 12px; background: var(--border); }
-
-        .sidebar-nav { flex: 1; padding: 8px 8px; display: flex; flex-direction: column; gap: 2px; }
-        .nav-group { display: flex; flex-direction: column; gap: 1px; margin-bottom: 8px; }
-        .nav-group-title { font-size: 9px; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.1em; padding: 8px 10px 4px; }
-        .nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: none; background: transparent; color: var(--text-tertiary); font-size: 13px; font-weight: 500; border-radius: 8px; transition: all 0.15s; text-align: left; width: 100%; white-space: nowrap; cursor: pointer; }
-        .nav-item:hover { background: var(--surface-hover); color: var(--text-secondary); }
-        .nav-item.active { background: var(--sidebar-active); color: var(--sidebar-active-text); font-weight: 600; }
-        .nav-icon { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; }
-        .nav-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-        .nav-right { display: flex; align-items: center; gap: 5px; margin-left: auto; }
-        .nav-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
-        .nav-badge { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 4px; color: #fff; }
-        .nav-badge.hot { background: var(--short); }
-        .nav-badge.ai { background: var(--accent); }
-        .nav-badge.beta { background: var(--amber); }
-        .nav-badge.live { background: var(--long); }
-        .nav-badge.new { background: var(--accent); }
-
-        .sidebar-bottom { padding: 10px 12px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-        .scan-status { display: flex; align-items: center; gap: 7px; }
-        .scan-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--long); animation: pulse 2s infinite; flex-shrink: 0; }
-        .scan-text { display: block; font-size: 10px; color: var(--text-secondary); font-weight: 500; }
-        .scan-sub { display: block; font-size: 9px; color: var(--text-tertiary); }
-        .sidebar-actions { display: flex; gap: 4px; }
-        .theme-toggle { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); width: 28px; height: 28px; border-radius: 7px; font-size: 13px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-
-        /* TOPBAR */
-        .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 20px; height: 50px; background: var(--sidebar-bg); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 90; gap: 12px; }
-        .topbar-left { display: flex; align-items: center; gap: 12px; }
-        .burger { border: none; background: transparent; display: flex; flex-direction: column; gap: 4px; padding: 4px; cursor: pointer; }
-        .burger span { display: block; width: 18px; height: 2px; background: var(--text); border-radius: 2px; }
-        .topbar-prices { display: flex; align-items: center; gap: 14px; }
-        .tp-item { display: flex; align-items: center; gap: 5px; }
-        .tp-sym { font-size: 10px; color: var(--text-tertiary); font-weight: 600; }
-        .tp-val { font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--text); }
-        .tp-chg { font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
-        .tp-chg.pos { color: var(--long); } .tp-chg.neg { color: var(--short); }
-        .tp-div { width: 1px; height: 14px; background: var(--border); }
-        .topbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-        .btn-trial { background: var(--accent); color: #fff; border: none; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 7px; white-space: nowrap; cursor: pointer; }
-        .btn-tg-bot { display: inline-flex; align-items: center; gap: 5px; background: #229ED9; color: #fff; border: none; font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 7px; box-shadow: 0 3px 10px rgba(34,158,217,0.3); white-space: nowrap; text-decoration: none; }
-        .btn-tg-bot:hover { background: #1e8bc0; }
-        .plan-badge { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 500; padding: 5px 10px; border-radius: 7px; white-space: nowrap; cursor: pointer; }
-        .theme-toggle-sm { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); width: 30px; height: 30px; border-radius: 7px; font-size: 14px; cursor: pointer; }
-
-        /* CONTENT */
-        .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 99; }
-        .main-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-        .content { flex: 1; max-width: 1360px; width: 100%; margin: 0 auto; padding: 24px 32px 80px; display: flex; flex-direction: column; gap: 0; }
-        .section { display: flex; flex-direction: column; gap: 14px; }
-        .section-title { font-size: 10px; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.1em; display: flex; align-items: center; gap: 8px; }
-        .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
-        .page-header { margin-bottom: 16px; }
-        .page-title { font-size: 24px; font-weight: 800; color: var(--text); letter-spacing: -0.02em; display: flex; align-items: center; gap: 10px; }
-        .page-subtitle { font-size: 13px; color: var(--text-secondary); margin-top: 5px; }
-        .beta-tag { font-size: 10px; font-weight: 700; background: var(--amber); color: #fff; padding: 2px 7px; border-radius: 4px; }
-        .hot-tag { font-size: 10px; font-weight: 700; background: var(--short); color: #fff; padding: 2px 7px; border-radius: 4px; }
-        .error-banner { padding: 12px 16px; background: var(--short-soft); color: var(--short); border: 1px solid var(--short-soft); border-radius: var(--radius-md); font-size: 13px; margin-bottom: 20px; }
-        .signals-grid { display: grid; gap: 16px; }
-        .pos { color: var(--long) !important; } .neg { color: var(--short) !important; }
-
-        /* KPI */
-        .kpi-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
-        .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px 20px; box-shadow: var(--shadow-card); transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s; }
-        .kpi-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); border-color: var(--accent); }
-        .kpi-card.accent { background: linear-gradient(135deg, var(--surface), var(--accent-soft)); }
-        .kpi-label { font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; }
-        .kpi-val { font-family: var(--font-mono); font-size: 30px; font-weight: 800; color: var(--text); line-height: 1.1; margin: 8px 0 4px; }
-        .kpi-sub { font-size: 11px; color: var(--text-secondary); }
-
-        /* RECENT SIGNALS */
-        .rs-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); padding: 8px 8px 4px; }
-        .rs-head { display: flex; justify-content: flex-end; padding: 6px 10px 2px; }
-        .rs-more { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 12px; padding: 5px 11px; border-radius: 7px; cursor: pointer; transition: all 0.15s; }
-        .rs-more:hover { border-color: var(--accent); color: var(--accent); }
-        .rs-list-wrap { position: relative; }
-        .rs-list { display: flex; flex-direction: column; }
-        .rs-list.rs-blur { filter: blur(5px); pointer-events: none; user-select: none; }
-        .rs-row { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
-        .rs-row:last-child { border-bottom: none; }
-        .rs-sym { font-weight: 700; color: var(--text); font-size: 14px; }
-        .rs-dir { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px; font-family: var(--font-mono); justify-self: start; }
-        .rs-dir.long { background: var(--long-soft); color: var(--long); }
-        .rs-dir.short { background: var(--short-soft); color: var(--short); }
-        .rs-res { font-size: 12px; color: var(--text-secondary); justify-self: start; }
-        .rs-pnl { font-weight: 700; font-size: 14px; }
-        .rs-lock { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 20px; background: color-mix(in srgb, var(--surface) 55%, transparent); }
-        .rs-lock-icon { font-size: 26px; }
-        .rs-lock-text { font-size: 13px; color: var(--text); font-weight: 600; max-width: 300px; }
-        .rs-lock-btn { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-md); padding: 10px 22px; font-size: 13px; font-weight: 700; cursor: pointer; transition: opacity 0.15s; }
-        .rs-lock-btn:hover { opacity: 0.88; }
-
-        /* LIVE STRATEGIES */
-        .ts-block { margin: 28px 0 0; }
-        .ts-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
-        .ts-title { font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
-        .ts-sub { font-size: 12px; color: var(--text-tertiary); }
-        .ts-more { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 12px; padding: 6px 12px; border-radius: 7px; white-space: nowrap; cursor: pointer; }
-        .ts-more:hover { border-color: var(--accent); color: var(--accent); }
-        .ts-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
-        .ts-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; box-shadow: var(--shadow-card); transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s; cursor: pointer; }
-        .ts-card:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: var(--shadow-lg); }
-        .ts-card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
-        .ts-name { font-size: 14px; font-weight: 700; color: var(--text); }
-        .ts-kind { font-size: 10px; color: var(--text-tertiary); background: var(--surface-hover); padding: 2px 8px; border-radius: 5px; white-space: nowrap; }
-        .ts-chart { padding: 4px 0 6px; margin: 0 -4px; }
-        .ts-roi-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
-        .ts-roi-label { font-size: 10px; color: var(--text-tertiary); }
-        .ts-roi-val { font-family: var(--font-mono); font-size: 22px; font-weight: 800; }
-        .ts-stats { border-top: 1px solid var(--border); padding-top: 8px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 5px; }
-        .ts-stat { display: flex; justify-content: space-between; }
-        .ts-stat-label { font-size: 11px; color: var(--text-secondary); }
-        .ts-stat-val { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text); }
-        .ts-btn { width: 100%; padding: 10px; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
-        .ts-btn:hover { opacity: 0.88; }
-
-        .nav-lock { font-size: 10px; opacity: 0.6; }
-
-        /* TRIAL BANNER */
-        .trial-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: 10px 16px; font-size: 13px; color: var(--text); margin-bottom: 20px; }
-        .trial-banner button { background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
-
-        /* UPGRADE LOCK */
-        .lock-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 56px 32px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; box-shadow: var(--shadow-card); position: relative; overflow: hidden; }
-        .lock-card::before { content: ''; position: absolute; top: -120px; left: 50%; transform: translateX(-50%); width: 500px; height: 360px; background: radial-gradient(circle, var(--accent-soft) 0%, transparent 65%); pointer-events: none; }
-        .lock-icon { font-size: 44px; position: relative; }
-        .lock-badge { position: relative; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #fff; background: linear-gradient(135deg, var(--accent), var(--purple)); padding: 4px 12px; border-radius: 20px; }
-        .lock-title { font-size: 22px; font-weight: 800; color: var(--text); position: relative; }
-        .lock-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; max-width: 440px; position: relative; }
-        .lock-btn { position: relative; margin-top: 6px; padding: 12px 28px; background: linear-gradient(135deg, var(--accent), var(--purple)); color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 24px rgba(77,140,245,0.35); }
-        .lock-btn:hover { opacity: 0.9; }
-        .lock-feats { display: flex; flex-wrap: wrap; gap: 8px 18px; justify-content: center; margin-top: 12px; position: relative; }
-        .lock-feat { font-size: 12px; color: var(--text-secondary); }
-
-        /* COMING SOON */
-        .coming-soon-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 64px 32px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
-        .cs-icon { font-size: 48px; opacity: 0.3; }
-        .cs-title { font-size: 22px; font-weight: 700; color: var(--text); }
-        .cs-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; max-width: 400px; }
-        .cs-badge { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-soft); padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; }
-
-        /* SKELETON & EMPTY */
-        .signal-skeleton { border-radius: var(--radius-lg); overflow: hidden; background: var(--surface); border: 1px solid var(--border); }
-        .sk-bar { height: 4px; } .sk-content { padding: 22px; display: flex; flex-direction: column; gap: 14px; }
-        .sk-row { display: flex; gap: 12px; align-items: center; } .sk-circle { width: 42px; height: 42px; border-radius: 12px; flex-shrink: 0; }
-        .sk-line { height: 14px; border-radius: 6px; flex: 1; } .sk-chart { height: 180px; border-radius: 8px; }
-        .empty-signal { padding: 22px 28px; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); display: flex; flex-direction: column; align-items: center; gap: 8px; }
-        .empty-icon { font-size: 24px; opacity: 0.4; } .empty-title { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
-        .empty-desc { font-size: 13px; color: var(--text-tertiary); line-height: 1.6; max-width: 320px; }
-        .empty-pulse { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--long); background: var(--long-soft); padding: 8px 16px; border-radius: 20px; }
-
-        @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(0,229,168,0.4)} 70%{box-shadow:0 0 0 8px rgba(0,229,168,0)} 100%{box-shadow:0 0 0 0 rgba(0,229,168,0)} }
-        @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-        .animate-in { animation: fadeIn 0.35s ease forwards; }
-
-        @media (max-width: 1100px) { .ts-grid { grid-template-columns: repeat(2,1fr); } .kpi-grid { grid-template-columns: repeat(2,1fr); } }
-        @media (max-width: 768px) {
-          .sidebar { position: fixed; left: -240px; top: 0; height: 100vh; transition: left 0.3s ease; z-index: 100; }
-          .layout.sidebar-open .sidebar { left: 0; }
-          .burger { display: flex; }
-          .content { padding: 16px 14px 80px; }
-          .topbar-prices { display: none; }
-          .ts-grid { grid-template-columns: 1fr; }
-          .kpi-grid { grid-template-columns: 1fr 1fr; }
-          /* topbar-right не должен выталкивать страницу в горизонтальный скролл */
-          .topbar { padding: 0 12px; }
-          .topbar-right { gap: 6px; }
-          .topbar-right .btn-trial { display: none; }
-          .topbar-right .btn-tg-bot span.btn-tg-label { display: none; }
-          .topbar-right .btn-tg-bot { padding: 6px 9px; }
-          .auth-email { max-width: 64px; }
-        }
-        @media (max-width: 480px) {
-          /* Триал-баннер: аккуратный стек вместо кривого переноса кнопки */
-          .trial-banner { flex-direction: column; align-items: stretch; text-align: center; gap: 10px; }
-          .trial-banner button { width: 100%; padding: 9px 14px; }
-          .page-title { font-size: 21px; }
-          .kpi-grid > * { padding: 14px 16px; }
-          .section-title { font-size: 15px; }
-        }
-      `}</style>
     </div>
   )
 }

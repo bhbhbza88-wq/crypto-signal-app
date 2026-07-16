@@ -282,10 +282,12 @@ export default function SignalCard({ signal }) {
         .signal-card {
           background: var(--surface);
           border: 1px solid var(--border);
-          border-radius: var(--radius-lg);
+          border-radius: 16px;
           box-shadow: var(--shadow-card);
           overflow: hidden;
+          transition: border-color 0.2s, transform 0.2s;
         }
+        .signal-card:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
         .signal-confidence-stripe { height: 3px; width: 100%; }
         .signal-header {
           display: flex; justify-content: space-between; align-items: flex-start;
@@ -295,17 +297,17 @@ export default function SignalCard({ signal }) {
         }
         .signal-title { display: flex; align-items: center; gap: 12px; }
         .signal-coin-icon {
-          width: 42px; height: 42px; border-radius: 12px;
+          width: 44px; height: 44px; border-radius: 12px;
           display: flex; align-items: center; justify-content: center;
           flex-shrink: 0;
         }
         .signal-sym-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
-        .symbol { font-size: 22px; font-weight: 700; color: var(--text); font-family: var(--font-mono); letter-spacing: -0.01em; }
+        .symbol { font-size: 22px; font-weight: 800; color: var(--text); font-family: var(--font-mono); letter-spacing: -0.02em; }
         .signal-pair { font-size: 11px; color: var(--text-tertiary); }
         .badge {
-          font-size: 12px; font-weight: 600;
+          font-size: 11px; font-weight: 700;
           padding: 4px 10px; border-radius: 7px;
-          letter-spacing: 0.03em; font-family: var(--font-mono);
+          letter-spacing: 0.04em; font-family: var(--font-mono);
         }
         .signal-meta { display: flex; gap: 16px; }
 
@@ -315,7 +317,6 @@ export default function SignalCard({ signal }) {
           margin-bottom: 4px;
         }
 
-        /* TRADINGVIEW CARD */
         .tv-card { margin: 14px 22px 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
         .tv-chrome { display: flex; align-items: center; gap: 7px; padding: 9px 12px; background: var(--surface-hover); border-bottom: 1px solid var(--border); }
         .tv-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
@@ -335,6 +336,7 @@ export default function SignalCard({ signal }) {
           margin: 14px 22px 0;
           padding: 12px 14px;
           background: var(--accent-soft); border-radius: 10px;
+          border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
         }
         .position-label { font-size: 12px; color: var(--text-secondary); }
         .position-value { font-family: var(--font-mono); font-weight: 700; color: var(--accent); font-size: 14px; }
@@ -344,19 +346,18 @@ export default function SignalCard({ signal }) {
           border-top: 1px solid var(--border);
         }
         .reasons-title {
-          font-size: 12px; font-weight: 600; color: var(--text-secondary);
-          text-transform: uppercase; letter-spacing: 0.04em;
+          font-size: 11px; font-weight: 700; color: var(--text-tertiary);
+          text-transform: uppercase; letter-spacing: 0.06em;
         }
         .reasons-list {
           margin: 10px 0 0; padding-left: 18px;
           display: flex; flex-direction: column; gap: 6px;
         }
-        .reasons-list li { font-size: 13px; color: var(--text); line-height: 1.4; }
+        .reasons-list li { font-size: 13px; color: var(--text); line-height: 1.45; }
         .source-attribution { margin: 10px 0 0; font-size: 13px; color: var(--text); font-weight: 600; }
 
-        @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(0,229,168,0.4)} 70%{box-shadow:0 0 0 5px rgba(0,229,168,0)} 100%{box-shadow:0 0 0 0 rgba(0,229,168,0)} }
+        @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(13,159,120,0.4)} 70%{box-shadow:0 0 0 5px rgba(13,159,120,0)} 100%{box-shadow:0 0 0 0 rgba(13,159,120,0)} }
 
-        /* На телефоне ужимаем боковые поля — иначе график зажат в 299px внутри 347px карточки */
         @media (max-width: 480px) {
           .signal-header { padding: 16px 16px 0; }
           .signal-meta { gap: 12px; }
