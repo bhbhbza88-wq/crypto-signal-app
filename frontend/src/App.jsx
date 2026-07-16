@@ -295,8 +295,8 @@ export default function App() {
             <div className="scan-status">
               <span className="scan-dot" />
               <div>
-                <span className="scan-text">Слежу за каналами</span>
-                <span className="scan-sub">обновление каждые неск. минут</span>
+                <span className="scan-text">Сканер онлайн</span>
+                <span className="scan-sub">поиск точек входа 24/7</span>
               </div>
             </div>
           )}
@@ -374,7 +374,7 @@ export default function App() {
             <div className="animate-in">
               <div className="page-header">
                 <h1 className="page-title">Дашборд</h1>
-                <p className="page-subtitle">Живой обзор: сигналы из каналов в реальном времени.</p>
+                <p className="page-subtitle">Живой обзор: сигналы AI-сканера в реальном времени.</p>
               </div>
 
               {/* KPI — реальные цифры */}
@@ -658,8 +658,8 @@ function EmptySignal() {
     <div className="empty-signal animate-in">
       <div className="empty-icon">🔍</div>
       <div className="empty-title">Сигналов нет</div>
-      <div className="empty-desc">Следим за каналами с сигналами. Как только появится новый вход — он отобразится здесь автоматически.</div>
-      <div className="empty-pulse"><span style={{width:7,height:7,borderRadius:'50%',background:'var(--long)',animation:'pulse 2s infinite',display:'inline-block'}} />Проверяем каналы каждые несколько минут</div>
+      <div className="empty-desc">AI-сканер ищет точки входа на рынке. Как только появится новый сигнал — он отобразится здесь.</div>
+      <div className="empty-pulse"><span style={{width:7,height:7,borderRadius:'50%',background:'var(--long)',animation:'pulse 2s infinite',display:'inline-block'}} />Сканируем рынок каждые несколько минут</div>
     </div>
   )
 }

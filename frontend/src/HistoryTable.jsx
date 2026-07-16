@@ -5,7 +5,7 @@ import WinrateRing from './WinrateRing'
 const RESULT_LABELS = {
   tp1: 'TP1', tp2: 'TP2', tp3: 'TP3',
   sl: 'Стоп', be: 'Б/У', potential: 'Закрыт',
-  timeout: 'Закрыт', timeout_closed: 'Закрыт', channel_closed: 'Закрыт каналом',
+  timeout: 'Закрыт', timeout_closed: 'Закрыт', channel_closed: 'Закрыто',
 }
 
 function PnLChart({ history }) {

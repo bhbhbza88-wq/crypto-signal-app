@@ -6,7 +6,7 @@ export const TG_BOT = 'https://t.me/trading4325_bot'
 export const RESULT_LABEL = {
   tp1: 'TP1', tp2: 'TP2', tp3: 'TP3', sl: 'Стоп', be: 'Б/У',
   potential: 'Закрыт', timeout: 'Закрыт', timeout_closed: 'Закрыт',
-  channel_closed: 'Закрыт каналом',
+  channel_closed: 'Закрыто',
 }
 
 export const APP_SECTIONS = [

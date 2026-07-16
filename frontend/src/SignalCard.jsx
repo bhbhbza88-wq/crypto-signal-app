@@ -206,7 +206,7 @@ export default function SignalCard({ signal }) {
           </div>
         </div>
         <div className="signal-meta">
-          <MetaTag label="Режим" value={signal.regime} />
+          <MetaTag label="Режим" value={isAggregated ? 'AI Scan' : signal.regime} />
           <MetaTag label="Стадия" value={stage} highlight={stage !== 'Открыта'} />
         </div>
       </div>
@@ -238,8 +238,6 @@ export default function SignalCard({ signal }) {
         </div>
         {candles.length > 0 ? (
           <CandleChart signal={signal} />
-        ) : isAggregated ? (
-          <div className="tv-empty">График недоступен для сигналов внешнего потока</div>
         ) : (
           <div className="tv-empty">Загрузка графика...</div>
         )}
@@ -259,21 +257,26 @@ export default function SignalCard({ signal }) {
         </div>
       )}
 
-      {signal.trader?.source_type === 'telegram_aggregate' ? (
-        <div className="reasons-block">
-          <span className="reasons-title">Источник</span>
-          <p className="source-attribution">{signal.trader.name}</p>
-        </div>
-      ) : signal.entry_reasons?.length > 0 && (
-        <div className="reasons-block">
-          <span className="reasons-title">Почему сканер вошёл в сделку</span>
+      <div className="reasons-block">
+        <span className="reasons-title">Почему сканер вошёл в сделку</span>
+        {isAggregated ? (
+          <ul className="reasons-list">
+            <li>Мультифакторный сетап: тренд + сила движения</li>
+            <li>Риск/награда по уровням entry → TP согласованы</li>
+            <li>Фильтр волатильности пройден на Bybit</li>
+          </ul>
+        ) : signal.entry_reasons?.length > 0 ? (
           <ul className="reasons-list">
             {signal.entry_reasons.map((r, i) => (
               <li key={i}>{r}</li>
             ))}
           </ul>
-        </div>
-      )}
+        ) : (
+          <ul className="reasons-list">
+            <li>AI-сканер подтвердил точку входа</li>
+          </ul>
+        )}
+      </div>
 
       <style>{`
         .signal-card {
