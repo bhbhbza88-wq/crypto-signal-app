@@ -16,12 +16,16 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
 CHANNEL_URL = "https://telegram.me/chlebchik"
 SITE_URL = "https://nowicki.trade"
+SUPPORT_USER = "Kupyansk_2"
+SUPPORT_URL = f"https://telegram.me/{SUPPORT_USER}"
 
 CRYPTO_PAY_ADDRESS = os.getenv("CRYPTO_PAY_ADDRESS", "").strip()
 CRYPTO_PAY_NETWORK = os.getenv("CRYPTO_PAY_NETWORK", "USDT TRC20").strip() or "USDT TRC20"
 CRYPTO_PAY_AMOUNT = os.getenv("CRYPTO_PAY_AMOUNT", "29").strip() or "29"
 
 WEBHOOK_SECRET = hashlib.sha256(TELEGRAM_BOT_TOKEN.encode()).hexdigest()[:32] if TELEGRAM_BOT_TOKEN else ""
+
+DIV = "━━━━━━━━━━━━━━━━"
 
 
 async def _api(method: str, payload: dict | None = None):
@@ -55,10 +59,10 @@ async def set_webhook():
 
     cmds = await _api("setMyCommands", {
         "commands": [
-            {"command": "start", "description": "Старт и ссылки"},
-            {"command": "help", "description": "Что умеет бот"},
-            {"command": "premium", "description": "Оплата Premium криптой"},
-            {"command": "status", "description": "Статистика и сайт"},
+            {"command": "start", "description": "🏠 Главное меню"},
+            {"command": "premium", "description": "💎 Оплатить Premium"},
+            {"command": "status", "description": "📊 Статус сканера"},
+            {"command": "help", "description": "📖 Помощь"},
         ]
     })
     if cmds and cmds.get("ok"):
@@ -77,12 +81,43 @@ async def send_message(chat_id: int, text: str, reply_markup: dict | None = None
     await _api("sendMessage", payload)
 
 
-def _main_keyboard():
+def _reply_menu():
+    """Постоянное меню внизу чата."""
+    return {
+        "keyboard": [
+            [{"text": "💎 Premium"}, {"text": "📊 Статус"}],
+            [{"text": "📡 Канал"}, {"text": "🌐 Платформа"}],
+            [{"text": "📖 Помощь"}, {"text": "✍️ Поддержка"}],
+        ],
+        "resize_keyboard": True,
+        "is_persistent": True,
+    }
+
+
+def _inline_home():
     return {"inline_keyboard": [
-        [{"text": "📡 Канал с сигналами", "url": CHANNEL_URL}],
-        [{"text": "📈 Открыть платформу", "url": SITE_URL}],
-        [{"text": "💎 Premium", "callback_data": "premium"}],
+        [
+            {"text": "💎 Premium", "callback_data": "premium"},
+            {"text": "📊 Статус", "callback_data": "status"},
+        ],
+        [
+            {"text": "📡 Канал", "url": CHANNEL_URL},
+            {"text": "🌐 Сайт", "url": SITE_URL},
+        ],
+        [{"text": "✍️ Написать после оплаты", "url": SUPPORT_URL}],
     ]}
+
+
+def _inline_premium():
+    rows = [
+        [{"text": "✍️ Написать @Kupyansk_2", "url": SUPPORT_URL}],
+        [
+            {"text": "🌐 Тарифы на сайте", "url": f"{SITE_URL}/app/pricing"},
+            {"text": "📡 Канал", "url": CHANNEL_URL},
+        ],
+        [{"text": "🏠 В меню", "callback_data": "menu"}],
+    ]
+    return {"inline_keyboard": rows}
 
 
 async def send_welcome(chat_id: int, start_payload: str = ""):
@@ -90,79 +125,113 @@ async def send_welcome(chat_id: int, start_payload: str = ""):
         await send_premium(chat_id)
         return
     text = (
-        "👋 <b>Привет! Это NOWICKI.</b>\n\n"
-        "AI-сканер ищет точки входа с уровнями TP/SL.\n"
-        "На сайте — живая лента, винрейт и история сделок.\n\n"
-        "Команды: /premium · /status · /help"
+        f"◈ <b>NOWICKI</b>\n"
+        f"{DIV}\n"
+        "AI-сканер ищет точки входа с TP/SL.\n"
+        "Живая лента, винрейт и история — на платформе.\n\n"
+        "Выбери действие в меню ниже 👇"
     )
-    await send_message(chat_id, text, _main_keyboard())
+    await send_message(chat_id, text, _reply_menu())
+    await send_message(chat_id, "Быстрые кнопки:", _inline_home())
 
 
 async def send_help(chat_id: int):
     text = (
-        "📖 <b>Команды NOWICKI</b>\n\n"
-        "/start — приветствие и ссылки\n"
+        f"📖 <b>Помощь</b>\n"
+        f"{DIV}\n"
+        "<b>Команды</b>\n"
+        "/start — главное меню\n"
         "/premium — оплата Premium криптой\n"
-        "/status — статистика и сайт\n"
-        "/help — это меню\n\n"
+        "/status — статус и ссылки\n"
+        "/help — эта справка\n\n"
+        "<b>После оплаты</b>\n"
+        f"Напиши <a href=\"{SUPPORT_URL}\">@{SUPPORT_USER}</a>:\n"
+        "• email аккаунта на nowicki.trade\n"
+        "• скрин / tx hash перевода\n\n"
         f"Канал: {CHANNEL_URL}\n"
-        f"Платформа: {SITE_URL}"
+        f"Сайт: {SITE_URL}"
     )
-    await send_message(chat_id, text, _main_keyboard())
+    await send_message(chat_id, text, _inline_home())
 
 
 async def send_premium(chat_id: int):
     if CRYPTO_PAY_ADDRESS:
-        addr_block = (
+        pay_block = (
+            f"<b>1.</b> Переведи <b>${CRYPTO_PAY_AMOUNT}</b> USDT\n"
             f"Сеть: <b>{CRYPTO_PAY_NETWORK}</b>\n"
-            f"Адрес:\n<code>{CRYPTO_PAY_ADDRESS}</code>\n\n"
-            "После оплаты напиши сюда:\n"
-            "1) email аккаунта на nowicki.trade\n"
-            "2) скрин / tx hash перевода\n\n"
-            "Активируем Premium вручную в течение дня."
+            f"Адрес (нажми, чтобы скопировать):\n"
+            f"<code>{CRYPTO_PAY_ADDRESS}</code>\n\n"
+            f"<b>2.</b> После оплаты напиши "
+            f"<a href=\"{SUPPORT_URL}\">@{SUPPORT_USER}</a>\n"
+            "и пришли:\n"
+            "• email аккаунта на nowicki.trade\n"
+            "• скрин или tx hash\n\n"
+            "Premium откроем вручную, обычно в течение дня."
         )
     else:
-        addr_block = (
-            "Адрес для оплаты скоро появится здесь.\n"
-            "Пока напиши нам email аккаунта на nowicki.trade — "
-            "подскажем, куда перевести."
+        pay_block = (
+            f"Адрес оплаты скоро появится.\n"
+            f"Напиши <a href=\"{SUPPORT_URL}\">@{SUPPORT_USER}</a> — подскажем, куда перевести."
         )
     text = (
-        f"💎 <b>NOWICKI Premium — ${CRYPTO_PAY_AMOUNT}/мес</b>\n\n"
-        "• Полная история сделок и PnL\n"
-        "• AI-ассистент 50 запросов/день\n"
-        "• Приоритетный доступ к фичам\n\n"
-        f"{addr_block}\n\n"
+        f"💎 <b>Premium — ${CRYPTO_PAY_AMOUNT}/мес</b>\n"
+        f"{DIV}\n"
+        "✓ Полная история сделок и PnL\n"
+        "✓ AI-ассистент · 50 запросов/день\n"
+        "✓ Приоритетный доступ к фичам\n"
+        f"{DIV}\n"
+        f"{pay_block}\n\n"
         "⚠️ Не является финансовым советом"
     )
-    keyboard = {"inline_keyboard": [
-        [{"text": "📈 Открыть платформу", "url": f"{SITE_URL}/app/pricing"}],
-        [{"text": "📡 Канал", "url": CHANNEL_URL}],
-    ]}
-    await send_message(chat_id, text, keyboard)
+    await send_message(chat_id, text, _inline_premium())
 
 
 async def send_status(chat_id: int):
     text = (
-        "📊 <b>Статус NOWICKI</b>\n\n"
-        "Сканер онлайн · сигналы публикуются в канал и на сайт.\n"
-        "Актуальный винрейт и история — на платформе.\n\n"
-        f"👉 {SITE_URL}\n"
-        f"📡 {CHANNEL_URL}\n\n"
-        "Premium: /premium"
+        f"📊 <b>Статус</b>\n"
+        f"{DIV}\n"
+        "🟢 Сканер онлайн\n"
+        "Сигналы идут в канал и на сайт.\n\n"
+        f"🌐 <a href=\"{SITE_URL}\">nowicki.trade</a>\n"
+        f"📡 <a href=\"{CHANNEL_URL}\">Канал сигналов</a>\n"
+        f"✍️ Поддержка: <a href=\"{SUPPORT_URL}\">@{SUPPORT_USER}</a>\n\n"
+        "Оплата: /premium"
     )
-    await send_message(chat_id, text, _main_keyboard())
+    await send_message(chat_id, text, _inline_home())
+
+
+async def send_support(chat_id: int):
+    text = (
+        f"✍️ <b>Поддержка</b>\n"
+        f"{DIV}\n"
+        f"После оплаты или по вопросам пиши:\n"
+        f"<a href=\"{SUPPORT_URL}\"><b>@{SUPPORT_USER}</b></a>\n\n"
+        "Укажи email аккаунта на nowicki.trade — так быстрее найдём заявку."
+    )
+    await send_message(chat_id, text, {"inline_keyboard": [
+        [{"text": f"Открыть @{SUPPORT_USER}", "url": SUPPORT_URL}],
+        [{"text": "💎 К оплате Premium", "callback_data": "premium"}],
+        [{"text": "🏠 В меню", "callback_data": "menu"}],
+    ]})
 
 
 async def handle_update(update: dict):
-    """Роутер команд и callback-кнопок из webhook."""
+    """Роутер команд, кнопок меню и callback."""
     cb = update.get("callback_query")
     if cb:
         chat_id = cb.get("message", {}).get("chat", {}).get("id")
         data = (cb.get("data") or "").strip().lower()
-        if chat_id and data in ("premium", "pay"):
+        await _api("answerCallbackQuery", {"callback_query_id": cb.get("id")})
+        if not chat_id:
+            return
+        if data in ("premium", "pay"):
             await send_premium(chat_id)
-            await _api("answerCallbackQuery", {"callback_query_id": cb.get("id")})
+        elif data == "status":
+            await send_status(chat_id)
+        elif data in ("help", "menu"):
+            await send_welcome(chat_id)
+        elif data == "support":
+            await send_support(chat_id)
         return
 
     message = update.get("message") or update.get("edited_message")
@@ -172,6 +241,21 @@ async def handle_update(update: dict):
     text = str(message.get("text") or "").strip()
     if not chat_id or not text:
         return
+
+    low = text.lower()
+    # кнопки reply-меню
+    if text in ("💎 Premium",) or low in ("premium", "оплатить"):
+        await send_premium(chat_id); return
+    if text in ("📊 Статус",) or low in ("status", "статус"):
+        await send_status(chat_id); return
+    if text in ("📖 Помощь",) or low in ("help", "помощь", "меню"):
+        await send_help(chat_id); return
+    if text in ("✍️ Поддержка",) or low in ("support", "поддержка"):
+        await send_support(chat_id); return
+    if text in ("📡 Канал",):
+        await send_message(chat_id, f"📡 Канал сигналов:\n{CHANNEL_URL}", _inline_home()); return
+    if text in ("🌐 Платформа",):
+        await send_message(chat_id, f"🌐 Платформа:\n{SITE_URL}", _inline_home()); return
 
     cmd, _, payload = text.partition(" ")
     cmd = cmd.split("@", 1)[0].lower()
@@ -184,10 +268,14 @@ async def handle_update(update: dict):
         await send_premium(chat_id)
     elif cmd in ("/status", "/stats"):
         await send_status(chat_id)
+    elif cmd in ("/support", "/pay_support"):
+        await send_support(chat_id)
     else:
         await send_message(
             chat_id,
-            "Не понял команду. Напиши /help — покажу доступные опции.",
+            f"Не понял 😕\nВыбери пункт меню или напиши /help\n\n"
+            f"После оплаты — @{SUPPORT_USER}",
+            _reply_menu(),
         )
 
 
