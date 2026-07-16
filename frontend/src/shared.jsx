@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 
-export const TG_CHANNEL = 'https://t.me/chlebchik'
-export const TG_BOT = 'https://t.me/trading4325_bot'
+export const TG_CHANNEL = 'https://telegram.me/chlebchik'
+export const TG_BOT = 'https://telegram.me/trading4325_bot'
 
 export const RESULT_LABEL = {
   tp1: 'TP1', tp2: 'TP2', tp3: 'TP3', sl: 'Стоп', be: 'Б/У',

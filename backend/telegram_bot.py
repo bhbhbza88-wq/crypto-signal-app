@@ -14,7 +14,7 @@ import httpx
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
-CHANNEL_URL = "https://t.me/chlebchik"
+CHANNEL_URL = "https://telegram.me/chlebchik"
 SITE_URL = "https://nowicki.trade"
 
 CRYPTO_PAY_ADDRESS = os.getenv("CRYPTO_PAY_ADDRESS", "").strip()

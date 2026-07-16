@@ -306,7 +306,7 @@ export default function App() {
           </div>
           <div className="topbar-right">
             <a className="btn-tg-bot" href={TG_BOT} target="_blank" rel="noopener noreferrer" aria-label="Telegram бот">
-              TG <span className="btn-tg-label">Бот</span>
+              Telegram <span className="btn-tg-label">Бот</span>
             </a>
             <button className="btn-trial" onClick={() => setTab('ai_assistant')}>AI Ассистент</button>
             {user ? (
