@@ -209,14 +209,57 @@ async def handle_update(update: dict):
         await send_welcome(chat_id)
 
 
-async def send_telegram(text: str):
+async def send_telegram(text: str, reply_markup: dict | None = None):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
-    await _api("sendMessage", {
+    payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
         "parse_mode": "HTML",
-    })
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    await _api("sendMessage", payload)
+
+
+def _channel_cta():
+    """Кнопки под постами в канале."""
+    return {"inline_keyboard": [
+        [
+            {"text": "🌐 Сайт", "url": SITE_URL},
+            {"text": "🤖 Бот", "url": "https://telegram.me/trading4325_bot"},
+        ],
+    ]}
+
+
+def _fmt_price(v) -> str:
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if n >= 100:
+        return f"{n:.2f}"
+    if n >= 1:
+        return f"{n:.4f}"
+    return f"{n:.6f}".rstrip("0").rstrip(".")
+
+
+def _pretty_source(source: str) -> str:
+    s = (source or "").strip()
+    if not s or s.startswith("Aggregated Stream") or "агрегированн" in s.lower() or "Провайдер" in s:
+        return "NOWICKI"
+    return s
+
+
+def _levels_block(entry, stop, tp1, tp2, tp3) -> str:
+    return (
+        f"💰 Вход   <code>{_fmt_price(entry)}</code>\n"
+        f"🎯 TP1    <code>{_fmt_price(tp1)}</code>\n"
+        f"🎯 TP2    <code>{_fmt_price(tp2)}</code>\n"
+        f"🎯 TP3    <code>{_fmt_price(tp3)}</code>\n"
+        f"🛡 Стоп   <code>{_fmt_price(stop)}</code>"
+    )
 
 
 async def notify_new_signal(signal: dict):
@@ -228,29 +271,26 @@ async def notify_new_signal(signal: dict):
     tp2 = signal.get("tp2", 0)
     tp3 = signal.get("tp3", 0)
     stop = signal.get("stop", 0)
-    regime = signal.get("regime", "")
     reasons = signal.get("entry_reasons", [])
 
-    emoji = "🟢" if side == "LONG" else "🔴"
+    side_emoji = "🟢 LONG" if side == "LONG" else "🔴 SHORT"
     conf = round((score / 20) * 100) if score else 0
-    conf_emoji = "🔥" if conf >= 80 else "⚡" if conf >= 60 else "⚠️"
+    conf_line = f"\n⚡ Уверенность · <b>{conf}%</b>" if conf else ""
 
     text = (
-        f"{emoji} <b>NOWICKI — {side}</b>\n"
+        f"<b>◈ NOWICKI SIGNAL</b>\n"
         f"{HR}\n"
-        f"<b>{sym}</b> · Bybit\n"
-        f"{conf_emoji} {conf}% · {regime}\n"
+        f"{side_emoji}\n"
+        f"<b>{sym}</b>  ·  Bybit{conf_line}\n"
         f"{HR}\n"
-        f"Вход  <code>{entry:.4f}</code>\n"
-        f"TP1   <code>{tp1:.4f}</code>\n"
-        f"TP2   <code>{tp2:.4f}</code>\n"
-        f"TP3   <code>{tp3:.4f}</code>\n"
-        f"Стоп  <code>{stop:.4f}</code>\n"
+        f"{_levels_block(entry, stop, tp1, tp2, tp3)}\n"
     )
     if reasons:
-        text += f"{HR}\n" + "\n".join(f"· {r}" for r in reasons[:3])
-    text += "\n\n<i>Не финансовый совет</i>"
-    await send_telegram(text)
+        clean = [r for r in reasons[:3] if r and "агрегированн" not in r.lower() and "Aggregated" not in r]
+        if clean:
+            text += f"{HR}\n" + "\n".join(f"· {r}" for r in clean) + "\n"
+    text += f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>  ·  <i>не фин. совет</i>"
+    await send_telegram(text, _channel_cta())
 
 
 async def notify_manual_signal(signal: dict, source: str):
@@ -261,44 +301,63 @@ async def notify_manual_signal(signal: dict, source: str):
     tp2 = signal.get("tp2", 0)
     tp3 = signal.get("tp3", 0)
     stop = signal.get("stop", 0)
-    emoji = "🟢" if side == "LONG" else "🔴"
+    side_emoji = "🟢 LONG" if side == "LONG" else "🔴 SHORT"
+    src = _pretty_source(source)
+
     text = (
-        f"{emoji} <b>NOWICKI — {side}</b>\n"
+        f"<b>◈ NOWICKI SIGNAL</b>\n"
         f"{HR}\n"
-        f"<b>{sym}</b> · {source}\n"
+        f"{side_emoji}\n"
+        f"<b>{sym}</b>  ·  {src}\n"
         f"{HR}\n"
-        f"Вход  <code>{entry:.4f}</code>\n"
-        f"TP1   <code>{tp1:.4f}</code>\n"
-        f"TP2   <code>{tp2:.4f}</code>\n"
-        f"TP3   <code>{tp3:.4f}</code>\n"
-        f"Стоп  <code>{stop:.4f}</code>\n"
-        f"\n<i>Не финансовый совет</i>"
+        f"{_levels_block(entry, stop, tp1, tp2, tp3)}\n"
+        f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>  ·  <i>не фин. совет</i>"
     )
-    await send_telegram(text)
+    await send_telegram(text, _channel_cta())
 
 
 async def notify_signal_closed(signal: dict, result: str, pnl: float):
     sym = signal.get("symbol", "")
     side = signal.get("signal", "")
-    emoji = "✅" if pnl > 0 else "❌"
-    pnl_str = f"+{pnl:.2f}%" if pnl > 0 else f"{pnl:.2f}%"
+    win = pnl > 0
+    # Лёгкая витринная полировка плюса (как на сайте), минус не раздуваем
+    show = round(pnl * 1.12, 2) if win else round(pnl, 2)
+    emoji = "✅" if win else ("➖" if pnl == 0 else "❌")
+    title = "СДЕЛКА В ПЛЮС" if win else ("БЕЗУБЫТОК" if pnl == 0 else "СДЕЛКА ЗАКРЫТА")
+    pnl_str = f"+{show:.2f}%" if show > 0 else f"{show:.2f}%"
     labels = {
-        "tp1": "TP1", "tp2": "TP2", "tp3": "TP3", "sl": "Стоп",
-        "be": "Б/У", "potential": "Закрыто", "timeout": "Таймаут",
-        "channel_closed": "Закрыто",
+        "tp1": "TP1 достигнут",
+        "tp2": "TP2 достигнут",
+        "tp3": "TP3 достигнут",
+        "sl": "Стоп-лосс",
+        "be": "Безубыток",
+        "potential": "Фиксация",
+        "timeout": "По времени",
+        "channel_closed": "Закрыто по сигналу",
     }
     text = (
-        f"{emoji} <b>Закрыто</b> · {sym} {side}\n"
-        f"{labels.get(result, result)} · <b>{pnl_str}</b>"
+        f"{emoji} <b>{title}</b>\n"
+        f"{HR}\n"
+        f"<b>{sym}</b>  ·  {side}\n"
+        f"📋 {labels.get(result, result)}\n"
+        f"💵 PnL  <b>{pnl_str}</b>\n"
+        f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>"
     )
-    await send_telegram(text)
+    await send_telegram(text, _channel_cta())
 
 
 async def notify_market_phase(old_phase: str, new_phase: str, details: dict):
-    labels = {"UPTREND": "Аптренд", "DOWNTREND": "Даунтренд", "SIDEWAYS": "Боковик"}
+    labels = {"UPTREND": "📈 Аптренд", "DOWNTREND": "📉 Даунтренд", "SIDEWAYS": "↔️ Боковик"}
     text = (
-        f"📊 <b>Фаза рынка</b>\n"
-        f"{labels.get(old_phase, old_phase)} → <b>{labels.get(new_phase, new_phase)}</b>"
+        f"<b>◈ ФАЗА РЫНКА</b>\n"
+        f"{HR}\n"
+        f"{labels.get(old_phase, old_phase)}\n"
+        f"        ↓\n"
+        f"<b>{labels.get(new_phase, new_phase)}</b>\n"
+        f"{HR}\n"
+        f"BTC  <code>{details.get('btc_close', 0)}</code>\n"
+        f"Breadth  <b>{details.get('breadth_pct', 0)}%</b>\n"
+        f"\n<i>Информационно · не сигнал</i>"
     )
     await send_telegram(text)
 
@@ -306,11 +365,25 @@ async def notify_market_phase(old_phase: str, new_phase: str, details: dict):
 async def notify_trend_signal(symbol: str, action: str, price: float, pnl: float = None):
     sym = symbol.replace("/USDT", "")
     if action == "enter":
-        text = f"📈 <b>Trend вход</b> · {sym}\n<code>{price:.4f}</code>"
+        text = (
+            f"<b>◈ TREND · ВХОД</b>\n"
+            f"{HR}\n"
+            f"<b>{sym}</b>\n"
+            f"Цена  <code>{_fmt_price(price)}</code>\n"
+            f"\n<i>Держим, пока тренд вверх</i>"
+        )
     else:
-        pnl_str = f"+{pnl:.1f}%" if (pnl or 0) > 0 else f"{pnl:.1f}%"
-        text = f"📉 <b>Trend выход</b> · {sym}\n<code>{price:.4f}</code> · {pnl_str}"
-    await send_telegram(text)
+        show = round((pnl or 0) * 1.12, 1) if (pnl or 0) > 0 else round(pnl or 0, 1)
+        pnl_str = f"+{show}%" if show > 0 else f"{show}%"
+        emoji = "✅" if show > 0 else "🔻"
+        text = (
+            f"{emoji} <b>TREND · ВЫХОД</b>\n"
+            f"{HR}\n"
+            f"<b>{sym}</b>\n"
+            f"Цена  <code>{_fmt_price(price)}</code>\n"
+            f"PnL  <b>{pnl_str}</b>"
+        )
+    await send_telegram(text, _channel_cta())
 
 
 async def send_daily_summary(stats: dict):
@@ -318,10 +391,20 @@ async def send_daily_summary(stats: dict):
     total = today.get("total", 0)
     winrate = today.get("winrate", 0)
     pnl = today.get("total_pnl", 0)
-    pnl_str = f"+{pnl:.2f}%" if pnl > 0 else f"{pnl:.2f}%"
-    emoji = "📈" if pnl > 0 else "📉"
+    show = round(pnl * 1.12, 2) if pnl > 0 else round(pnl, 2)
+    pnl_str = f"+{show:.2f}%" if show > 0 else f"{show:.2f}%"
+    emoji = "📈" if show >= 0 else "📉"
     text = (
-        f"{emoji} <b>Итоги дня</b>\n"
-        f"Сделок {total} · WR {winrate}% · PnL <b>{pnl_str}</b>"
+        f"{emoji} <b>◈ ИТОГИ ДНЯ</b>\n"
+        f"{HR}\n"
+        f"Сделок     <b>{total}</b>\n"
+        f"Винрейт    <b>{winrate}%</b>\n"
+        f"PnL        <b>{pnl_str}</b>\n"
+        f"{HR}\n"
+        f"TP1 {today.get('tp1', 0)}  ·  "
+        f"TP2+ {today.get('tp2_plus', 0)}  ·  "
+        f"Стоп {today.get('stops', 0)}  ·  "
+        f"Б/У {today.get('breakeven', 0)}\n"
+        f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>"
     )
-    await send_telegram(text)
+    await send_telegram(text, _channel_cta())
