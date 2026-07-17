@@ -382,11 +382,11 @@ async def _backfill_loop(client, channels: dict, last_ids: dict):
                 print(f"[telegram_ingest] Ошибка догоняющего опроса {display_name}: {e}")
 
 
-async def run():
-    if not is_configured():
-        print("[telegram_ingest] Не сконфигурирован (нужны TELEGRAM_API_ID/HASH/SESSION/SOURCE_CHANNELS) — пропуск запуска")
-        return
+STARTUP_LOOKBACK = 40  # при старте перечитаем хвост канала — иначе посты за downtime теряются
 
+
+async def _run_once():
+    """Один цикл: connect → listen → disconnect. Вызывающий run() перезапускает при обрыве."""
     from telethon import TelegramClient, events
     from telethon.sessions import StringSession
 
@@ -406,14 +406,53 @@ async def run():
     await client.start()
 
     last_ids = {}
-    for username in channels:
+    for username, display_name in channels.items():
         try:
-            latest = await client.get_messages(username, limit=1)
-            last_ids[username] = latest[0].id if latest else 0
+            # Хвост канала: догоняем то, что пропустили пока процесс/Telethon были мёртвы.
+            # Раньше ставили last_id = latest и теряли все посты за downtime навсегда.
+            recent = await client.get_messages(username, limit=STARTUP_LOOKBACK)
+            if not recent:
+                last_ids[username] = 0
+                continue
+            last_ids[username] = min(m.id for m in recent) - 1
+            for msg in reversed(list(recent)):
+                if msg.id > last_ids.get(username, 0):
+                    last_ids[username] = msg.id
+                try:
+                    await _handle_message(display_name, msg)
+                except Exception as e:
+                    print(f"[telegram_ingest] Ошибка стартового догона {display_name}: {e}")
+            print(f"[telegram_ingest] Стартовый догон {display_name}: {len(recent)} сообщений")
         except Exception as e:
-            print(f"[telegram_ingest] Не удалось получить последний message id для {channels[username]}: {e}")
+            print(f"[telegram_ingest] Не удалось прочитать {display_name}: {e}")
             last_ids[username] = 0
-    asyncio.create_task(_backfill_loop(client, channels, last_ids))
 
+    backfill_task = asyncio.create_task(_backfill_loop(client, channels, last_ids))
     print(f"[telegram_ingest] Запущен, слушаю каналы: {', '.join(channels.values())}")
-    await client.run_until_disconnected()
+    try:
+        await client.run_until_disconnected()
+    finally:
+        backfill_task.cancel()
+        try:
+            await backfill_task
+        except asyncio.CancelledError:
+            pass
+        print("[telegram_ingest] Соединение с Telegram оборвалось")
+
+
+async def run():
+    """Держим ingest живым: после disconnect/crash ждём и поднимаем снова."""
+    if not is_configured():
+        print("[telegram_ingest] Не сконфигурирован (нужны TELEGRAM_API_ID/HASH/SESSION/SOURCE_CHANNELS) — пропуск запуска")
+        return
+
+    delay = 5
+    while True:
+        try:
+            await _run_once()
+            delay = 5
+        except Exception as e:
+            print(f"[telegram_ingest] Упал: {e}")
+        print(f"[telegram_ingest] Переподключение через {delay}с…")
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 120)
