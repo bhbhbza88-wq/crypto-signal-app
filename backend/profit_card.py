@@ -103,35 +103,39 @@ def render_profit_card(
     W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # координаты относительно шаблона (масштабируем от эталона ~1080)
-    sx = W / 1080
-    sy = H / 1080
-    pad = int(72 * sx)
+    # раскладка как на Binance share (текст сверху слева, много воздуха снизу)
+    sx = W / 1080.0
+    sy = H / 1080.0
+    pad = int(56 * sx)
 
-    font_pair = _font(max(28, int(52 * sx)), bold=True)
-    font_side = _font(max(22, int(40 * sx)), bold=True)
-    font_roi = _font(max(48, int(120 * sx)), bold=True)
-    font_label = _font(max(18, int(32 * sx)))
-    font_val = _font(max(22, int(40 * sx)), bold=True)
+    font_pair = _font(max(26, int(48 * sx)), bold=True)
+    font_side = _font(max(22, int(36 * sx)), bold=True)
+    font_roi = _font(max(56, int(132 * sx)), bold=True)
+    font_label = _font(max(18, int(30 * sx)))
+    font_val = _font(max(22, int(38 * sx)), bold=True)
 
-    y = int(100 * sy)
+    # 1) пара
+    y = int(88 * sy)
     draw.text((pad, y), pair_line, font=font_pair, fill=WHITE)
 
-    y = int(178 * sy)
+    # 2) Лонг/Шорт | Nx — сразу под парой
+    y = int(155 * sy)
     side_text = f"{side_ru} "
     draw.text((pad, y), side_text, font=font_side, fill=side_color)
     sw = draw.textlength(side_text, font=font_side)
     draw.text((pad + sw, y), f"| {leverage}x", font=font_side, fill=GREY)
 
-    y = int(280 * sy)
+    # 3) крупный ROI — заметный отступ после стороны
+    y = int(250 * sy)
     draw.text((pad, y), roi_str, font=font_roi, fill=roi_color)
 
-    y = int(460 * sy)
-    col2_x = int(W * 0.52)
+    # 4) две колонки цен — ещё отступ вниз
+    y = int(455 * sy)
+    col2_x = int(W * 0.50)
     draw.text((pad, y), "Цена входа", font=font_label, fill=GREY)
     draw.text((col2_x, y), "Последняя цена", font=font_label, fill=GREY)
 
-    y = int(512 * sy)
+    y = int(505 * sy)
     draw.text((pad, y), _fmt_price(entry), font=font_val, fill=WHITE)
     draw.text((col2_x, y), _fmt_price(exit_price), font=font_val, fill=WHITE)
 
