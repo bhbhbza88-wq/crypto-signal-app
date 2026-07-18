@@ -21,8 +21,10 @@ _lock = threading.Lock()
 
 @contextmanager
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=5)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     try:
         yield conn
         conn.commit()
@@ -167,6 +169,9 @@ def init_db():
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_tokens_user ON auth_tokens(user_id, kind)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_history_trader ON history(trader_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_history_date ON history(date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)")
 
         # ── Трейдеры (авторы сигналов) ────────────────────────────
         conn.execute("""
@@ -653,24 +658,107 @@ def list_traders(only_active=False):
         traders = conn.execute(
             "SELECT * FROM traders" + (" WHERE is_active=1" if only_active else "") + " ORDER BY id"
         ).fetchall()
+        hist_rows = conn.execute("""
+            SELECT trader_id,
+                   COUNT(*) AS closed,
+                   SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                   COALESCE(SUM(pnl), 0) AS total_pnl
+            FROM history
+            WHERE trader_id IS NOT NULL
+            GROUP BY trader_id
+        """).fetchall()
+        hist_by_id = {r['trader_id']: r for r in hist_rows}
+        open_rows = conn.execute("""
+            SELECT trader_id, COUNT(*) AS c
+            FROM open_trades
+            WHERE trader_id IS NOT NULL
+            GROUP BY trader_id
+        """).fetchall()
+        open_by_id = {r['trader_id']: r['c'] for r in open_rows}
         out = []
         for t in traders:
             t = dict(t)
-            hist = conn.execute(
-                "SELECT result, pnl FROM history WHERE trader_id=?", (t['id'],)
-            ).fetchall()
-            open_count = conn.execute(
-                "SELECT COUNT(*) c FROM open_trades WHERE trader_id=?", (t['id'],)
-            ).fetchone()['c']
-            closed = len(hist)
-            wins = sum(1 for h in hist if h['pnl'] > 0)
-            total_pnl = sum(h['pnl'] for h in hist)
+            h = hist_by_id.get(t['id'])
+            closed = int(h['closed']) if h else 0
+            wins = int(h['wins'] or 0) if h else 0
+            total_pnl = float(h['total_pnl'] or 0) if h else 0.0
             t['closed_trades'] = closed
-            t['open_positions'] = open_count
+            t['open_positions'] = int(open_by_id.get(t['id'], 0))
             t['winrate'] = round(wins / closed * 100, 1) if closed else None
             t['total_pnl'] = round(total_pnl, 2)
             out.append(t)
         return out
+
+
+def get_traders_by_ids(ids):
+    """Лёгкий lookup без агрегатов — для /api/signals."""
+    ids = [i for i in ids if i is not None]
+    if not ids:
+        return {}
+    with get_conn() as conn:
+        placeholders = ",".join("?" * len(ids))
+        rows = conn.execute(
+            f"SELECT id, name, avatar_url, source_type FROM traders WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        return {r['id']: dict(r) for r in rows}
+
+
+def _stats_bucket(conn, where_sql="", params=()):
+    """Одна корзина метрик как у _summarize в main.py."""
+    row = conn.execute(f"""
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN result = 'sl' THEN 1 ELSE 0 END) AS stops,
+            SUM(CASE WHEN result IN ('be', 'potential') THEN 1 ELSE 0 END) AS breakeven,
+            SUM(CASE WHEN result = 'tp1' THEN 1 ELSE 0 END) AS tp1,
+            COALESCE(SUM(pnl), 0) AS total_pnl
+        FROM history
+        {where_sql}
+    """, params).fetchone()
+    total = int(row['total'] or 0)
+    if not total:
+        return {
+            "total": 0, "winrate": 0, "tp1": 0, "tp2_plus": 0,
+            "stops": 0, "breakeven": 0, "total_pnl": 0, "avg_pnl": 0,
+            "best": None, "worst": None,
+        }
+    wins = int(row['wins'] or 0)
+    tp1s = int(row['tp1'] or 0)
+    total_pnl = float(row['total_pnl'] or 0)
+    best = conn.execute(
+        f"SELECT symbol, pnl FROM history {where_sql} ORDER BY pnl DESC LIMIT 1", params
+    ).fetchone()
+    worst = conn.execute(
+        f"SELECT symbol, pnl FROM history {where_sql} ORDER BY pnl ASC LIMIT 1", params
+    ).fetchone()
+    return {
+        "total": total,
+        "winrate": round(wins / total * 100, 1),
+        "tp1": tp1s,
+        "tp2_plus": wins - tp1s,
+        "stops": int(row['stops'] or 0),
+        "breakeven": int(row['breakeven'] or 0),
+        "total_pnl": round(total_pnl, 2),
+        "avg_pnl": round(total_pnl / total, 2),
+        "best": {"symbol": best['symbol'], "pnl": best['pnl']} if best else None,
+        "worst": {"symbol": worst['symbol'], "pnl": worst['pnl']} if worst else None,
+    }
+
+
+def get_stats_summaries():
+    """today / week / all_time без загрузки тысяч строк в Python."""
+    from datetime import timedelta
+    now = datetime.now()
+    today_str = now.strftime('%Y-%m-%d')
+    week_ago = (now - timedelta(days=7)).strftime('%Y-%m-%d')
+    with get_conn() as conn:
+        return {
+            "today": _stats_bucket(conn, "WHERE date=?", (today_str,)),
+            "week": _stats_bucket(conn, "WHERE date>=?", (week_ago,)),
+            "all_time": _stats_bucket(conn),
+        }
 
 
 def update_trader(trader_id, name=None, avatar_url=None, bio=None, is_active=None):

@@ -172,9 +172,9 @@ def send_email(to: str, subject: str, text: str, html: str | None = None) -> boo
         return False
     try:
         # HTTP сначала: Railway блокирует исходящий SMTP (Errno 101).
+        # Если Resend настроен — только он (без Gmail/SMTP fallback с длинными таймаутами).
         if RESEND_API_KEY:
-            if _send_resend(to, subject, text, html):
-                return True
+            return _send_resend(to, subject, text, html)
         if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN:
             if _send_gmail_api(to, subject, text, html):
                 return True

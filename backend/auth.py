@@ -8,10 +8,23 @@ import os
 import hmac
 import hashlib
 import secrets
+import threading
 from datetime import datetime, timedelta
 
 import database as db
 import email_smtp
+
+
+def _send_email_bg(fn, *args):
+    """Не блокируем HTTP-ответ ожиданием Resend/SMTP."""
+    def _run():
+        try:
+            ok = fn(*args)
+            if not ok:
+                print(f"[email] background send returned False: {fn.__name__}")
+        except Exception as e:
+            print(f"[email] background send failed: {e}")
+    threading.Thread(target=_run, daemon=True, name="email-send").start()
 
 PBKDF2_ITERATIONS = 200_000
 SESSION_DAYS = 30
@@ -123,9 +136,7 @@ def register(email: str, password: str):
 
     if need_verify:
         token = _create_token(uid, 'verify', VERIFY_HOURS)
-        sent = email_smtp.send_verify_email(email, token)
-        if not sent:
-            return None, 'Не удалось отправить письмо. Попробуй позже или войди через Google.'
+        _send_email_bg(email_smtp.send_verify_email, email, token)
         return {
             'needs_verification': True,
             'email': email,
@@ -168,8 +179,7 @@ def resend_verification(email: str):
     if not email_smtp.is_configured():
         return None, 'Отправка писем не настроена'
     token = _create_token(user['id'], 'verify', VERIFY_HOURS)
-    if not email_smtp.send_verify_email(email, token):
-        return None, 'Не удалось отправить письмо'
+    _send_email_bg(email_smtp.send_verify_email, email, token)
     return {'ok': True, 'message': ok_msg}, None
 
 
@@ -182,8 +192,7 @@ def request_password_reset(email: str):
     if not email_smtp.is_configured():
         return None, 'Отправка писем не настроена'
     token = _create_token(user['id'], 'reset', RESET_HOURS)
-    if not email_smtp.send_reset_email(email, token):
-        return None, 'Не удалось отправить письмо'
+    _send_email_bg(email_smtp.send_reset_email, email, token)
     return {'ok': True, 'message': ok_msg}, None
 
 

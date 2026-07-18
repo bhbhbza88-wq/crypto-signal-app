@@ -564,10 +564,21 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
 
 # ── API endpoints ────────────────────────────────────────────────
 
+@app.get("/health")
+def health():
+    try:
+        with db.get_conn() as conn:
+            conn.execute("SELECT 1").fetchone()
+        return {"ok": True, "db": True}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"db unavailable: {e}")
+
+
 @app.get("/api/signals")
 def get_active_signals():
     trades = db.load_trades()
-    traders_by_id = {t['id']: t for t in db.list_traders(only_active=False)}
+    trader_ids = {t.get('trader_id') for t in trades.values() if t.get('trader_id')}
+    traders_by_id = db.get_traders_by_ids(trader_ids)
     out = []
     for symbol, t in trades.items():
         candles = []
@@ -576,17 +587,6 @@ def get_active_signals():
                 candles = json.loads(t['candles_json'])
             except (TypeError, json.JSONDecodeError):
                 candles = []
-        # Telegram-импорт раньше не писал свечи — догружаем с Bybit и сохраняем
-        if not candles:
-            try:
-                import data_layer
-                cj = data_layer.fetch_candles_json(symbol)
-                if cj:
-                    candles = json.loads(cj)
-                    t['candles_json'] = cj
-                    db.upsert_trade(symbol, t)
-            except Exception as e:
-                print(f"[api/signals] candles backfill {symbol}: {e}")
         entry_reasons = json.loads(t['entry_reasons_json']) if t.get('entry_reasons_json') else []
         trader = traders_by_id.get(t.get('trader_id'))
         out.append({
@@ -609,17 +609,20 @@ def get_active_signals():
     return out
 
 
+_stats_cache = {"ts": 0.0, "data": None}
+_STATS_TTL_SEC = 45
+
+
 @app.get("/api/stats")
 def get_stats():
-    history   = db.load_history(limit=5000)
-    now       = datetime.now()
-    today_str = now.strftime('%Y-%m-%d')
-    week_ago  = now - timedelta(days=7)
-    return {
-        "today":    _summarize([t for t in history if t['date'] == today_str]),
-        "week":     _summarize([t for t in history if datetime.strptime(t['date'], '%Y-%m-%d') >= week_ago]),
-        "all_time": _summarize(history),
-    }
+    now = _time.time()
+    cached = _stats_cache["data"]
+    if cached is not None and (now - _stats_cache["ts"]) < _STATS_TTL_SEC:
+        return cached
+    data = db.get_stats_summaries()
+    _stats_cache["ts"] = now
+    _stats_cache["data"] = data
+    return data
 
 
 def _summarize(trades):

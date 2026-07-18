@@ -9,7 +9,7 @@ from datetime import datetime
 import database as db
 import nfi_strategy
 import telegram_bot
-from data_layer import fetch_data_cached, build_features, fetch_ticker
+from data_layer import fetch_data_cached, build_features, fetch_ticker, fetch_candles_json
 from nfi_strategy import (
     set_cooldown, record_daily_loss,
     calc_chandelier_exit,
@@ -175,6 +175,16 @@ def check_trades():
 
     for symbol, trade in open_trades.items():
         try:
+            # Старые TG-сделки без свечей — догружаем в фоне, не на /api/signals
+            if not trade.get('candles_json'):
+                try:
+                    cj = fetch_candles_json(symbol)
+                    if cj:
+                        trade['candles_json'] = cj
+                        db.upsert_trade(symbol, trade)
+                except Exception as e:
+                    print(f"[tracker] candles backfill {symbol}: {e}")
+
             ticker = fetch_ticker(symbol)
             if not ticker or ticker.get('last') is None:
                 continue

@@ -12,7 +12,9 @@ const AIChat = lazy(() => import('./AIChat'))
 const Admin = lazy(() => import('./Admin'))
 const ChannelAnalyzer = lazy(() => import('./ChannelAnalyzer'))
 
-const POLL_INTERVAL = 15000
+const POLL_SIGNALS_MS = 30000
+const POLL_STATS_MS = 75000
+const CORE_POLL_TABS = new Set(['overview', 'history'])
 const VALID_TABS = new Set(APP_SECTIONS)
 
 // Ошибка в одной вкладке не должна ронять всё приложение в белый экран
@@ -178,16 +180,59 @@ export default function App() {
 
   useEffect(() => { requestPush() }, [])
 
-  const fetchCore = useCallback(async () => {
+  const fetchSignals = useCallback(async () => {
     try {
-      const [s, h, st] = await Promise.all([api.getSignals(), api.getHistory(50), api.getStats()])
-      if (s.length > 0 && prevRef.current.length === 0) sendPush(`🚨 NOWICKI: ${s[0].signal} ${s[0].symbol}`, `Score ${s[0].score}/20`)
-      prevRef.current = s; setSignals(s); setHistory(h); setStats(st); setError(null)
-    } catch { setError('Нет связи с сервером.') }
-    finally { setLoading(false) }
+      const s = await api.getSignals()
+      if (s.length > 0 && prevRef.current.length === 0) {
+        sendPush(`🚨 NOWICKI: ${s[0].signal} ${s[0].symbol}`, `Score ${s[0].score}/20`)
+      }
+      prevRef.current = s
+      setSignals(s)
+      setError(null)
+    } catch {
+      setError('Нет связи с сервером.')
+    }
   }, [])
 
-  useEffect(() => { fetchCore(); const id = setInterval(fetchCore, POLL_INTERVAL); return () => clearInterval(id) }, [fetchCore])
+  const fetchStatsHistory = useCallback(async () => {
+    try {
+      const [h, st] = await Promise.all([api.getHistory(50), api.getStats()])
+      setHistory(h)
+      setStats(st)
+      setError(null)
+    } catch {
+      setError('Нет связи с сервером.')
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const boot = async () => {
+      await Promise.all([fetchSignals(), fetchStatsHistory()])
+      if (!cancelled) setLoading(false)
+    }
+    boot()
+
+    const shouldPoll = () =>
+      document.visibilityState === 'visible' && CORE_POLL_TABS.has(tab)
+
+    const sigId = setInterval(() => { if (shouldPoll()) fetchSignals() }, POLL_SIGNALS_MS)
+    const stId = setInterval(() => { if (shouldPoll()) fetchStatsHistory() }, POLL_STATS_MS)
+
+    const onVis = () => {
+      if (shouldPoll()) {
+        fetchSignals()
+        fetchStatsHistory()
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      cancelled = true
+      clearInterval(sigId)
+      clearInterval(stId)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [fetchSignals, fetchStatsHistory, tab])
 
   const isPremium = !!user && (user.tier === 'premium' || user.tier === 'vip')
 
