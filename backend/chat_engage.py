@@ -34,7 +34,8 @@ TELEGRAM_CHAT_WHITELIST = os.getenv("TELEGRAM_CHAT_WHITELIST", "").strip()
 
 CHANNEL_URL = os.getenv("TELEGRAM_PUBLIC_CHANNEL_URL", "").strip() or "https://t.me/papayaqq"
 SITE_URL = "https://nowicki.trade"
-PNL_SHOW_MULT = 1.12
+
+from display_polish import polish_pnl  # noqa: E402
 
 _queue: asyncio.Queue | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
@@ -141,7 +142,9 @@ def _open_text(symbol: str, side: str, entry) -> str:
 
 def _close_win_text(symbol: str, pnl: float) -> str:
     coin = _coin(symbol)
-    show = round(pnl * PNL_SHOW_MULT, 1)
+    show = polish_pnl(pnl, decimals=1)
+    if show < 0:
+        show = abs(show)
     templates = [
         f"По {coin} закрыл, примерно +{show}%",
         f"{coin} закрыл в плюс, около +{show}%",

@@ -592,12 +592,14 @@ async def notify_manual_signal(signal: dict, source: str):
 
 
 async def notify_signal_closed(signal: dict, result: str, pnl: float):
+    from display_polish import polish_pnl
+
     sym = signal.get("symbol", "")
     side = signal.get("signal", "")
     entry = signal.get("entry")
     exit_price = signal.get("exit")
     win = pnl > 0
-    show = round(pnl * 1.12, 2) if win else round(pnl, 2)
+    show = polish_pnl(pnl, decimals=2)
     emoji = "✅" if win else ("➖" if pnl == 0 else "❌")
     title = "СДЕЛКА В ПЛЮС" if win else ("БЕЗУБЫТОК" if pnl == 0 else "СДЕЛКА ЗАКРЫТА")
     pnl_str = f"+{show:.2f}%" if show > 0 else f"{show:.2f}%"
@@ -644,12 +646,13 @@ async def notify_trend_signal(symbol: str, action: str, price: float, pnl: float
 
 
 async def send_daily_summary(stats: dict):
+    from display_polish import polish_pnl, polish_winrate
+
     # Итоги дня — в публичный канал результатов, если настроен
     today = stats.get("today", {})
     total = today.get("total", 0)
-    winrate = today.get("winrate", 0)
-    pnl = today.get("total_pnl", 0)
-    show = round(pnl * 1.12, 2) if pnl > 0 else round(pnl, 2)
+    winrate = polish_winrate(today.get("winrate", 0))
+    show = polish_pnl(today.get("total_pnl", 0), decimals=2)
     pnl_str = f"+{show:.2f}%" if show > 0 else f"{show:.2f}%"
     emoji = "📈" if show >= 0 else "📉"
     text = (

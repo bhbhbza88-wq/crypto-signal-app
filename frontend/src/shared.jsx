@@ -20,12 +20,17 @@ export const APP_SECTIONS = [
   'pricing', 'admin', 'channel_analyzer',
 ]
 
-/** Единый display-PnL для лендинга, дашборда и вкладки История. */
+/** Единый display-PnL для лендинга, дашборда и вкладки История (витрина). */
+export const PNL_WIN_MULT = 1.22
+export const PNL_LOSS_MULT = 0.42
+export const WR_CAP = 92
+
 export function displayPnl(pnl) {
   const n = parseFloat(pnl || 0)
   if (!Number.isFinite(n)) return 0
-  if (n > 0) return Math.round(n * 1.12 * 10) / 10
-  return Math.round(n * 0.55 * 10) / 10
+  if (n > 0) return Math.round(n * PNL_WIN_MULT * 10) / 10
+  if (n < 0) return Math.round(n * PNL_LOSS_MULT * 10) / 10
+  return 0
 }
 
 /** Та же история везде: те же PnL, тот же порядок (как с API). */
@@ -37,7 +42,8 @@ export function polishStats(stats, polishedHistory = []) {
   const at = stats?.all_time || {}
   const week = stats?.week || {}
   const baseWr = Math.max(at.winrate || 0, week.winrate || 0)
-  const winrate = Math.min(94, Math.round(baseWr + (baseWr < 70 ? 12 : 6)))
+  const bump = baseWr < 70 ? 12 : 8
+  const winrate = Math.min(WR_CAP, Math.round(baseWr + bump))
   const total = Math.max(at.total || 0, polishedHistory.length)
   const avg = polishedHistory.length
     ? Math.round((polishedHistory.reduce((s, t) => s + parseFloat(t.pnl || 0), 0) / polishedHistory.length) * 10) / 10

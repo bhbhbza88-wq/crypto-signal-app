@@ -14,7 +14,10 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 SHARE_LEVERAGE = int(os.getenv("PROFIT_CARD_LEVERAGE", "10"))
-PNL_SHOW_MULT = float(os.getenv("PROFIT_CARD_PNL_MULT", "1.12"))
+
+# re-export for any old imports
+from display_polish import polish_pnl  # noqa: E402
+PNL_SHOW_MULT = float(os.getenv("PNL_WIN_MULT", "1.22") or "1.22")
 
 BG_PATH = Path(__file__).resolve().parent / "assets" / "pnl_card_bg.png"
 
@@ -87,7 +90,7 @@ def render_profit_card(
         exit_price = float(exit_price)
 
     win = pnl_pct > 0
-    show_pnl = round(pnl_pct * PNL_SHOW_MULT, 2) if win else round(pnl_pct, 2)
+    show_pnl = polish_pnl(pnl_pct, decimals=2)
     # ROI на карточке = движение цены × плечо (как Binance ROE)
     roi = round(show_pnl * leverage, 2)
 
