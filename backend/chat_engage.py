@@ -1,5 +1,5 @@
 """
-Chat Engage — отдельный user-аккаунт пишет в whitelist-чаты «как человек»:
+Chat Engage — пишет в whitelist-чаты «как человек» по реальным сделкам NOWICKI.
 
   открыли сигнал  → «здарова, вот монету нашёл, зашёл…»
   закрыли в плюс  → в тех же чатах «отработала, +X%»
@@ -7,12 +7,14 @@ Chat Engage — отдельный user-аккаунт пишет в whitelist-�
   спросили «где берёшь» → мягко сайт + канал
 
 Env:
-  TELEGRAM_API_ID / TELEGRAM_API_HASH  — те же, что у ingest
-  TELEGRAM_CHAT_SESSION                — StringSession ВТОРОГО аккаунта
-  TELEGRAM_CHAT_WHITELIST              — username или -100id через запятую
+  TELEGRAM_API_ID / TELEGRAM_API_HASH
+  TELEGRAM_CHAT_WHITELIST              — username чатов через запятую (обязательно)
+  TELEGRAM_CHAT_SESSION                — опционально, второй аккаунт
+  TELEGRAM_SESSION                     — fallback, если CHAT_SESSION пустой
 
-Один Telethon-клиент в фоне (очередь) — иначе две сессии с одним ключом конфликтуют.
-Без сессии / whitelist — no-op.
+Режим shared (один аккаунт с ingest): не поднимаем второй Telethon-клиент —
+ingest вызывает attach_to_client(client). Иначе AuthKeyDuplicatedError.
+Отдельный аккаунт: TELEGRAM_CHAT_SESSION ≠ TELEGRAM_SESSION → run() сам.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ import database as db
 
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "")
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
+TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "").strip()
 TELEGRAM_CHAT_SESSION = os.getenv("TELEGRAM_CHAT_SESSION", "").strip()
 TELEGRAM_CHAT_WHITELIST = os.getenv("TELEGRAM_CHAT_WHITELIST", "").strip()
 
@@ -35,6 +38,7 @@ PNL_SHOW_MULT = 1.12
 
 _queue: asyncio.Queue | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
+_attached = False
 
 ASK_RE = re.compile(
     r"(где\s+(бер|наход|смотр|берёшь|берешь|нашел|нашёл)|"
@@ -47,13 +51,26 @@ ASK_RE = re.compile(
 )
 
 
+def _session_string() -> str:
+    return TELEGRAM_CHAT_SESSION or TELEGRAM_SESSION
+
+
+def uses_ingest_session() -> bool:
+    """True = пишем тем же аккаунтом, что и ingest — отдельный клиент нельзя."""
+    if not TELEGRAM_CHAT_WHITELIST:
+        return False
+    if not TELEGRAM_CHAT_SESSION:
+        return True
+    return TELEGRAM_CHAT_SESSION == TELEGRAM_SESSION
+
+
 def is_configured() -> bool:
-    return bool(
-        TELEGRAM_API_ID
-        and TELEGRAM_API_HASH
-        and TELEGRAM_CHAT_SESSION
-        and TELEGRAM_CHAT_WHITELIST
-    )
+    return bool(TELEGRAM_API_ID and TELEGRAM_API_HASH and _session_string() and TELEGRAM_CHAT_WHITELIST)
+
+
+def needs_own_client() -> bool:
+    """Отдельный run() только если есть свой CHAT_SESSION, отличный от ingest."""
+    return is_configured() and not uses_ingest_session()
 
 
 def _whitelist() -> list[str]:
@@ -110,7 +127,6 @@ def _soft_promo_reply() -> str:
 
 
 def _enqueue(job: dict) -> None:
-    """Кладём задачу в очередь воркера (thread-safe — трекер в другом потоке)."""
     if _queue is None or _main_loop is None:
         print("[chat_engage] воркер ещё не готов — пост пропущен")
         return
@@ -166,22 +182,96 @@ async def _do_close(client, symbol: str, side: str, result: str, pnl: float) -> 
     db.clear_chat_engage_posts(symbol)
 
 
+async def _worker_loop(client):
+    while True:
+        job = await _queue.get()
+        try:
+            if job["kind"] == "open":
+                await _do_open(client, job["symbol"], job["side"], job["entry"])
+            elif job["kind"] == "close":
+                await _do_close(
+                    client, job["symbol"], job["side"],
+                    job.get("result", ""), job.get("pnl", 0),
+                )
+        except Exception as e:
+            print(f"[chat_engage] job error: {e}")
+        finally:
+            _queue.task_done()
+
+
+def _register_ask_handler(client, me):
+    from telethon import events
+
+    @client.on(events.NewMessage(incoming=True))
+    async def on_msg(event):
+        text = event.raw_text or ""
+        if not ASK_RE.search(text):
+            return
+        if event.sender_id == me.id:
+            return
+        if not event.is_private:
+            mentioned = bool(getattr(event.message, "mentioned", False))
+            is_reply_to_us = False
+            if event.is_reply and event.reply_to:
+                try:
+                    replied = await event.get_reply_message()
+                    is_reply_to_us = replied and replied.sender_id == me.id
+                except Exception:
+                    pass
+            if not (mentioned or is_reply_to_us):
+                return
+        await asyncio.sleep(random.uniform(2, 6))
+        await event.respond(_soft_promo_reply())
+
+
+async def attach_to_client(client) -> asyncio.Task | None:
+    """Подцепить очередь к уже запущенному ingest-клиенту (один аккаунт)."""
+    global _queue, _main_loop, _attached
+    if not is_configured() or not uses_ingest_session():
+        return None
+    if _attached:
+        return None
+    _main_loop = asyncio.get_running_loop()
+    _queue = asyncio.Queue()
+    me = await client.get_me()
+    _register_ask_handler(client, me)
+    task = asyncio.create_task(_worker_loop(client))
+    _attached = True
+    print(
+        f"[chat_engage] shared с ingest: @{me.username or me.id}, "
+        f"чаты: {', '.join(_whitelist())}"
+    )
+    return task
+
+
+def detach():
+    """Сброс при disconnect ingest — следующий _run_once снова attach."""
+    global _queue, _main_loop, _attached
+    _attached = False
+    _queue = None
+    _main_loop = None
+
+
 async def run():
-    """Один клиент: очередь open/close + ответы на «где берёшь»."""
+    """Отдельный аккаунт (TELEGRAM_CHAT_SESSION свой)."""
     global _queue, _main_loop
-    if not is_configured():
-        print("[chat_engage] не сконфигурирован (CHAT_SESSION + WHITELIST) — пропуск")
+    if not needs_own_client():
+        if is_configured() and uses_ingest_session():
+            print("[chat_engage] режим shared — ждём attach от telegram_ingest")
+        else:
+            print("[chat_engage] не сконфигурирован (нужен WHITELIST) — пропуск")
         return
 
-    from telethon import TelegramClient, events
+    from telethon import TelegramClient
     from telethon.sessions import StringSession
 
     _main_loop = asyncio.get_running_loop()
     _queue = asyncio.Queue()
-    print(f"[chat_engage] запущен, чаты: {', '.join(_whitelist())}")
+    print(f"[chat_engage] отдельный аккаунт, чаты: {', '.join(_whitelist())}")
 
     while True:
         client = None
+        worker_task = None
         try:
             client = TelegramClient(
                 StringSession(TELEGRAM_CHAT_SESSION),
@@ -193,63 +283,25 @@ async def run():
                 raise RuntimeError("TELEGRAM_CHAT_SESSION не авторизована")
             me = await client.get_me()
             print(f"[chat_engage] online as {me.first_name} (@{me.username or me.id})")
-
-            @client.on(events.NewMessage(incoming=True))
-            async def on_msg(event):
-                text = event.raw_text or ""
-                if not ASK_RE.search(text):
-                    return
-                if event.sender_id == me.id:
-                    return
-                # в группах — только reply/mention; в ЛС — всегда
-                if not event.is_private:
-                    mentioned = bool(getattr(event.message, "mentioned", False))
-                    is_reply_to_us = False
-                    if event.is_reply and event.reply_to:
-                        try:
-                            replied = await event.get_reply_message()
-                            is_reply_to_us = replied and replied.sender_id == me.id
-                        except Exception:
-                            pass
-                    if not (mentioned or is_reply_to_us):
-                        return
-                await asyncio.sleep(random.uniform(2, 6))
-                await event.respond(_soft_promo_reply())
-
-            async def worker():
-                while True:
-                    job = await _queue.get()
-                    try:
-                        if job["kind"] == "open":
-                            await _do_open(client, job["symbol"], job["side"], job["entry"])
-                        elif job["kind"] == "close":
-                            await _do_close(
-                                client, job["symbol"], job["side"],
-                                job.get("result", ""), job.get("pnl", 0),
-                            )
-                    except Exception as e:
-                        print(f"[chat_engage] job error: {e}")
-                    finally:
-                        _queue.task_done()
-
-            worker_task = asyncio.create_task(worker())
-            try:
-                await client.run_until_disconnected()
-            finally:
-                worker_task.cancel()
-                try:
-                    await worker_task
-                except asyncio.CancelledError:
-                    pass
+            _register_ask_handler(client, me)
+            worker_task = asyncio.create_task(_worker_loop(client))
+            await client.run_until_disconnected()
         except asyncio.CancelledError:
             if client:
                 await client.disconnect()
             raise
         except Exception as e:
             print(f"[chat_engage] упал: {e}, рестарт через 20с")
+        finally:
+            if worker_task:
+                worker_task.cancel()
+                try:
+                    await worker_task
+                except asyncio.CancelledError:
+                    pass
             if client:
                 try:
                     await client.disconnect()
                 except Exception:
                     pass
-            await asyncio.sleep(20)
+        await asyncio.sleep(20)

@@ -41,7 +41,9 @@ async def lifespan(app: FastAPI):
     start_background_scanner()
     if telegram_ingest.is_configured():
         asyncio.create_task(telegram_ingest.run())
-    if chat_engage.is_configured():
+    # Отдельный клиент только если TELEGRAM_CHAT_SESSION ≠ ingest.
+    # Иначе chat_engage цепляется к клиенту ingest (один аккаунт).
+    if chat_engage.needs_own_client():
         asyncio.create_task(chat_engage.run())
     asyncio.create_task(telegram_bot.set_webhook())
     yield

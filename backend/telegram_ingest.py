@@ -527,6 +527,14 @@ async def _run_once():
 
     await client.start()
 
+    engage_task = None
+    try:
+        import chat_engage
+        if chat_engage.is_configured() and chat_engage.uses_ingest_session():
+            engage_task = await chat_engage.attach_to_client(client)
+    except Exception as e:
+        print(f"[telegram_ingest] chat_engage attach: {e}")
+
     last_ids = {}
     for username, display_name in channels.items():
         try:
@@ -558,6 +566,17 @@ async def _run_once():
         try:
             await backfill_task
         except asyncio.CancelledError:
+            pass
+        if engage_task:
+            engage_task.cancel()
+            try:
+                await engage_task
+            except asyncio.CancelledError:
+                pass
+        try:
+            import chat_engage
+            chat_engage.detach()
+        except Exception:
             pass
         print("[telegram_ingest] Соединение с Telegram оборвалось")
 

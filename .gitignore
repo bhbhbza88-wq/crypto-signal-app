@@ -25,3 +25,10 @@ Thumbs.db
 # Окружение
 .env
 .env.*
+
+# Локальный логин chat-engage (секреты)
+backend/_tmp_api.env
+backend/_chat_login_state.json
+backend/_chat_session_out.txt
+backend/_chat_login_steps.py
+backend/_fetch_api_for_login.py
