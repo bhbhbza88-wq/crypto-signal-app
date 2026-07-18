@@ -41,7 +41,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 AI_MODEL = "gpt-4o-mini"
 
 SOURCE_TYPE = "telegram_aggregate"
-AGG_MAX_OPEN = 5
+AGG_MAX_OPEN = 8  # с 7 источниками лимит 5 слишком рано режет поток
 
 EXTRACTOR_SYSTEM_PROMPT = (
     "Ты извлекаешь параметры торгового сигнала из сообщения крипто-канала. "
