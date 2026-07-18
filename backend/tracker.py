@@ -28,6 +28,11 @@ def _notify_closed(symbol, signal, result, pnl):
         loop.close()
     except Exception as e:
         print(f"⚠️ Telegram (закрытие {symbol}): {e}")
+    try:
+        import chat_engage
+        chat_engage.fire_close(symbol, signal, result, pnl)
+    except Exception as e:
+        print(f"⚠️ chat_engage (закрытие {symbol}): {e}")
 
 # Выход по времени — должен совпадать с таймаутом бэктеста (36 свечей 1h).
 # Для momentum это ОСНОВНОЙ механизм выхода (TP недостижимы), без него

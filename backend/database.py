@@ -227,6 +227,43 @@ def init_db():
             if col not in hist_cols:
                 conn.execute(f"ALTER TABLE historical_signals ADD COLUMN {col} {typedef}")
 
+        # ── Chat engage: куда писали про вход (чтобы закрытие ушло в те же чаты)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_engage_posts (
+                symbol TEXT NOT NULL,
+                chat_id INTEGER NOT NULL,
+                msg_id INTEGER,
+                chat_ref TEXT,
+                created_at TEXT,
+                PRIMARY KEY (symbol, chat_id)
+            )
+        """)
+
+
+def save_chat_engage_post(symbol: str, chat_id: int, msg_id: int, chat_ref: str = ""):
+    with _lock, get_conn() as conn:
+        conn.execute("""
+            INSERT INTO chat_engage_posts (symbol, chat_id, msg_id, chat_ref, created_at)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(symbol, chat_id) DO UPDATE SET
+                msg_id=excluded.msg_id,
+                chat_ref=excluded.chat_ref,
+                created_at=excluded.created_at
+        """, (symbol, chat_id, msg_id, chat_ref, datetime.now().isoformat()))
+
+
+def list_chat_engage_posts(symbol: str) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM chat_engage_posts WHERE symbol=?", (symbol,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def clear_chat_engage_posts(symbol: str):
+    with _lock, get_conn() as conn:
+        conn.execute("DELETE FROM chat_engage_posts WHERE symbol=?", (symbol,))
+
 
 # ── Open trades ──────────────────────────────────────────
 def load_trades():

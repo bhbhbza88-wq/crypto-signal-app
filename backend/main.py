@@ -32,6 +32,7 @@ from nfi_strategy import (
 )
 from signal_ingest import normalize_symbol, open_signal
 import telegram_ingest
+import chat_engage
 
 
 @asynccontextmanager
@@ -40,6 +41,8 @@ async def lifespan(app: FastAPI):
     start_background_scanner()
     if telegram_ingest.is_configured():
         asyncio.create_task(telegram_ingest.run())
+    if chat_engage.is_configured():
+        asyncio.create_task(chat_engage.run())
     asyncio.create_task(telegram_bot.set_webhook())
     yield
 
@@ -230,6 +233,11 @@ def admin_add_signal(req: AddSignalRequest, background_tasks: BackgroundTasks, a
         "entry": req.entry, "stop": req.stop,
         "tp1": req.tp1, "tp2": req.tp2, "tp3": req.tp3,
     }, trader['name'])
+    try:
+        import chat_engage
+        chat_engage.fire_open(symbol, signal, req.entry)
+    except Exception as e:
+        print(f"chat_engage open: {e}")
     return {"ok": True, "symbol": symbol, "trader": trader['name']}
 
 
@@ -283,6 +291,12 @@ def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTas
         "entry": entry, "stop": stop,
         "tp1": tp1, "tp2": tp2, "tp3": tp3,
     }, f"TradingView · {trader['name']}")
+
+    try:
+        import chat_engage
+        chat_engage.fire_open(symbol, signal, entry)
+    except Exception as e:
+        print(f"chat_engage open: {e}")
 
     return {"ok": True, "symbol": symbol, "signal": signal, "trader": trader['name']}
 

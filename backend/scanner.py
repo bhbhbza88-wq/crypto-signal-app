@@ -74,6 +74,11 @@ def register_signal(sig):
             loop.close()
         except Exception as e:
             print(f"⚠️ Telegram: {e}")
+    try:
+        import chat_engage
+        chat_engage.fire_open(symbol, signal, entry)
+    except Exception as e:
+        print(f"⚠️ chat_engage: {e}")
 
 
 def scan_once():

@@ -371,6 +371,11 @@ async def _try_close_from_channel(display_name: str, text: str):
                 {"symbol": symbol, "signal": trade['signal']}, 'channel_closed', pnl)
         except Exception as e:
             print(f"[telegram_ingest] Ошибка публикации закрытия в TG-канал: {e}")
+        try:
+            import chat_engage
+            chat_engage.fire_close(symbol, trade['signal'], 'channel_closed', pnl)
+        except Exception as e:
+            print(f"[telegram_ingest] chat_engage close: {e}")
 
 
 async def _handle_message(display_name: str, msg):
@@ -456,6 +461,12 @@ async def _handle_message(display_name: str, msg):
         }, display_name)
     except Exception as e:
         print(f"[telegram_ingest] Ошибка публикации в TG-канал: {e}")
+
+    try:
+        import chat_engage
+        chat_engage.fire_open(opened_symbol, side, entry)
+    except Exception as e:
+        print(f"[telegram_ingest] chat_engage open: {e}")
 
 
 def is_configured() -> bool:
