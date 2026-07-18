@@ -93,18 +93,50 @@ def _fmt_entry(v) -> str:
     return f"{n:.6f}".rstrip("0").rstrip(".")
 
 
+# не повторяем одни и те же фразы подряд
+_recent_open: list[str] = []
+_recent_close: list[str] = []
+
+
+def _pick_unique(candidates: list[str], recent: list[str], remember: int = 8) -> str:
+    pool = [c for c in candidates if c not in recent] or candidates
+    choice = random.choice(pool)
+    recent.append(choice)
+    del recent[:-remember]
+    return choice
+
+
 def _open_text(symbol: str, side: str, entry) -> str:
     coin = _coin(symbol)
     side_ru = "лонг" if side == "LONG" else "шорт"
+    e = _fmt_entry(entry)
     templates = [
-        f"Взял {side_ru} по {coin} от {_fmt_entry(entry)}, че думаете?",
-        f"Зашёл в {side_ru} по {coin} около {_fmt_entry(entry)}. Как вам сетап?",
-        f"Пробую {side_ru} {coin} от {_fmt_entry(entry)}, стоп короткий",
-        f"По {coin} взял {side_ru} с {_fmt_entry(entry)}, посмотрим",
-        f"Зашёл {coin} {side_ru} от {_fmt_entry(entry)}. Кто тоже смотрит?",
-        f"Взял такой {side_ru} по {coin}, вход {_fmt_entry(entry)}",
+        f"Взял {side_ru} по {coin} от {e}, че думаете?",
+        f"Зашёл в {side_ru} по {coin} около {e}. Как вам сетап?",
+        f"Пробую {side_ru} {coin} от {e}, стоп короткий",
+        f"По {coin} взял {side_ru} с {e}, посмотрим",
+        f"Зашёл {coin} {side_ru} от {e}. Кто тоже смотрит?",
+        f"Взял такой {side_ru} по {coin}, вход {e}",
+        f"По {coin} открыл {side_ru} от {e}",
+        f"Залетел в {side_ru} по {coin}, {e}. Мнения?",
+        f"{coin} — взял {side_ru} около {e}",
+        f"Сегодня по {coin} зашёл в {side_ru} с {e}",
+        f"Глянул {coin}, открыл {side_ru} от {e}",
+        f"На копейку пробую {side_ru} {coin} от {e}",
+        f"Чувство что {coin} в {side_ru} пойдёт — уже зашёл от {e}",
+        f"По {coin} сетап норм, взял {side_ru} {e}",
+        f"Зашёл так по {coin}: {side_ru} от {e}",
+        f"Взял {side_ru} {coin}, вход {e}. Держу",
+        f"{coin} интересный, я в {side_ru} с {e}",
+        f"Короче {coin}, {side_ru} от {e}",
+        f"Поймал вход по {coin}, {side_ru} {e}",
+        f"Маленьким плечом взял {side_ru} {coin} от {e}",
+        f"Есть идея по {coin} — {side_ru} от {e}",
+        f"Зашёл по {coin} в {side_ru}, цена {e}. Кто с нами?",
+        f"Пробую такой {side_ru} по {coin} от {e}",
+        f"По {coin} уже в {side_ru} с {e}, поглядим",
     ]
-    return random.choice(templates)
+    return _pick_unique(templates, _recent_open)
 
 
 def _close_win_text(symbol: str, pnl: float) -> str:
@@ -116,8 +148,25 @@ def _close_win_text(symbol: str, pnl: float) -> str:
         f"По {coin} зафиксировал, вышло ~+{show}%",
         f"Закрыл {coin}, +{show}% примерно. Норм зашло",
         f"По той сделке {coin} вышли около +{show}%",
+        f"{coin} отработала, где-то +{show}%",
+        f"Вышел по {coin}, плюс около +{show}%",
+        f"По {coin} забрал +{show}% примерно",
+        f"Фиксанул {coin}, вышло +{show}%",
+        f"{coin} закрыл — плюс ~+{show}%. Приятно",
+        f"По {coin} всё, +{show}% в кармане",
+        f"Сделку по {coin} закрыл в плюс (+{show}%)",
+        f"Ок, {coin} дала около +{show}%",
+        f"По {coin} вышли чисто, примерно +{show}%",
+        f"Закрыл ту по {coin}, +{show}%",
+        f"{coin} зашла нормально, +{show}% примерно",
+        f"Зафиксировал {coin} около +{show}%",
+        f"По {coin} профит ~+{show}%",
+        f"Готово по {coin}: примерно +{show}%",
+        f"Та {coin} отработала на +{show}%",
+        f"Плюсанул по {coin}, где-то +{show}%",
+        f"По {coin} закрылись, +{show}%. Не космос, но ок",
     ]
-    return random.choice(templates)
+    return _pick_unique(templates, _recent_close)
 
 
 def _soft_promo_reply() -> str:
@@ -125,6 +174,9 @@ def _soft_promo_reply() -> str:
         f"Смотрю сканер на {SITE_URL}, ещё кидают в {CHANNEL_URL}",
         f"Обычно через nowicki — {SITE_URL}, канал {CHANNEL_URL}",
         f"Беру оттуда: {SITE_URL} и тг {CHANNEL_URL}",
+        f"Есть сканер {SITE_URL}, плюс канал {CHANNEL_URL}",
+        f"Если коротко — {SITE_URL} / {CHANNEL_URL}",
+        f"Глянь nowicki.trade и канал {CHANNEL_URL}, оттуда идеи",
     ]
     return random.choice(templates)
 
