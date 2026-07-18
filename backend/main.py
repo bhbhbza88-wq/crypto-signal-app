@@ -440,7 +440,23 @@ def get_active_signals():
     traders_by_id = {t['id']: t for t in db.list_traders(only_active=False)}
     out = []
     for symbol, t in trades.items():
-        candles       = json.loads(t['candles_json'])       if t.get('candles_json')       else []
+        candles = []
+        if t.get('candles_json'):
+            try:
+                candles = json.loads(t['candles_json'])
+            except (TypeError, json.JSONDecodeError):
+                candles = []
+        # Telegram-импорт раньше не писал свечи — догружаем с Bybit и сохраняем
+        if not candles:
+            try:
+                import data_layer
+                cj = data_layer.fetch_candles_json(symbol)
+                if cj:
+                    candles = json.loads(cj)
+                    t['candles_json'] = cj
+                    db.upsert_trade(symbol, t)
+            except Exception as e:
+                print(f"[api/signals] candles backfill {symbol}: {e}")
         entry_reasons = json.loads(t['entry_reasons_json']) if t.get('entry_reasons_json') else []
         trader = traders_by_id.get(t.get('trader_id'))
         out.append({

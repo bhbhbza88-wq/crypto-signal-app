@@ -21,7 +21,8 @@ def normalize_symbol(raw: str) -> str:
     return s
 
 
-def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime, reasons=None, score=None):
+def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime,
+                reasons=None, score=None, candles_json=None):
     """Валидирует и открывает позицию через db.insert_trade_if_not_exists.
 
     Возвращает (symbol, None) при успехе или (None, причина) при отказе,
@@ -44,6 +45,13 @@ def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime, r
     if not ok:
         return None, 'invalid_levels'
 
+    if not candles_json:
+        try:
+            import data_layer
+            candles_json = data_layer.fetch_candles_json(symbol)
+        except Exception:
+            candles_json = None
+
     trade = {
         "signal": signal,
         "entry": entry,
@@ -52,6 +60,7 @@ def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime, r
         "score": score,
         "regime": regime,
         "opened_at": datetime.now().isoformat(),
+        "candles_json": candles_json,
         "entry_reasons_json": json.dumps(reasons or [], ensure_ascii=False),
         "trader_id": trader_id,
     }

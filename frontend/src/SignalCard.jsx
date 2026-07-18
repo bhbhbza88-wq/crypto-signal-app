@@ -168,9 +168,7 @@ export default function SignalCard({ signal }) {
   const tone = isLong ? 'var(--long)' : 'var(--short)'
   const toneSoft = isLong ? 'var(--long-soft)' : 'var(--short-soft)'
   const sym = signal.symbol.replace('/USDT', '')
-  // сигналы Premium Aggregator Feed не проходят через технический сканер:
-  // score/candles у них принципиально нет (score=None, candles_json не заполняется
-  // в open_signal при импорте из Telegram) — это не "недогрузка", а другой тип сигнала
+  // Premium Aggregator: confidence от техсканера нет; свечи догружаются с Bybit
   const isAggregated = signal.trader?.source_type === 'telegram_aggregate'
 
   const candles = signal.candles || []

@@ -71,6 +71,26 @@ def fetch_ticker(symbol):
     return api_call(exchange.fetch_ticker, symbol)
 
 
+def fetch_candles_json(symbol, timeframe='1h', limit=60):
+    """Свечи для графика на карточке сигнала (JSON-строка как в scanner)."""
+    import json
+    cache_key = f"candles:{symbol}:{timeframe}:{limit}"
+    now = time.time()
+    hit = _data_cache.get(cache_key)
+    if hit and now - hit[0] < 60:
+        return hit[1]
+    raw = api_call(exchange.fetch_ohlcv, symbol, timeframe, limit=limit)
+    if not raw:
+        return None
+    rows = [
+        {"timestamp": int(c[0]), "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]}
+        for c in raw
+    ]
+    payload = json.dumps(rows)
+    _data_cache[cache_key] = (now, payload)
+    return payload
+
+
 def build_features(df):
     df = df.copy()
     df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
