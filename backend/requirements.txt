@@ -7,3 +7,4 @@ httpx
 telethon
 Pillow
 qrcode
+google-auth

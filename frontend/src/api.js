@@ -9,7 +9,6 @@ function resolveBaseUrl() {
 
 const BASE_URL = resolveBaseUrl()
 
-// ── Токен авторизации (localStorage) ──
 const TOKEN_KEY = 'nwicki_token'
 export function getToken() { return localStorage.getItem(TOKEN_KEY) }
 export function setToken(t) { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY) }
@@ -37,8 +36,14 @@ async function post(path, body) {
 }
 
 export const api = {
+  authConfig: () => get('/auth/config'),
   register: (email, password) => post('/auth/register', { email, password }),
   login: (email, password) => post('/auth/login', { email, password }),
+  googleLogin: (idToken) => post('/auth/google', { id_token: idToken }),
+  verifyEmail: (token) => post('/auth/verify-email', { token }),
+  resendVerification: (email) => post('/auth/resend-verification', { email }),
+  forgotPassword: (email) => post('/auth/forgot-password', { email }),
+  resetPassword: (token, password) => post('/auth/reset-password', { token, password }),
   logout: () => post('/auth/logout'),
   me: () => get('/auth/me'),
   getSignals: () => get('/signals'),

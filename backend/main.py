@@ -189,10 +189,10 @@ def require_admin(authorization: str | None = Header(default=None)):
 @app.post("/api/auth/register")
 def auth_register(req: AuthRequest, request: Request):
     _rate_limit(f"auth:reg:{_client_ip(request)}", limit=5, window=60)
-    user, token = auth.register(req.email, req.password)
-    if not user:
-        raise HTTPException(status_code=400, detail=token)  # token=сообщение об ошибке
-    return {"token": token, "user": auth.public_user(user)}
+    data, err = auth.register(req.email, req.password)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return data
 
 
 @app.post("/api/auth/login")
@@ -202,6 +202,74 @@ def auth_login(req: AuthRequest, request: Request):
     if not user:
         raise HTTPException(status_code=401, detail=token)
     return {"token": token, "user": auth.public_user(user)}
+
+
+class GoogleAuthRequest(BaseModel):
+    id_token: str
+
+
+class EmailOnlyRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str
+
+
+@app.get("/api/auth/config")
+def auth_config():
+    """Публичные флаги для фронта (Google client id, SMTP)."""
+    return auth.public_auth_config()
+
+
+@app.post("/api/auth/google")
+def auth_google(req: GoogleAuthRequest, request: Request):
+    _rate_limit(f"auth:google:{_client_ip(request)}", limit=20, window=60)
+    user, token = auth.login_with_google(req.id_token)
+    if not user:
+        raise HTTPException(status_code=401, detail=token)
+    return {"token": token, "user": auth.public_user(user)}
+
+
+class TokenRequest(BaseModel):
+    token: str
+
+
+@app.post("/api/auth/verify-email")
+def auth_verify_email(req: TokenRequest, request: Request):
+    _rate_limit(f"auth:verify:{_client_ip(request)}", limit=20, window=60)
+    data, err = auth.verify_email(req.token)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return data
+
+
+@app.post("/api/auth/resend-verification")
+def auth_resend_verification(req: EmailOnlyRequest, request: Request):
+    _rate_limit(f"auth:resend:{_client_ip(request)}", limit=5, window=60)
+    data, err = auth.resend_verification(req.email)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return data
+
+
+@app.post("/api/auth/forgot-password")
+def auth_forgot_password(req: EmailOnlyRequest, request: Request):
+    _rate_limit(f"auth:forgot:{_client_ip(request)}", limit=5, window=60)
+    data, err = auth.request_password_reset(req.email)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return data
+
+
+@app.post("/api/auth/reset-password")
+def auth_reset_password(req: ResetPasswordRequest, request: Request):
+    _rate_limit(f"auth:reset:{_client_ip(request)}", limit=10, window=60)
+    data, err = auth.reset_password(req.token, req.password)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return data
 
 
 @app.post("/api/auth/logout")

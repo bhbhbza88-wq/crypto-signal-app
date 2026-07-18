@@ -150,6 +150,23 @@ def init_db():
             conn.execute("ALTER TABLE users ADD COLUMN trial_ends_at TEXT")
         if 'is_admin' not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+        if 'email_verified' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0")
+            # Старые аккаунты не блокируем — считаем уже подтверждёнными
+            conn.execute("UPDATE users SET email_verified=1")
+        if 'google_id' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                created_at TEXT,
+                expires_at TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_tokens_user ON auth_tokens(user_id, kind)")
 
         # ── Трейдеры (авторы сигналов) ────────────────────────────
         conn.execute("""
@@ -472,18 +489,32 @@ def trend_load_log(limit=200):
 
 
 # ── Пользователи / сессии ─────────────────────────────────
-def create_user(email, password_hash, salt, tier='free', trial_ends_at=None):
+def create_user(email, password_hash, salt, tier='free', trial_ends_at=None,
+                email_verified=0, google_id=None):
     with _lock, get_conn() as conn:
         cur = conn.execute("""
-            INSERT INTO users (email, password_hash, salt, tier, created_at, trial_ends_at)
-            VALUES (?,?,?,?,?,?)
-        """, (email.lower().strip(), password_hash, salt, tier, datetime.now().isoformat(), trial_ends_at))
+            INSERT INTO users (email, password_hash, salt, tier, created_at, trial_ends_at,
+                               email_verified, google_id)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (
+            email.lower().strip(), password_hash, salt, tier,
+            datetime.now().isoformat(), trial_ends_at,
+            int(email_verified), google_id,
+        ))
         return cur.lastrowid
 
 
 def get_user_by_email(email):
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM users WHERE email=?", (email.lower().strip(),)).fetchone()
+        return dict(row) if row else None
+
+
+def get_user_by_google_id(google_id: str):
+    if not google_id:
+        return None
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM users WHERE google_id=?", (google_id,)).fetchone()
         return dict(row) if row else None
 
 
@@ -501,6 +532,54 @@ def set_user_tier(user_id, tier):
 def set_user_admin(user_id, is_admin: bool):
     with _lock, get_conn() as conn:
         conn.execute("UPDATE users SET is_admin=? WHERE id=?", (int(is_admin), user_id))
+
+
+def set_email_verified(user_id, verified: bool = True):
+    with _lock, get_conn() as conn:
+        conn.execute("UPDATE users SET email_verified=? WHERE id=?", (int(verified), user_id))
+
+
+def set_user_google_id(user_id, google_id: str):
+    with _lock, get_conn() as conn:
+        conn.execute("UPDATE users SET google_id=? WHERE id=?", (google_id, user_id))
+
+
+def set_user_password(user_id, password_hash, salt):
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET password_hash=?, salt=? WHERE id=?",
+            (password_hash, salt, user_id),
+        )
+
+
+def create_auth_token(token: str, user_id: int, kind: str, expires_at: str):
+    with _lock, get_conn() as conn:
+        conn.execute("DELETE FROM auth_tokens WHERE user_id=? AND kind=?", (user_id, kind))
+        conn.execute("""
+            INSERT INTO auth_tokens (token, user_id, kind, created_at, expires_at)
+            VALUES (?,?,?,?,?)
+        """, (token, user_id, kind, datetime.now().isoformat(), expires_at))
+
+
+def consume_auth_token(token: str, kind: str):
+    """Возвращает user_id если токен валиден, иначе None. Токен удаляется."""
+    if not token:
+        return None
+    with _lock, get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM auth_tokens WHERE token=? AND kind=?",
+            (token, kind),
+        ).fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        conn.execute("DELETE FROM auth_tokens WHERE token=?", (token,))
+        try:
+            if datetime.now() > datetime.fromisoformat(data["expires_at"]):
+                return None
+        except (ValueError, TypeError):
+            return None
+        return data["user_id"]
 
 
 def create_session(token, user_id, expires_at):

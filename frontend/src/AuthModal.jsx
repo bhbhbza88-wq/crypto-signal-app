@@ -1,14 +1,86 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { api, setToken } from './api'
 
+const GIS_SRC = 'https://accounts.google.com/gsi/client'
+
+function loadGisScript() {
+  if (window.google?.accounts?.id) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${GIS_SRC}"]`)
+    if (existing) {
+      existing.addEventListener('load', () => resolve())
+      existing.addEventListener('error', reject)
+      return
+    }
+    const s = document.createElement('script')
+    s.src = GIS_SRC
+    s.async = true
+    s.onload = () => resolve()
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+}
+
 export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
-  const [mode, setMode] = useState(initialMode)
+  const [mode, setMode] = useState(initialMode) // login | register | forgot | check_email
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(null)
+  const [info, setInfo] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [googleClientId, setGoogleClientId] = useState(null)
+  const [emailEnabled, setEmailEnabled] = useState(false)
   const dialogRef = useRef(null)
   const firstFieldRef = useRef(null)
+  const googleBtnRef = useRef(null)
+
+  useEffect(() => {
+    api.authConfig().then(c => {
+      setGoogleClientId(c.google_client_id || null)
+      setEmailEnabled(!!c.email_enabled)
+    }).catch(() => {})
+  }, [])
+
+  const finishAuth = useCallback((res) => {
+    setToken(res.token)
+    onAuth(res.user)
+    onClose()
+  }, [onAuth, onClose])
+
+  const onGoogleCredential = useCallback(async (response) => {
+    setError(null); setBusy(true)
+    try {
+      const res = await api.googleLogin(response.credential)
+      finishAuth(res)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }, [finishAuth])
+
+  useEffect(() => {
+    if (!googleClientId || !googleBtnRef.current) return
+    let cancelled = false
+    loadGisScript().then(() => {
+      if (cancelled || !googleBtnRef.current) return
+      window.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: onGoogleCredential,
+        ux_mode: 'popup',
+      })
+      googleBtnRef.current.innerHTML = ''
+      window.google.accounts.id.renderButton(googleBtnRef.current, {
+        theme: 'outline',
+        size: 'large',
+        width: 312,
+        text: 'continue_with',
+        shape: 'rectangular',
+        locale: 'ru',
+      })
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [googleClientId, onGoogleCredential, mode])
 
   useEffect(() => {
     firstFieldRef.current?.focus()
@@ -38,19 +110,59 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
 
   async function submit(e) {
     e.preventDefault()
-    setError(null); setBusy(true)
+    setError(null); setInfo(null); setBusy(true)
     try {
-      const fn = mode === 'login' ? api.login : api.register
-      const res = await fn(email, password)
-      setToken(res.token)
-      onAuth(res.user)
-      onClose()
+      if (mode === 'forgot') {
+        const res = await api.forgotPassword(email)
+        setInfo(res.message || 'Если аккаунт существует — проверь почту.')
+        return
+      }
+      if (mode === 'login') {
+        const res = await api.login(email, password)
+        finishAuth(res)
+        return
+      }
+      if (mode === 'register') {
+        const res = await api.register(email, password)
+        if (res.needs_verification) {
+          setMode('check_email')
+          setInfo(res.message)
+          return
+        }
+        finishAuth(res)
+      }
     } catch (err) {
       setError(err.message)
     } finally {
       setBusy(false)
     }
   }
+
+  async function resend() {
+    setError(null); setBusy(true)
+    try {
+      const res = await api.resendVerification(email)
+      setInfo(res.message)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const title = {
+    login: 'Вход',
+    register: 'Регистрация',
+    forgot: 'Сброс пароля',
+    check_email: 'Проверь почту',
+  }[mode]
+
+  const sub = {
+    login: 'Войдите в аккаунт NOWICKI',
+    register: 'Первые 3 дня Premium бесплатно',
+    forgot: emailEnabled ? 'Пришлём ссылку на email' : 'Сброс пароля недоступен — SMTP не настроен',
+    check_email: `Мы отправили письмо на ${email}`,
+  }[mode]
 
   return (
     <div className="am-overlay" onClick={onClose} role="presentation">
@@ -63,45 +175,82 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
         onClick={e => e.stopPropagation()}
       >
         <button type="button" className="am-close" onClick={onClose} aria-label="Закрыть">✕</button>
-        <h2 id="am-title" className="am-title">{mode === 'login' ? 'Вход' : 'Регистрация'}</h2>
-        <p className="am-sub">{mode === 'login' ? 'Войдите в аккаунт NOWICKI' : 'Первые 3 дня Premium бесплатно. Дальше — оплата криптой в Telegram-боте'}</p>
+        <h2 id="am-title" className="am-title">{title}</h2>
+        <p className="am-sub">{sub}</p>
 
-        <form onSubmit={submit} className="am-form">
-          <label className="am-label" htmlFor="am-email">Email</label>
-          <input
-            id="am-email"
-            ref={firstFieldRef}
-            className="am-input"
-            type="email"
-            autoComplete="email"
-            placeholder="Email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            required
-          />
-          <label className="am-label" htmlFor="am-password">Пароль</label>
-          <input
-            id="am-password"
-            className="am-input"
-            type="password"
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            placeholder="Пароль (мин. 8 символов)"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            required
-            minLength={6}
-          />
-          {error && <div className="am-error" role="alert">{error}</div>}
-          <button className="am-submit" type="submit" disabled={busy}>
-            {busy ? '...' : (mode === 'login' ? 'Войти' : 'Зарегистрироваться')}
-          </button>
-        </form>
+        {mode !== 'check_email' && googleClientId && (
+          <>
+            <div ref={googleBtnRef} className="am-google" />
+            <div className="am-or"><span>или</span></div>
+          </>
+        )}
+
+        {mode === 'check_email' ? (
+          <div className="am-check">
+            {info && <div className="am-info" role="status">{info}</div>}
+            {error && <div className="am-error" role="alert">{error}</div>}
+            <button type="button" className="am-submit" onClick={resend} disabled={busy}>
+              {busy ? '...' : 'Отправить письмо ещё раз'}
+            </button>
+            <button type="button" className="am-linkish" onClick={() => { setMode('login'); setError(null) }}>
+              Ко входу
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={submit} className="am-form">
+            <label className="am-label" htmlFor="am-email">Email</label>
+            <input
+              id="am-email"
+              ref={firstFieldRef}
+              className="am-input"
+              type="email"
+              autoComplete="email"
+              placeholder="you@gmail.com"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required
+            />
+            {mode !== 'forgot' && (
+              <>
+                <label className="am-label" htmlFor="am-password">Пароль</label>
+                <input
+                  id="am-password"
+                  className="am-input"
+                  type="password"
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  placeholder="Пароль (мин. 8 символов)"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                  minLength={8}
+                />
+              </>
+            )}
+            {error && <div className="am-error" role="alert">{error}</div>}
+            {info && <div className="am-info" role="status">{info}</div>}
+            <button className="am-submit" type="submit" disabled={busy || (mode === 'forgot' && !emailEnabled)}>
+              {busy ? '...' : (
+                mode === 'login' ? 'Войти'
+                  : mode === 'register' ? 'Зарегистрироваться'
+                    : 'Отправить ссылку'
+              )}
+            </button>
+          </form>
+        )}
 
         <div className="am-switch">
-          {mode === 'login' ? (
-            <>Нет аккаунта? <button type="button" onClick={() => { setMode('register'); setError(null) }}>Регистрация</button></>
-          ) : (
-            <>Уже есть аккаунт? <button type="button" onClick={() => { setMode('login'); setError(null) }}>Войти</button></>
+          {mode === 'login' && (
+            <>
+              <button type="button" onClick={() => { setMode('forgot'); setError(null); setInfo(null) }}>Забыли пароль?</button>
+              <span className="am-dot">·</span>
+              Нет аккаунта? <button type="button" onClick={() => { setMode('register'); setError(null); setInfo(null) }}>Регистрация</button>
+            </>
+          )}
+          {mode === 'register' && (
+            <>Уже есть аккаунт? <button type="button" onClick={() => { setMode('login'); setError(null); setInfo(null) }}>Войти</button></>
+          )}
+          {mode === 'forgot' && (
+            <>Вспомнили? <button type="button" onClick={() => { setMode('login'); setError(null); setInfo(null) }}>Войти</button></>
           )}
         </div>
 
@@ -111,15 +260,21 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
           .am-close { position: absolute; top: 14px; right: 14px; background: none; border: none; color: var(--text-tertiary); font-size: 16px; cursor: pointer; }
           .am-title { font-family: var(--font-display); font-size: 22px; font-weight: 800; color: var(--text); }
           .am-sub { font-size: 13px; color: var(--text-secondary); margin: 4px 0 18px; }
+          .am-google { display: flex; justify-content: center; min-height: 40px; margin-bottom: 4px; }
+          .am-or { display: flex; align-items: center; gap: 10px; color: var(--text-tertiary); font-size: 12px; margin: 14px 0; }
+          .am-or::before, .am-or::after { content: ''; flex: 1; height: 1px; background: var(--border); }
           .am-label { font-size: 11px; font-weight: 600; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
-          .am-form { display: flex; flex-direction: column; gap: 8px; }
+          .am-form, .am-check { display: flex; flex-direction: column; gap: 8px; }
           .am-input { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 11px 14px; font-size: 14px; color: var(--text); font-family: var(--font-ui); }
           .am-input:focus { outline: none; border-color: var(--accent); }
           .am-error { font-size: 12px; color: var(--short); }
+          .am-info { font-size: 12px; color: var(--accent); }
           .am-submit { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); padding: 12px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 4px; }
           .am-submit:disabled { opacity: 0.6; }
+          .am-linkish { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 13px; font-weight: 600; margin-top: 8px; }
           .am-switch { text-align: center; font-size: 13px; color: var(--text-secondary); margin-top: 16px; }
           .am-switch button { background: none; border: none; color: var(--accent); cursor: pointer; font-weight: 600; }
+          .am-dot { margin: 0 6px; color: var(--text-tertiary); }
         `}</style>
       </div>
     </div>

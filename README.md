@@ -44,7 +44,8 @@ frontend/   React (Vite) — дашборд + публичный лендинг
 |---|---|
 | `App.jsx` | Дашборд-шелл: сайдбар (Главное/Стратегии/Инструменты/Аккаунт), роутинг вкладок, ErrorBoundary, восстановление сессии |
 | `Landing.jsx` | Публичный лендинг — hero, живой скринер-виджет, реальная статистика, тарифы, честность как УТП |
-| `AuthModal.jsx` | Вход/регистрация (email+пароль) |
+| `AuthModal.jsx` | Вход/регистрация (email+пароль, Google), сброс пароля |
+| `AuthPages.jsx` | Страницы подтверждения email и нового пароля |
 | `SignalCard.jsx` | Карточка активного сигнала — настоящий свечной график (lightweight-charts, движок TradingView) с price-lines Entry/SL/TP1/TP2/TP3 |
 | `MarketView.jsx` | Скринер — тепловая карта 39 пар по режиму и ADX |
 | `Backtest.jsx` | Бэктест (одна пара / все пары) + панель «Проверка на прочность» (Premium) |
@@ -106,6 +107,40 @@ GET  /api/market, /api/market/phase                             — цены, с
 POST /api/backtest, /api/backtest/multi                         — бэктест (одна пара / все пары)
 POST /api/backtest/robustness, GET /api/backtest/robustness/{job_id} — проверка на прочность (Premium)
 ```
+
+## Auth: Google + Gmail
+
+Поддерживается вход через **Google** и регистрация email+пароль с подтверждением через **Gmail SMTP**.
+
+### Railway / env (backend)
+
+| Переменная | Зачем |
+|---|---|
+| `GOOGLE_CLIENT_ID` | OAuth 2.0 Client ID (тип «Веб-приложение») из Google Cloud Console |
+| `SMTP_USER` | Gmail-адрес отправителя |
+| `SMTP_PASSWORD` | [Пароль приложения](https://myaccount.google.com/apppasswords) Google (не обычный пароль) |
+| `SMTP_HOST` | опционально, по умолчанию `smtp.gmail.com` |
+| `SMTP_PORT` | опционально, по умолчанию `587` |
+| `SMTP_FROM` | опционально, по умолчанию = `SMTP_USER` |
+| `FRONTEND_URL` | `https://nowicki.trade` — ссылки в письмах |
+| `REQUIRE_EMAIL_VERIFY` | `1` (по умолчанию) — без подтверждения нельзя войти по паролю; `0` чтобы отключить |
+
+Без SMTP регистрация всё равно работает (сразу логинит). Без `GOOGLE_CLIENT_ID` кнопка Google скрыта.
+
+### Google Cloud Console
+
+1. APIs & Services → Credentials → Create OAuth client ID → Web application  
+2. Authorized JavaScript origins: `https://nowicki.trade`, `http://localhost:5173`  
+3. Authorized redirect URIs можно оставить пустыми (используем GIS popup + ID token)  
+4. Скопируй Client ID → `GOOGLE_CLIENT_ID` на Railway  
+
+### Gmail
+
+1. Включи 2FA на Google-аккаунте  
+2. Создай App Password для «Mail»  
+3. `SMTP_USER` = твой Gmail, `SMTP_PASSWORD` = app password  
+
+Эндпоинты: `POST /api/auth/google`, `/api/auth/verify-email`, `/api/auth/forgot-password`, `/api/auth/reset-password`, `GET /api/auth/config`.
 
 ## Локальный запуск
 
