@@ -1,6 +1,6 @@
 """
 Карточка закрытия: статичный фон (assets/pnl_card_bg.png) + текст поверх.
-Фон не рендерим каждый раз — только накладываем цифры сделки.
+Раскладка как у Binance Futures share.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ def _font(size: int, bold: bool = False):
 
 
 def _fmt_price(v: float) -> str:
+    """Как на Binance share — фиксированная точность, без обрезки нулей."""
     try:
         n = float(v)
     except (TypeError, ValueError):
@@ -50,11 +51,8 @@ def _fmt_price(v: float) -> str:
     if n >= 100:
         return f"{n:.4f}"
     if n >= 1:
-        return f"{n:.7f}".rstrip("0").rstrip(".") if n < 10 else f"{n:.4f}"
-    s = f"{n:.8f}".rstrip("0")
-    if s.endswith("."):
-        s += "0"
-    return s
+        return f"{n:.7f}"
+    return f"{n:.8f}"
 
 
 def _exit_from_pnl(side: str, entry: float, pnl_pct: float) -> float:
@@ -90,6 +88,7 @@ def render_profit_card(
 
     win = pnl_pct > 0
     show_pnl = round(pnl_pct * PNL_SHOW_MULT, 2) if win else round(pnl_pct, 2)
+    # ROI на карточке = движение цены × плечо (как Binance ROE)
     roi = round(show_pnl * leverage, 2)
 
     coin = symbol.replace("/USDT", "").replace("USDT", "").upper()
@@ -103,41 +102,36 @@ def render_profit_card(
     W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # раскладка как на Binance share (текст сверху слева, много воздуха снизу)
-    sx = W / 1080.0
-    sy = H / 1080.0
-    pad = int(56 * sx)
+    # доли от реального размера шаблона (1024×929) — как на референсе Binance
+    pad = int(W * 0.065)
+    col2_x = int(W * 0.48)
 
-    font_pair = _font(max(26, int(48 * sx)), bold=True)
-    font_side = _font(max(22, int(36 * sx)), bold=True)
-    font_roi = _font(max(56, int(132 * sx)), bold=True)
-    font_label = _font(max(18, int(30 * sx)))
-    font_val = _font(max(22, int(38 * sx)), bold=True)
+    font_pair = _font(max(28, int(H * 0.048)), bold=True)
+    font_side = _font(max(22, int(H * 0.036)), bold=False)   # не bold — как оригинал
+    font_roi = _font(max(52, int(H * 0.115)), bold=True)
+    font_label = _font(max(18, int(H * 0.030)), bold=False)
+    font_val = _font(max(22, int(H * 0.038)), bold=True)
 
-    # 1) пара
-    y = int(88 * sy)
-    draw.text((pad, y), pair_line, font=font_pair, fill=WHITE)
+    # 1) пара — верх
+    draw.text((pad, int(H * 0.095)), pair_line, font=font_pair, fill=WHITE)
 
-    # 2) Лонг/Шорт | Nx — сразу под парой
-    y = int(155 * sy)
+    # 2) Шорт | 25x — плотно под парой
+    y_side = int(H * 0.160)
     side_text = f"{side_ru} "
-    draw.text((pad, y), side_text, font=font_side, fill=side_color)
+    draw.text((pad, y_side), side_text, font=font_side, fill=side_color)
     sw = draw.textlength(side_text, font=font_side)
-    draw.text((pad + sw, y), f"| {leverage}x", font=font_side, fill=GREY)
+    draw.text((pad + sw, y_side), f"| {leverage}x", font=font_side, fill=GREY)
 
-    # 3) крупный ROI — заметный отступ после стороны
-    y = int(250 * sy)
-    draw.text((pad, y), roi_str, font=font_roi, fill=roi_color)
+    # 3) крупный % — заметный зазор после стороны
+    draw.text((pad, int(H * 0.275)), roi_str, font=font_roi, fill=roi_color)
 
-    # 4) две колонки цен — ещё отступ вниз
-    y = int(455 * sy)
-    col2_x = int(W * 0.50)
-    draw.text((pad, y), "Цена входа", font=font_label, fill=GREY)
-    draw.text((col2_x, y), "Последняя цена", font=font_label, fill=GREY)
-
-    y = int(505 * sy)
-    draw.text((pad, y), _fmt_price(entry), font=font_val, fill=WHITE)
-    draw.text((col2_x, y), _fmt_price(exit_price), font=font_val, fill=WHITE)
+    # 4) цены — ниже, с воздухом после %
+    y_lab = int(H * 0.52)
+    y_val = int(H * 0.575)
+    draw.text((pad, y_lab), "Цена входа", font=font_label, fill=GREY)
+    draw.text((col2_x, y_lab), "Последняя цена", font=font_label, fill=GREY)
+    draw.text((pad, y_val), _fmt_price(entry), font=font_val, fill=WHITE)
+    draw.text((col2_x, y_val), _fmt_price(exit_price), font=font_val, fill=WHITE)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
