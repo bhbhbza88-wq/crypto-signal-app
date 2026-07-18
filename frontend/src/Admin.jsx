@@ -24,22 +24,36 @@ export default function Admin() {
   const [premiumMsg, setPremiumMsg] = useState(null)
   const [premiumRequests, setPremiumRequests] = useState([])
 
+  const [channelDays, setChannelDays] = useState(14)
+  const [channelStats, setChannelStats] = useState({ rows: [], since: null, days: 14 })
+
   const load = useCallback(async () => {
     try {
-      const [t, s, reqs] = await Promise.all([
+      const [t, s, reqs, ch] = await Promise.all([
         api.adminGetTraders(),
         api.getSignals(),
         api.adminPremiumRequests().catch(() => []),
+        api.adminChannelDaily(channelDays).catch(() => ({ rows: [], days: channelDays })),
       ])
-      setTraders(t); setOpenSignals(s); setPremiumRequests(reqs); setError(null)
+      setTraders(t); setOpenSignals(s); setPremiumRequests(reqs); setChannelStats(ch); setError(null)
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [channelDays])
 
   useEffect(() => { load() }, [load])
+
+  // Group channel rows by date for display
+  const channelByDate = (() => {
+    const map = new Map()
+    for (const r of channelStats.rows || []) {
+      if (!map.has(r.date)) map.set(r.date, [])
+      map.get(r.date).push(r)
+    }
+    return [...map.entries()]
+  })()
 
   async function submitPremium(e) {
     e.preventDefault()
@@ -135,6 +149,69 @@ export default function Admin() {
       </div>
 
       {error && <div className="adm-error animate-in">❌ {error}</div>}
+
+      {/* История по каналам */}
+      <section className="adm-card" style={{ marginTop: 16 }}>
+        <div className="adm-ch-head">
+          <h2 className="section-title" style={{ margin: 0, flex: 1 }}>История по каналам</h2>
+          <select
+            className="adm-input adm-ch-days"
+            value={channelDays}
+            onChange={e => setChannelDays(Number(e.target.value))}
+          >
+            <option value={7}>7 дней</option>
+            <option value={14}>14 дней</option>
+            <option value={30}>30 дней</option>
+            <option value={60}>60 дней</option>
+          </select>
+        </div>
+        <p className="adm-hint" style={{ marginTop: -4 }}>
+          Сколько сделок закрылось с каждого канала за день и сколько из них в плюс (PnL &gt; 0).
+        </p>
+        {channelByDate.length === 0 ? (
+          <div className="adm-empty">За выбранный период закрытых сделок нет</div>
+        ) : (
+          <div className="adm-ch-days-list">
+            {channelByDate.map(([date, rows]) => {
+              const dayTotal = rows.reduce((s, r) => s + r.total, 0)
+              const dayWins = rows.reduce((s, r) => s + r.wins, 0)
+              const dayPnl = rows.reduce((s, r) => s + r.total_pnl, 0)
+              return (
+                <div key={date} className="adm-ch-day">
+                  <div className="adm-ch-day-head">
+                    <span className="adm-ch-date">{date}</span>
+                    <span className="adm-ch-sum">
+                      {dayTotal} сделок · <b className="pos">{dayWins} в плюс</b>
+                      {' · '}
+                      <b className={dayPnl >= 0 ? 'pos' : 'neg'}>{dayPnl >= 0 ? '+' : ''}{dayPnl.toFixed(1)}%</b>
+                    </span>
+                  </div>
+                  <div className="adm-ch-table">
+                    <div className="adm-ch-tr head">
+                      <span>Канал</span>
+                      <span>Сделок</span>
+                      <span>В плюс</span>
+                      <span>Винрейт</span>
+                      <span>PnL</span>
+                    </div>
+                    {rows.map(r => (
+                      <div key={`${date}-${r.trader_id}-${r.channel}`} className="adm-ch-tr">
+                        <span className="adm-ch-name" title={r.source_type}>{r.channel}</span>
+                        <span className="mono">{r.total}</span>
+                        <span className="mono pos">{r.wins}</span>
+                        <span className="mono">{r.winrate}%</span>
+                        <span className={`mono ${r.total_pnl >= 0 ? 'pos' : 'neg'}`}>
+                          {r.total_pnl >= 0 ? '+' : ''}{r.total_pnl}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
 
       {/* Дать Premium */}
       <section className="adm-card adm-premium" style={{ marginTop: 16 }}>
@@ -319,6 +396,18 @@ export default function Admin() {
         .adm-submit { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); padding: 11px; font-size: 13px; font-weight: 700; cursor: pointer; }
         .adm-submit:disabled { opacity: 0.6; cursor: default; }
         .adm-premium { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+        .adm-ch-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .adm-ch-days { width: auto; max-width: 120px; padding: 8px 10px; }
+        .adm-ch-days-list { display: flex; flex-direction: column; gap: 14px; max-height: 520px; overflow-y: auto; }
+        .adm-ch-day { border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+        .adm-ch-day-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; background: var(--surface-hover); border-bottom: 1px solid var(--border); }
+        .adm-ch-date { font-weight: 800; font-family: var(--font-mono); font-size: 13px; }
+        .adm-ch-sum { font-size: 12px; color: var(--text-secondary); }
+        .adm-ch-table { display: flex; flex-direction: column; }
+        .adm-ch-tr { display: grid; grid-template-columns: 1.6fr 0.7fr 0.7fr 0.8fr 0.8fr; gap: 8px; padding: 8px 12px; font-size: 12px; border-top: 1px solid var(--border); align-items: center; }
+        .adm-ch-tr.head { border-top: none; color: var(--text-tertiary); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; background: transparent; }
+        .adm-ch-name { font-weight: 650; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .adm-ch-tr .mono { font-family: var(--font-mono); font-weight: 700; }
         .adm-req-list { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 12px; }
         .adm-req-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
         .adm-req-email { font-weight: 700; font-family: var(--font-mono); color: var(--text); }

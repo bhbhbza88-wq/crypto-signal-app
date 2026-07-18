@@ -377,6 +377,12 @@ def admin_premium_requests(admin=Depends(require_admin)):
         return [dict(r) for r in rows]
 
 
+@app.get("/api/admin/channel-daily")
+def admin_channel_daily(days: int = 14, admin=Depends(require_admin)):
+    """История по каналам: сколько сделок за день и сколько в плюс."""
+    return db.channel_daily_stats(days=days)
+
+
 @app.post("/api/admin/add-signal")
 def admin_add_signal(req: AddSignalRequest, background_tasks: BackgroundTasks, admin=Depends(require_admin)):
     trader = db.get_trader(req.trader_id)

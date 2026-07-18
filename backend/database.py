@@ -422,6 +422,44 @@ def history_for_date(date_str):
         return [dict(r) for r in rows]
 
 
+def channel_daily_stats(days: int = 14):
+    """Сделки по каналам (traders) за последние N дней: total / wins / pnl."""
+    from datetime import timedelta
+    days = max(1, min(int(days or 14), 90))
+    since = (datetime.now() - timedelta(days=days - 1)).strftime('%Y-%m-%d')
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                h.date AS date,
+                COALESCE(t.id, 0) AS trader_id,
+                COALESCE(t.name, 'Без канала / старое') AS channel,
+                COALESCE(t.source_type, 'unknown') AS source_type,
+                COUNT(*) AS total,
+                SUM(CASE WHEN h.pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN h.pnl < 0 THEN 1 ELSE 0 END) AS losses,
+                SUM(CASE WHEN h.pnl = 0 THEN 1 ELSE 0 END) AS breakeven,
+                COALESCE(SUM(h.pnl), 0) AS total_pnl
+            FROM history h
+            LEFT JOIN traders t ON t.id = h.trader_id
+            WHERE h.date >= ?
+            GROUP BY h.date, t.id, t.name, t.source_type
+            ORDER BY h.date DESC, total DESC, channel ASC
+        """, (since,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            total = int(d['total'] or 0)
+            wins = int(d['wins'] or 0)
+            d['total'] = total
+            d['wins'] = wins
+            d['losses'] = int(d['losses'] or 0)
+            d['breakeven'] = int(d['breakeven'] or 0)
+            d['total_pnl'] = round(float(d['total_pnl'] or 0), 2)
+            d['winrate'] = round(wins / total * 100, 1) if total else 0
+            out.append(d)
+        return {"days": days, "since": since, "rows": out}
+
+
 # ── Events (заменяет уведомления, которые раньше шли в TG) ─
 def add_event(symbol, kind, message):
     with _lock, get_conn() as conn:

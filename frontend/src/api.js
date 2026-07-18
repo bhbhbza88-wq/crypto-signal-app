@@ -56,6 +56,7 @@ export const api = {
   adminGrantPremium: (email, days = 30, tier = 'premium') =>
     post('/admin/grant-premium', { email, days, tier }),
   adminPremiumRequests: () => get('/admin/premium-requests'),
+  adminChannelDaily: (days = 14) => get(`/admin/channel-daily?days=${days}`),
   analyzeChannel: (channelUrl, days = 30, entryTimeoutHours = 6, maxHoldHours = 168, riskPerTradeUsd = 100) =>
     post('/analyze-channel', {
       channel_url: channelUrl, days, entry_timeout_hours: entryTimeoutHours,
