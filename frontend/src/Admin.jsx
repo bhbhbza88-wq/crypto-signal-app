@@ -18,10 +18,20 @@ export default function Admin() {
   const [signalBusy, setSignalBusy] = useState(false)
   const [signalMsg, setSignalMsg] = useState(null)
 
+  const [premiumEmail, setPremiumEmail] = useState('')
+  const [premiumDays, setPremiumDays] = useState(30)
+  const [premiumBusy, setPremiumBusy] = useState(false)
+  const [premiumMsg, setPremiumMsg] = useState(null)
+  const [premiumRequests, setPremiumRequests] = useState([])
+
   const load = useCallback(async () => {
     try {
-      const [t, s] = await Promise.all([api.adminGetTraders(), api.getSignals()])
-      setTraders(t); setOpenSignals(s); setError(null)
+      const [t, s, reqs] = await Promise.all([
+        api.adminGetTraders(),
+        api.getSignals(),
+        api.adminPremiumRequests().catch(() => []),
+      ])
+      setTraders(t); setOpenSignals(s); setPremiumRequests(reqs); setError(null)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -30,6 +40,38 @@ export default function Admin() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  async function submitPremium(e) {
+    e.preventDefault()
+    setPremiumBusy(true); setPremiumMsg(null)
+    try {
+      const r = await api.adminGrantPremium(premiumEmail.trim(), Number(premiumDays) || 30, 'premium')
+      setPremiumMsg({
+        ok: true,
+        text: `Premium выдан: ${r.email} до ${r.premium_until ? String(r.premium_until).slice(0, 10) : '—'}`,
+      })
+      setPremiumEmail('')
+      await load()
+    } catch (err) {
+      setPremiumMsg({ ok: false, text: err.message })
+    } finally {
+      setPremiumBusy(false)
+    }
+  }
+
+  async function revokePremium(email) {
+    if (!confirm(`Снять Premium с ${email}?`)) return
+    setPremiumBusy(true); setPremiumMsg(null)
+    try {
+      await api.adminGrantPremium(email, 30, 'free')
+      setPremiumMsg({ ok: true, text: `Снято: ${email} → free` })
+      await load()
+    } catch (err) {
+      setPremiumMsg({ ok: false, text: err.message })
+    } finally {
+      setPremiumBusy(false)
+    }
+  }
 
   async function submitTrader(e) {
     e.preventDefault()
@@ -88,11 +130,72 @@ export default function Admin() {
       <div className="page-header" style={{ marginBottom: 8 }}>
         <h1 className="page-title">Админка <span className="hot-tag">ADMIN</span></h1>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
-          Трейдеры и ручной ввод ТВХ. Статистика считается вживую из реальных закрытых сделок — не редактируется.
+          Premium, трейдеры и ручной ввод ТВХ. Статистика считается вживую из закрытых сделок.
         </p>
       </div>
 
       {error && <div className="adm-error animate-in">❌ {error}</div>}
+
+      {/* Дать Premium */}
+      <section className="adm-card adm-premium" style={{ marginTop: 16 }}>
+        <h2 className="section-title">Дать Premium</h2>
+        <p className="adm-hint" style={{ marginTop: -6 }}>
+          Впиши email с nowicki.trade — тариф станет Premium. Потом вручную добавь человека в платный канал/чат.
+        </p>
+        <form onSubmit={submitPremium} className="adm-form" style={{ borderTop: 'none', paddingTop: 0 }}>
+          <div className="adm-row2">
+            <input
+              className="adm-input"
+              type="email"
+              placeholder="email@gmail.com"
+              value={premiumEmail}
+              onChange={e => setPremiumEmail(e.target.value)}
+              required
+            />
+            <input
+              className="adm-input"
+              type="number"
+              min={1}
+              max={3650}
+              placeholder="Дней"
+              value={premiumDays}
+              onChange={e => setPremiumDays(e.target.value)}
+              title="Срок в днях"
+            />
+          </div>
+          {premiumMsg && <div className={premiumMsg.ok ? 'adm-msg-ok' : 'adm-msg-err'}>{premiumMsg.text}</div>}
+          <button className="adm-submit" type="submit" disabled={premiumBusy || !premiumEmail.trim()}>
+            {premiumBusy ? '...' : 'Выдать Premium'}
+          </button>
+        </form>
+        {premiumRequests.length > 0 && (
+          <div className="adm-req-list">
+            <div className="adm-form-title">Заявки из Telegram («Я оплатил»)</div>
+            {premiumRequests.slice(0, 12).map(r => (
+              <div key={r.id} className="adm-req-row">
+                <span className="adm-req-email">{r.email}</span>
+                <span className={`adm-req-status ${r.status}`}>{r.status}</span>
+                <span className="adm-req-date">{String(r.created_at || '').slice(0, 16).replace('T', ' ')}</span>
+                {r.status === 'pending' && (
+                  <button
+                    type="button"
+                    className="adm-req-btn"
+                    disabled={premiumBusy}
+                    onClick={() => { setPremiumEmail(r.email); }}
+                  >
+                    Подставить
+                  </button>
+                )}
+                {r.status === 'granted' && (
+                  <button type="button" className="adm-req-btn ghost" disabled={premiumBusy} onClick={() => revokePremium(r.email)}>
+                    Снять
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="adm-grid">
         {/* Трейдеры */}
@@ -215,6 +318,16 @@ export default function Admin() {
         .adm-hint { font-size: 11px; color: var(--text-tertiary); }
         .adm-submit { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); padding: 11px; font-size: 13px; font-weight: 700; cursor: pointer; }
         .adm-submit:disabled { opacity: 0.6; cursor: default; }
+        .adm-premium { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+        .adm-req-list { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 12px; }
+        .adm-req-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+        .adm-req-email { font-weight: 700; font-family: var(--font-mono); color: var(--text); }
+        .adm-req-status { text-transform: uppercase; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; color: var(--text-tertiary); }
+        .adm-req-status.pending { color: var(--amber); }
+        .adm-req-status.granted { color: var(--long); }
+        .adm-req-date { color: var(--text-tertiary); margin-left: auto; }
+        .adm-req-btn { border: 1px solid var(--border); background: var(--surface-hover); color: var(--text); border-radius: 8px; padding: 5px 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
+        .adm-req-btn.ghost { opacity: 0.75; }
         .adm-open-list { display: flex; flex-direction: column; gap: 6px; }
         .adm-open-row { display: flex; align-items: center; gap: 12px; font-size: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); flex-wrap: wrap; }
         .adm-open-side { font-weight: 800; font-family: var(--font-mono); width: 52px; }

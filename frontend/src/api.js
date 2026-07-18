@@ -53,6 +53,9 @@ export const api = {
   adminGetTraders: () => get('/admin/traders'),
   adminCreateTrader: (data) => post('/admin/traders', data),
   adminAddSignal: (data) => post('/admin/add-signal', data),
+  adminGrantPremium: (email, days = 30, tier = 'premium') =>
+    post('/admin/grant-premium', { email, days, tier }),
+  adminPremiumRequests: () => get('/admin/premium-requests'),
   analyzeChannel: (channelUrl, days = 30, entryTimeoutHours = 6, maxHoldHours = 168, riskPerTradeUsd = 100) =>
     post('/analyze-channel', {
       channel_url: channelUrl, days, entry_timeout_hours: entryTimeoutHours,

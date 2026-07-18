@@ -321,6 +321,62 @@ def admin_list_traders(admin=Depends(require_admin)):
     return db.list_traders(only_active=False)
 
 
+class GrantPremiumRequest(BaseModel):
+    email: str
+    days: int = 30
+    tier: str = "premium"
+
+
+@app.post("/api/admin/grant-premium")
+def admin_grant_premium(req: GrantPremiumRequest, admin=Depends(require_admin)):
+    """Выдать Premium по email (админка сайта)."""
+    email = (req.email or "").lower().strip()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Укажи корректный email")
+    days = max(1, min(int(req.days or 30), 3650))
+    tier = (req.tier or "premium").lower().strip()
+    if tier not in ("premium", "vip", "free"):
+        raise HTTPException(status_code=400, detail="Тариф: free / premium / vip")
+
+    user = db.get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail=f"Пользователь {email} не найден. Пусть сначала зарегистрируется на сайте.")
+
+    if tier == "free":
+        db.set_user_tier(user["id"], "free")
+        with db.get_conn() as conn:
+            conn.execute("UPDATE users SET premium_until=NULL WHERE id=?", (user["id"],))
+        pending = db.get_pending_premium_request(email=email)
+        if pending:
+            db.resolve_premium_request(pending["id"], "cancelled")
+        return {"ok": True, "email": email, "tier": "free", "premium_until": None}
+
+    until = db.grant_premium(user["id"], days=days)
+    if tier == "vip":
+        db.set_user_tier(user["id"], "vip")
+    pending = db.get_pending_premium_request(email=email)
+    if pending:
+        db.resolve_premium_request(pending["id"], "granted")
+    return {
+        "ok": True,
+        "email": email,
+        "tier": tier if tier == "vip" else "premium",
+        "premium_until": until,
+        "user_id": user["id"],
+    }
+
+
+@app.get("/api/admin/premium-requests")
+def admin_premium_requests(admin=Depends(require_admin)):
+    """Последние заявки «Я оплатил» из Telegram-бота."""
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, telegram_id, email, created_at, status
+               FROM premium_requests ORDER BY id DESC LIMIT 30"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 @app.post("/api/admin/add-signal")
 def admin_add_signal(req: AddSignalRequest, background_tasks: BackgroundTasks, admin=Depends(require_admin)):
     trader = db.get_trader(req.trader_id)
