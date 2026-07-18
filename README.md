@@ -76,18 +76,36 @@ frontend/   React (Vite) — дашборд + публичный лендинг
 ## Монетизация
 
 - Тарифы **free / premium / vip**, 3-дневный Premium-триал при регистрации.
-- За Premium: полные дашборды стратегий (Сравнение/Дальран/Long-Short/Trend), полная история сделок (free видит только винрейт), «Проверка на прочность», расширенный лимит AI-ассистента (free 5 / premium 50 / vip 200 запросов в день).
-- Оплата — **пока заглушка** (`/api/billing/upgrade` просто меняет тариф). Реальный платёжный провайдер — отдельный будущий шаг, сознательно отложен.
-- Нереализованные обещания (Telegram-алерты, VIP-канал, приоритетные сигналы) помечены «СКОРО», а не выдаются за готовые.
+- За Premium: **каналы ТВХ + чат в Telegram** (invite после оплаты), полная история на сайте, AI 50/день.
+- Публичный канал **результатов** (закрытые сделки) — без оплаты, ссылка с сайта.
+- Оплата: USDT TRC20 через бота → пользователь жмёт «Я оплатил» + email → админ `/grant email` → tier + invite-ссылки.
+- `/api/billing/upgrade` — stub для админа/тестов; основной путь — Telegram `/grant`.
+
+## Telegram-каналы (чеклист)
+
+**Роли**
+
+| Что | Кто видит | Env |
+|-----|-----------|-----|
+| Каналы ТВХ (входы) | Premium | `TELEGRAM_PREMIUM_CHANNEL_IDS` (CSV), fallback `TELEGRAM_CHAT_ID` |
+| Чат обсуждения | Premium (invite) | `TELEGRAM_PREMIUM_CHAT_ID` |
+| Канал результатов (закрытия) | Все | `@papayaqq` — `TELEGRAM_PUBLIC_CHANNEL_ID` (default `@papayaqq`) + `TELEGRAM_PUBLIC_CHANNEL_URL` |
+| Админы бота (`/grant`) | — | `TELEGRAM_ADMIN_IDS` (CSV numeric user id) |
+
+**Настройка в Telegram**
+
+1. Публичный канал результатов: **[@papayaqq](https://t.me/papayaqq)** — добавь бота админом (post messages). Default в коде: `@papayaqq`.
+2. Сделай каналы ТВХ и чат **private**, бот — админ с правом **invite users** + post.
+3. Узнай numeric `chat_id` premium-каналов/чата → `TELEGRAM_PREMIUM_CHANNEL_IDS`, `TELEGRAM_PREMIUM_CHAT_ID`.
+4. Свой Telegram user id → `TELEGRAM_ADMIN_IDS`.
+5. Сайт ведёт на `https://t.me/papayaqq` (`TG_RESULTS_CHANNEL` в `shared.jsx`).
+
+**Команды бота:** `/premium`, `/paid` (email), `/grant email@…` (только админ).
 
 ## AI-ассистент
 
-Персона «Ник» — бывалый крипто-трейдер-наставник (прошёл 2021 и крах 2022), а не безликий ChatGPT.
-Работает через `/api/ai/chat` с серверным ключом (env `OPENAI_API_KEY`, модель `gpt-4o-mini`).
-Системный контекст строится **на бэкенде** из реальных данных при каждом запросе: цены BTC/ETH,
-снапшот скринера (все 39 пар с режимом/ADX), фаза рынка, активные сигналы сканера. Гардрейлы: не
-обещает прибыль, всегда напоминает про стоп/риск, не предсказывает цену, честно говорит, если
-данных нет.
+Персона Nick — desk analyst NOWICKI. Модель по умолчанию `gpt-4o` (`AI_MODEL`).
+Контекст: цены, скринер, открытые сетапы с R:R/reasons, статистика, последние закрытия.
 
 ## API (основные эндпоинты)
 
@@ -158,7 +176,9 @@ python -m uvicorn main:app --reload --port 8000
 
 На Windows нужен `PYTHONIOENCODING=utf-8` в окружении — иначе падает на эмодзи в консольных логах
 (`cp1250` кодек по умолчанию). Обязательные env-переменные для полного функционала:
-`OPENAI_API_KEY` (AI-ассистент), `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` (уведомления, опционально).
+`OPENAI_API_KEY` (AI-ассистент), `TELEGRAM_BOT_TOKEN`,
+`TELEGRAM_PREMIUM_CHANNEL_IDS` / `TELEGRAM_CHAT_ID`, `TELEGRAM_PUBLIC_CHANNEL_ID`,
+`TELEGRAM_ADMIN_IDS` (опционально для уведомлений).
 
 При старте сразу запускается фоновый сканер. Проверить: http://localhost:8000/api/stats.
 

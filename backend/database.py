@@ -158,6 +158,23 @@ def init_db():
             conn.execute("UPDATE users SET email_verified=1")
         if 'google_id' not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
+        if 'telegram_id' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN telegram_id INTEGER")
+            print("✅ Миграция: добавлена колонка telegram_id в users")
+        if 'premium_until' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN premium_until TEXT")
+            print("✅ Миграция: добавлена колонка premium_until в users")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_id)")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS premium_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER NOT NULL,
+                email TEXT NOT NULL,
+                created_at TEXT,
+                status TEXT DEFAULT 'pending'
+            )
+        """)
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS auth_tokens (
@@ -532,6 +549,67 @@ def get_user_by_id(user_id):
 def set_user_tier(user_id, tier):
     with _lock, get_conn() as conn:
         conn.execute("UPDATE users SET tier=? WHERE id=?", (tier, user_id))
+
+
+def set_user_telegram_id(user_id, telegram_id: int):
+    with _lock, get_conn() as conn:
+        conn.execute("UPDATE users SET telegram_id=? WHERE id=?", (int(telegram_id), user_id))
+
+
+def get_user_by_telegram_id(telegram_id: int):
+    if not telegram_id:
+        return None
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM users WHERE telegram_id=?", (int(telegram_id),)).fetchone()
+        return dict(row) if row else None
+
+
+def grant_premium(user_id, days: int = 30):
+    """Ставит tier=premium и premium_until (+days от сейчас)."""
+    from datetime import timedelta
+    until = (datetime.now() + timedelta(days=max(1, int(days)))).isoformat()
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET tier='premium', premium_until=? WHERE id=?",
+            (until, user_id),
+        )
+    return until
+
+
+def add_premium_request(telegram_id: int, email: str):
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "UPDATE premium_requests SET status='cancelled' WHERE telegram_id=? AND status='pending'",
+            (int(telegram_id),),
+        )
+        cur = conn.execute(
+            """INSERT INTO premium_requests (telegram_id, email, created_at, status)
+               VALUES (?,?,?, 'pending')""",
+            (int(telegram_id), email.lower().strip(), datetime.now().isoformat()),
+        )
+        return cur.lastrowid
+
+
+def get_pending_premium_request(email: str = None, telegram_id: int = None):
+    with get_conn() as conn:
+        if email:
+            row = conn.execute(
+                "SELECT * FROM premium_requests WHERE email=? AND status='pending' ORDER BY id DESC LIMIT 1",
+                (email.lower().strip(),),
+            ).fetchone()
+        elif telegram_id:
+            row = conn.execute(
+                "SELECT * FROM premium_requests WHERE telegram_id=? AND status='pending' ORDER BY id DESC LIMIT 1",
+                (int(telegram_id),),
+            ).fetchone()
+        else:
+            return None
+        return dict(row) if row else None
+
+
+def resolve_premium_request(req_id: int, status: str = "granted"):
+    with _lock, get_conn() as conn:
+        conn.execute("UPDATE premium_requests SET status=? WHERE id=?", (status, req_id))
 
 
 def set_user_admin(user_id, is_admin: bool):

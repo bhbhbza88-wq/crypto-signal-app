@@ -55,6 +55,14 @@ def effective_tier(user: dict) -> str:
     if not user:
         return 'free'
     base = user.get('tier', 'free')
+    # Платный premium с истекшим сроком → free (trial отдельно ниже)
+    until = user.get('premium_until')
+    if base == 'premium' and until:
+        try:
+            if datetime.now() > datetime.fromisoformat(until):
+                base = 'free'
+        except (ValueError, TypeError):
+            pass
     if TIER_RANK.get(base, 0) >= TIER_RANK.get(TRIAL_TIER, 0):
         return base
     if _trial_active(user):

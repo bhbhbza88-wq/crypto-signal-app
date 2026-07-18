@@ -1,7 +1,13 @@
 import { useEffect, useState, useRef } from 'react'
 
-export const TG_CHANNEL = 'https://telegram.me/chlebchik'
 export const TG_BOT = 'https://telegram.me/trading4325_bot'
+/** Публичный канал с завершёнными сделками (витрина). Переопределение: VITE_TG_RESULTS_CHANNEL */
+export const TG_RESULTS_CHANNEL =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TG_RESULTS_CHANNEL) ||
+  'https://t.me/papayaqq'
+/** @deprecated для ТВХ — ведём на бота Premium; алиас на результаты для старых ссылок */
+export const TG_CHANNEL = TG_RESULTS_CHANNEL
+export const TG_PREMIUM = `${TG_BOT}?start=premium`
 
 export const RESULT_LABEL = {
   tp1: 'TP1', tp2: 'TP2', tp3: 'TP3', sl: 'Стоп', be: 'Б/У',

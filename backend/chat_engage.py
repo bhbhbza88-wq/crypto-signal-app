@@ -32,7 +32,7 @@ TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "").strip()
 TELEGRAM_CHAT_SESSION = os.getenv("TELEGRAM_CHAT_SESSION", "").strip()
 TELEGRAM_CHAT_WHITELIST = os.getenv("TELEGRAM_CHAT_WHITELIST", "").strip()
 
-CHANNEL_URL = "https://telegram.me/chlebchik"
+CHANNEL_URL = os.getenv("TELEGRAM_PUBLIC_CHANNEL_URL", "").strip() or "https://t.me/papayaqq"
 SITE_URL = "https://nowicki.trade"
 PNL_SHOW_MULT = 1.12
 

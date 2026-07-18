@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { TG_BOT } from './shared'
+import { TG_RESULTS_CHANNEL, TG_PREMIUM } from './shared'
 
-const PREMIUM_BOT = `${TG_BOT}?start=premium`
+const PREMIUM_BOT = TG_PREMIUM
 
 const PERIODS = [
   { key: 'month', label: 'Месяц', mult: 1, discount: 0 },
@@ -18,7 +18,13 @@ const TIERS = [
   },
   {
     key: 'premium', name: 'Premium', price: 29, lifetime: 299,
-    features: ['Полная история сделок', 'PnL по дням и разбивка по TP/SL', 'AI-ассистент (50 вопросов/день)', { label: 'Push-алерты', soon: true }],
+    features: [
+      'Каналы с ТВХ (входы) + чат',
+      'Полная история сделок на сайте',
+      'PnL по дням и разбивка по TP/SL',
+      'AI-ассистент (50 вопросов/день)',
+      { label: 'Push-алерты', soon: true },
+    ],
     cta: 'Оформить в Telegram', accent: 'var(--accent)', popular: true,
   },
 ]
@@ -27,7 +33,7 @@ const FAQ = [
   { q: 'Это реальная торговля или бэктест?', a: 'Каждая сделка в истории — вход и выход по актуальным ценам Bybit. Сигналы формирует наш AI-сканер.' },
   { q: 'Как считается винрейт?', a: 'Доля закрытых сделок с положительным PnL от общего числа закрытых — учитываются TP, стоп и таймаут.' },
   { q: 'Как сканер выбирает монеты?', a: 'Анализируем тренд, силу движения, волатильность и объём. Сигнал появляется только когда условия сходятся и уровни entry/stop/TP согласованы.' },
-  { q: 'Как оплатить Premium?', a: 'Нажми «Оформить в Telegram» — бот покажет USDT-адрес (TRC20). После оплаты напиши @Kupyansk_2: email аккаунта и скрин/tx — откроем Premium.' },
+  { q: 'Как оплатить Premium?', a: 'Нажми «Оформить в Telegram» — бот покажет USDT (TRC20). После оплаты нажми «Я оплатил» и укажи email аккаунта — админ выдаст invite в каналы ТВХ. Публичные результаты смотри без оплаты.' },
   { q: 'На какой бирже работает платформа?', a: 'Сейчас — Bybit. Поддержка других бирж в планах.' },
 ]
 
@@ -57,7 +63,13 @@ export default function Pricing({ user }) {
         </p>
       </div>
 
-      <div className="pr-banner">Оплата Premium — USDT TRC20 в Telegram-боте. После перевода напиши @Kupyansk_2 (email + скрин/tx).</div>
+      <div className="pr-banner">
+        Оплата Premium — USDT TRC20 в боте. После перевода: «Я оплатил» + email → invite в каналы ТВХ.
+        {' '}
+        <a href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', fontWeight: 700 }}>
+          Публичные результаты →
+        </a>
+      </div>
 
       <div className="pr-period-switch">
         {PERIODS.map(p => (

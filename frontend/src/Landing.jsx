@@ -4,7 +4,7 @@ import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts'
 import { api } from './api'
 import {
   useLivePrices, CountUp, useReveal, RESULT_LABEL,
-  TG_CHANNEL, TG_BOT,
+  TG_BOT, TG_RESULTS_CHANNEL, TG_PREMIUM,
   polishHistory, polishStats, buildShowcaseCurve,
 } from './shared'
 import { useI18n } from './i18n'
@@ -146,7 +146,7 @@ export default function Landing() {
             <a href="#signals" onClick={e => { e.preventDefault(); go('#signals') }}>Сигналы</a>
             <a href="#pricing" onClick={e => { e.preventDefault(); go('#pricing') }}>Тарифы</a>
             <a href="#about" onClick={e => { e.preventDefault(); go('#about') }}>О сканере</a>
-            <a href={TG_CHANNEL} target="_blank" rel="noopener noreferrer">Telegram</a>
+            <a href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">Результаты</a>
           </div>
           <div className="nav-right">
             <div className="lang-switch" role="group" aria-label="Language">
@@ -273,7 +273,7 @@ export default function Landing() {
           </div>
           <div className="honest-cta reveal">
             <a className="btn-solid" href={TG_BOT} target="_blank" rel="noopener noreferrer">Открыть бота</a>
-            <a className="btn-ghost" href={TG_CHANNEL} target="_blank" rel="noopener noreferrer">Сигналы в Telegram</a>
+            <a className="btn-ghost" href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">Смотреть результаты</a>
           </div>
         </div>
       </section>
@@ -329,7 +329,8 @@ export default function Landing() {
             <p className="muted">AI-сканер крипторынка. Сигналы с уровнями и трек-рекордом на Bybit.</p>
           </div>
           <div className="foot-links">
-            <a href={TG_CHANNEL} target="_blank" rel="noopener noreferrer">Telegram</a>
+            <a href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">Результаты</a>
+            <a href={TG_PREMIUM} target="_blank" rel="noopener noreferrer">Premium</a>
             <a href={TG_BOT} target="_blank" rel="noopener noreferrer">Бот</a>
             <button type="button" onClick={() => navigate('/app/overview')}>Платформа</button>
           </div>
