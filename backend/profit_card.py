@@ -102,7 +102,7 @@ def render_profit_card(
     W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # раскладка по первому референсу: блок текста НИЖЕ, не прилипает к верху
+    # ещё чуть ниже — ближе к первому референсу Binance
     pad = int(W * 0.07)
     col2_x = int(W * 0.48)
 
@@ -112,19 +112,18 @@ def render_profit_card(
     font_label = _font(max(18, int(H * 0.028)), bold=False)
     font_val = _font(max(22, int(H * 0.036)), bold=True)
 
-    # опустили весь блок ~на 8–10% вниз относительно прошлой версии
-    draw.text((pad, int(H * 0.175)), pair_line, font=font_pair, fill=WHITE)
+    draw.text((pad, int(H * 0.205)), pair_line, font=font_pair, fill=WHITE)
 
-    y_side = int(H * 0.240)
+    y_side = int(H * 0.270)
     side_text = f"{side_ru} "
     draw.text((pad, y_side), side_text, font=font_side, fill=side_color)
     sw = draw.textlength(side_text, font=font_side)
     draw.text((pad + sw, y_side), f"| {leverage}x", font=font_side, fill=GREY)
 
-    draw.text((pad, int(H * 0.365)), roi_str, font=font_roi, fill=roi_color)
+    draw.text((pad, int(H * 0.400)), roi_str, font=font_roi, fill=roi_color)
 
-    y_lab = int(H * 0.600)
-    y_val = int(H * 0.655)
+    y_lab = int(H * 0.640)
+    y_val = int(H * 0.695)
     draw.text((pad, y_lab), "Цена входа", font=font_label, fill=GREY)
     draw.text((col2_x, y_lab), "Последняя цена", font=font_label, fill=GREY)
     draw.text((pad, y_val), _fmt_price(entry), font=font_val, fill=WHITE)
