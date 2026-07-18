@@ -7,6 +7,7 @@ import {
   TG_CHANNEL, TG_BOT,
   polishHistory, polishStats, buildShowcaseCurve,
 } from './shared'
+import { useI18n } from './i18n'
 
 const SCAN_COINS = [
   'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK',
@@ -106,6 +107,7 @@ function LiveScanner({ prices }) {
 
 export default function Landing() {
   const navigate = useNavigate()
+  const { lang, setLang, locales } = useI18n()
   const prices = useLivePrices()
   const { recent, curve, display } = useLiveStats()
   const [openFaq, setOpenFaq] = useState(null)
@@ -147,6 +149,18 @@ export default function Landing() {
             <a href={TG_CHANNEL} target="_blank" rel="noopener noreferrer">Telegram</a>
           </div>
           <div className="nav-right">
+            <div className="lang-switch" role="group" aria-label="Language">
+              {locales.map((l) => (
+                <button
+                  key={l.code}
+                  type="button"
+                  className={`lang-btn ${lang === l.code ? 'active' : ''}`}
+                  onClick={() => setLang(l.code)}
+                >
+                  {l.short}
+                </button>
+              ))}
+            </div>
             <button type="button" className="theme-btn" aria-label="Сменить тему" onClick={() => setDark(d => !d)}>
               {dark ? '☀' : '☾'}
             </button>
@@ -344,6 +358,9 @@ export default function Landing() {
         .nav-links a { padding: 8px 12px; border-radius: 8px; font-size: 14px; color: var(--text-secondary); font-weight: 500; }
         .nav-links a:hover { color: var(--text); background: var(--surface-hover); }
         .nav-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+        .lang-switch { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+        .lang-btn { border: none; background: transparent; color: var(--text-tertiary); font-size: 11px; font-weight: 800; padding: 6px 8px; border-radius: 7px; cursor: pointer; letter-spacing: 0.04em; }
+        .lang-btn.active { background: var(--accent); color: #fff; }
         .theme-btn { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); }
         .burger { display: none; flex-direction: column; gap: 5px; background: none; border: none; padding: 4px; }
         .burger span { width: 20px; height: 2px; background: var(--text); }

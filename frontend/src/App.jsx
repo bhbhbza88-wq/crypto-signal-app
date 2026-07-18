@@ -3,6 +3,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, getToken, setToken } from './api'
 import AuthModal from './AuthModal'
 import SignalCard from './SignalCard'
+import AccountMenu from './AccountMenu'
+import { useI18n } from './i18n'
 import { useLivePrices, CountUp, RESULT_LABEL, TG_BOT, APP_SECTIONS, polishHistory, polishStats } from './shared'
 import './App.css'
 
@@ -25,15 +27,16 @@ class ErrorBoundary extends Component {
     if (this.state.error && prevProps.resetKey !== this.props.resetKey) this.setState({ error: null })
   }
   render() {
+    const { t } = this.props
     if (this.state.error) {
       return (
         <div className="section animate-in" style={{ textAlign: 'center', padding: '60px 20px' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
-          <h2 style={{ marginBottom: 8 }}>Что-то пошло не так</h2>
+          <h2 style={{ marginBottom: 8 }}>{t ? t('err.boundary') : 'Something went wrong'}</h2>
           <p style={{ color: 'var(--text-secondary)', marginBottom: 20 }}>
-            Раздел не смог загрузиться. Попробуй обновить страницу — остальное приложение работает.
+            {t ? t('err.boundarySub') : 'Try refreshing the page.'}
           </p>
-          <button className="btn-primary" onClick={() => window.location.reload()}>Обновить</button>
+          <button className="btn-primary" onClick={() => window.location.reload()}>{t ? t('err.reload') : 'Reload'}</button>
         </div>
       )
     }
@@ -42,13 +45,13 @@ class ErrorBoundary extends Component {
 }
 
 const NAV_SECTIONS = [
-  { title: 'Главное', items: [
-    { key: 'overview',     label: 'Дашборд',       icon: '◈' },
-    { key: 'history',      label: 'История',        icon: '📋' },
-    { key: 'ai_assistant', label: 'AI Ассистент',  icon: '✦', badge: 'BETA' },
+  { titleKey: 'nav.main', items: [
+    { key: 'overview',     labelKey: 'nav.dashboard', icon: '◈' },
+    { key: 'history',      labelKey: 'nav.history',   icon: '📋' },
+    { key: 'ai_assistant', labelKey: 'nav.ai',        icon: '✦', badge: 'BETA' },
   ]},
-  { title: 'Аккаунт', items: [
-    { key: 'pricing',      label: 'Тарифы',         icon: '💎' },
+  { titleKey: 'nav.account', items: [
+    { key: 'pricing',      labelKey: 'nav.pricing',   icon: '💎' },
   ]},
 ]
 
@@ -69,27 +72,27 @@ function KPI({ label, value, suffix, sub, accent }) {
 }
 
 function requestPush() { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission() }
-function sendPush(t, b) { if ('Notification' in window && Notification.permission === 'granted') new Notification(t, { body: b }) }
+function sendPush(title, body) { if ('Notification' in window && Notification.permission === 'granted') new Notification(title, { body }) }
 
-function RecentSignals({ history, isPremium, onUpgrade, onSeeAll }) {
+function RecentSignals({ history, isPremium, onUpgrade, onSeeAll, t }) {
   const rows = polishHistory(history).slice(0, 8)
   if (!rows.length) return null
   return (
     <div className="rs-card">
       {isPremium && (
         <div className="rs-head">
-          <button className="rs-more" onClick={onSeeAll}>Вся история →</button>
+          <button className="rs-more" onClick={onSeeAll}>{t('recent.all')}</button>
         </div>
       )}
       <div className="rs-list-wrap">
         <div className={`rs-list ${!isPremium ? 'rs-blur' : ''}`}>
-          {rows.map((t) => (
-            <div className="rs-row" key={t.id}>
-              <span className="rs-sym mono">{t.symbol.replace('/USDT', '')}</span>
-              <span className={`rs-dir ${t.signal === 'LONG' ? 'long' : 'short'}`}>{t.signal}</span>
-              <span className="rs-res">{RESULT_LABEL[t.result] || t.result}</span>
-              <span className={`rs-pnl mono ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}`}>
-                {t.pnl > 0 ? '+' : ''}{t.pnl}%
+          {rows.map((row) => (
+            <div className="rs-row" key={row.id}>
+              <span className="rs-sym mono">{row.symbol.replace('/USDT', '')}</span>
+              <span className={`rs-dir ${row.signal === 'LONG' ? 'long' : 'short'}`}>{row.signal}</span>
+              <span className="rs-res">{RESULT_LABEL[row.result] || row.result}</span>
+              <span className={`rs-pnl mono ${row.pnl > 0 ? 'pos' : row.pnl < 0 ? 'neg' : ''}`}>
+                {row.pnl > 0 ? '+' : ''}{row.pnl}%
               </span>
             </div>
           ))}
@@ -97,8 +100,8 @@ function RecentSignals({ history, isPremium, onUpgrade, onSeeAll }) {
         {!isPremium && (
           <div className="rs-lock">
             <span className="rs-lock-icon">🔒</span>
-            <span className="rs-lock-text">Полная лента сделок и PnL по дням — на Premium</span>
-            <button className="rs-lock-btn" onClick={onUpgrade}>Открыть за Premium →</button>
+            <span className="rs-lock-text">{t('recent.lock')}</span>
+            <button className="rs-lock-btn" onClick={onUpgrade}>{t('recent.unlock')}</button>
           </div>
         )}
       </div>
@@ -111,6 +114,7 @@ export default function App() {
   const { section } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = VALID_TABS.has(section) ? section : 'overview'
+  const { t } = useI18n()
 
   const [signals, setSignals] = useState([])
   const [history, setHistory] = useState([])
@@ -136,14 +140,12 @@ export default function App() {
     if (!VALID_TABS.has(section)) navigate('/app/overview', { replace: true })
   }, [section, navigate])
 
-  // восстановление сессии по сохранённому токену
   useEffect(() => {
     if (getToken()) {
       api.me().then(r => setUser(r.user)).catch(() => setToken(null))
     }
   }, [])
 
-  // CTA с лендинга: /app/... ?auth=register|login
   useEffect(() => {
     const wanted = searchParams.get('auth')
     if (wanted === 'register' || wanted === 'login') {
@@ -190,7 +192,7 @@ export default function App() {
       setSignals(s)
       setError(null)
     } catch {
-      setError('Нет связи с сервером.')
+      setError('offline')
     }
   }, [])
 
@@ -201,7 +203,7 @@ export default function App() {
       setStats(st)
       setError(null)
     } catch {
-      setError('Нет связи с сервером.')
+      setError('offline')
     }
   }, [])
 
@@ -236,17 +238,27 @@ export default function App() {
 
   const isPremium = !!user && (user.tier === 'premium' || user.tier === 'vip')
 
-  const navSections = user?.is_admin
-    ? [...NAV_SECTIONS, { title: 'Админ', items: [
-        { key: 'admin', label: 'Админка', icon: '🛠' },
-        { key: 'channel_analyzer', label: 'Channel Analyzer', icon: '🔬' },
-      ] }]
-    : NAV_SECTIONS
+  const navSections = useMemo(() => {
+    const base = NAV_SECTIONS.map((sec) => ({
+      title: t(sec.titleKey),
+      items: sec.items.map((item) => ({
+        ...item,
+        label: t(item.labelKey),
+      })),
+    }))
+    if (!user?.is_admin) return base
+    return [...base, {
+      title: t('nav.admin'),
+      items: [
+        { key: 'admin', label: t('nav.adminPanel'), icon: '🛠' },
+        { key: 'channel_analyzer', label: t('nav.channelAnalyzer'), icon: '🔬' },
+      ],
+    }]
+  }, [t, user?.is_admin])
 
   return (
     <div className={`layout ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
 
-      {/* ── SIDEBAR ── */}
       <aside className="sidebar">
         <div className="sidebar-top">
           <div className="sidebar-logo" onClick={() => navigate('/')}>
@@ -284,24 +296,24 @@ export default function App() {
           {navSections.map((sec) => (
             <div key={sec.title} className="nav-group">
               {!sidebarCollapsed && <div className="nav-group-title">{sec.title}</div>}
-              {sec.items.map((t) => (
+              {sec.items.map((navItem) => (
                 <button
-                  key={t.key}
-                  className={`nav-item ${tab === t.key ? 'active' : ''}`}
-                  onClick={() => setTab(t.key)}
-                  title={sidebarCollapsed ? t.label : ''}
+                  key={navItem.key}
+                  className={`nav-item ${tab === navItem.key ? 'active' : ''}`}
+                  onClick={() => setTab(navItem.key)}
+                  title={sidebarCollapsed ? navItem.label : ''}
                 >
-                  <span className="nav-icon">{t.icon}</span>
-                  {!sidebarCollapsed && <span className="nav-label">{t.label}</span>}
+                  <span className="nav-icon">{navItem.icon}</span>
+                  {!sidebarCollapsed && <span className="nav-label">{navItem.label}</span>}
                   {!sidebarCollapsed && (
                     <div className="nav-right">
-                      {t.badge && <span className={`nav-badge ${
-                        t.badge==='HOT' ? 'hot' :
-                        t.badge==='AI' ? 'ai' :
-                        t.badge==='LIVE' ? 'live' :
-                        t.badge==='NEW' ? 'new' : 'beta'
-                      }`}>{t.badge}</span>}
-                      {tab === t.key && <span className="nav-pip" />}
+                      {navItem.badge && <span className={`nav-badge ${
+                        navItem.badge==='HOT' ? 'hot' :
+                        navItem.badge==='AI' ? 'ai' :
+                        navItem.badge==='LIVE' ? 'live' :
+                        navItem.badge==='NEW' ? 'new' : 'beta'
+                      }`}>{navItem.badge}</span>}
+                      {tab === navItem.key && <span className="nav-pip" />}
                     </div>
                   )}
                 </button>
@@ -315,20 +327,16 @@ export default function App() {
             <div className="scan-status">
               <span className="scan-dot" />
               <div>
-                <span className="scan-text">Сканер онлайн</span>
-                <span className="scan-sub">поиск точек входа 24/7</span>
+                <span className="scan-text">{t('scan.online')}</span>
+                <span className="scan-sub">{t('scan.sub')}</span>
               </div>
             </div>
           )}
-          <div className="sidebar-actions">
-            <button className="theme-toggle" onClick={() => setDark(d => !d)}>{dark ? '☀' : '☾'}</button>
-          </div>
         </div>
       </aside>
 
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
 
-      {/* ── MAIN ── */}
       <div className="main-wrap">
         <header className="topbar">
           <div className="topbar-left">
@@ -350,39 +358,38 @@ export default function App() {
             )}
           </div>
           <div className="topbar-right">
-            <a className="btn-tg-bot" href={TG_BOT} target="_blank" rel="noopener noreferrer" aria-label="Telegram бот">
-              Telegram <span className="btn-tg-label">Бот</span>
+            <a className="btn-tg-bot" href={TG_BOT} target="_blank" rel="noopener noreferrer" aria-label={`${t('top.telegram')} ${t('top.bot')}`}>
+              {t('top.telegram')} <span className="btn-tg-label">{t('top.bot')}</span>
             </a>
-            <button className="btn-trial" onClick={() => setTab('ai_assistant')}>AI Ассистент</button>
-            {user ? (
-              <div className="auth-box">
-                <button className={`plan-badge tier-${user.tier}`} onClick={() => setTab('pricing')} title="Сменить тариф">
-                  {user.tier.toUpperCase()}
-                </button>
-                <span className="auth-email" title={user.email}>{user.email.split('@')[0]}</span>
-                <button className="auth-logout" onClick={logout} title="Выйти">⎋</button>
-              </div>
-            ) : (
-              <button className="auth-login-btn" onClick={() => { setAuthMode('login'); setShowAuth(true) }}>Войти</button>
-            )}
-            <button className="theme-toggle-sm" onClick={() => setDark(d => !d)}>{dark ? '☀' : '☾'}</button>
+            <button className="btn-trial" onClick={() => setTab('ai_assistant')}>{t('top.ai')}</button>
+            <AccountMenu
+              user={user}
+              dark={dark}
+              onToggleTheme={() => setDark((d) => !d)}
+              onLogout={logout}
+              onLogin={() => { setAuthMode('login'); setShowAuth(true) }}
+              onOpenPricing={() => setTab('pricing')}
+            />
           </div>
         </header>
 
         <main className="content">
-          {error && <div className="error-banner animate-in">{error}</div>}
+          {error && <div className="error-banner animate-in">{t('err.offline')}</div>}
 
           {user?.on_trial && (
             <div className="trial-banner animate-in">
-              <span>✦ <strong>Premium-триал активен</strong> — осталось {user.trial_days_left} {user.trial_days_left === 1 ? 'день' : 'дн.'}. История и Premium-фичи открыты.</span>
-              <button onClick={() => setTab('pricing')}>Оформить Premium</button>
+              <span>✦ <strong>{t('trial.active')}</strong> — {t('trial.left', {
+                n: user.trial_days_left,
+                unit: user.trial_days_left === 1 ? t('trial.day') : t('trial.days'),
+              })}</span>
+              <button onClick={() => setTab('pricing')}>{t('trial.cta')}</button>
             </div>
           )}
 
-          <ErrorBoundary resetKey={tab}>
-          <Suspense fallback={<div className="section animate-in" style={{ padding: 40, color: 'var(--text-tertiary)' }}>Загрузка раздела…</div>}>
-          {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">AI Ассистент <span className="beta-tag">BETA</span></h1></div><AIChat /></section>}
-          {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">История сделок</h1></div><HistoryTable history={history} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
+          <ErrorBoundary resetKey={tab} t={t}>
+          <Suspense fallback={<div className="section animate-in" style={{ padding: 40, color: 'var(--text-tertiary)' }}>{t('load.section')}</div>}>
+          {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">{t('ai.title')} <span className="beta-tag">BETA</span></h1></div><AIChat /></section>}
+          {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">{t('hist.title')}</h1></div><HistoryTable history={history} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
           {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} /></section>}
           {tab === 'admin' && user?.is_admin && <Admin />}
           {tab === 'channel_analyzer' && user?.is_admin && <section className="section animate-in"><ChannelAnalyzer /></section>}
@@ -391,9 +398,9 @@ export default function App() {
             <div className="animate-in dash">
               <div className="dash-hero">
                 <div className="dash-hero-text">
-                  <span className="live-chip">Scanner live</span>
-                  <h1 className="page-title">Дашборд</h1>
-                  <p className="page-subtitle">AI ищет точки входа. Открытые сетапы и свежий трек-рекорд — ниже.</p>
+                  <span className="live-chip">{t('dash.live')}</span>
+                  <h1 className="page-title">{t('dash.title')}</h1>
+                  <p className="page-subtitle">{t('dash.sub')}</p>
                 </div>
                 {prices && (
                   <div className="dash-ticker app-panel">
@@ -412,18 +419,18 @@ export default function App() {
               </div>
 
               <div className="kpi-grid">
-                <KPI label="Активные" value={signals.length} sub={signals.length ? 'в работе' : 'ожидание'} accent />
-                <KPI label="Закрыто" value={displayStats.total} sub="всего сделок" />
-                <KPI label="Винрейт" value={displayStats.winrate} suffix="%" sub="за всё время" />
-                <KPI label="Ср. PnL" value={displayStats.avgPnl} suffix="%" sub="на сделку" />
+                <KPI label={t('kpi.active')} value={signals.length} sub={signals.length ? t('kpi.activeSub') : t('kpi.wait')} accent />
+                <KPI label={t('kpi.closed')} value={displayStats.total} sub={t('kpi.closedSub')} />
+                <KPI label={t('kpi.winrate')} value={displayStats.winrate} suffix="%" sub={t('kpi.winrateSub')} />
+                <KPI label={t('kpi.avgPnl')} value={displayStats.avgPnl} suffix="%" sub={t('kpi.avgPnlSub')} />
               </div>
 
               <section className="section dash-section">
                 <div className="app-panel-head" style={{ paddingLeft: 0, paddingRight: 0, border: 'none' }}>
-                  <h2 className="section-title" style={{ margin: 0, flex: 1 }}>Активные сигналы</h2>
+                  <h2 className="section-title" style={{ margin: 0, flex: 1 }}>{t('sec.active')}</h2>
                   <span className="sec-count">{signals.length}</span>
                 </div>
-                {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal /> : (
+                {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal t={t} /> : (
                   <div className="signals-grid">
                     {signals.map(s => <SignalCard key={s.symbol} signal={s} />)}
                   </div>
@@ -433,11 +440,12 @@ export default function App() {
               {history.length > 0 && (
                 <section className="section dash-section">
                   <div className="app-panel-head" style={{ paddingLeft: 0, paddingRight: 0, border: 'none' }}>
-                    <h2 className="section-title" style={{ margin: 0, flex: 1 }}>Последние сигналы</h2>
+                    <h2 className="section-title" style={{ margin: 0, flex: 1 }}>{t('sec.recent')}</h2>
                   </div>
                   <RecentSignals
                     history={history}
                     isPremium={isPremium}
+                    t={t}
                     onSeeAll={() => setTab('history')}
                     onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))}
                   />
@@ -450,8 +458,6 @@ export default function App() {
       </div>
 
       {showAuth && <AuthModal initialMode={authMode} onClose={() => setShowAuth(false)} onAuth={setUser} />}
-
-
     </div>
   )
 }
@@ -469,13 +475,13 @@ function SignalSkeleton() {
   )
 }
 
-function EmptySignal() {
+function EmptySignal({ t }) {
   return (
     <div className="empty-signal animate-in">
       <div className="empty-icon">🔍</div>
-      <div className="empty-title">Сигналов нет</div>
-      <div className="empty-desc">AI-сканер ищет точки входа на рынке. Как только появится новый сигнал — он отобразится здесь.</div>
-      <div className="empty-pulse"><span style={{width:7,height:7,borderRadius:'50%',background:'var(--long)',animation:'pulse 2s infinite',display:'inline-block'}} />Сканируем рынок каждые несколько минут</div>
+      <div className="empty-title">{t('empty.title')}</div>
+      <div className="empty-desc">{t('empty.desc')}</div>
+      <div className="empty-pulse"><span style={{width:7,height:7,borderRadius:'50%',background:'var(--long)',animation:'pulse 2s infinite',display:'inline-block'}} />{t('empty.pulse')}</div>
     </div>
   )
 }
