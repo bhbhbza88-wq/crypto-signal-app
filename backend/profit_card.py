@@ -62,6 +62,44 @@ def _exit_from_pnl(side: str, entry: float, pnl_pct: float) -> float:
     return entry * (1 - pnl_pct / 100.0)
 
 
+def _draw_binance_mark(img: Image.Image, cx: int, cy: int, scale: float = 1.0, alpha: int = 48):
+    """Полупрозрачная эмблема Binance (ромб с вырезом) — watermark как на PnL-карточке."""
+    s = int(240 * scale)
+    size = s * 5
+    mark = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    mx = my = size // 2
+    md = ImageDraw.Draw(mark)
+
+    def diamond(r, fill=None, outline=None, width=1):
+        pts = [(mx, my - r), (mx + r, my), (mx, my + r), (mx - r, my)]
+        md.polygon(pts, fill=fill, outline=outline, width=width)
+
+    # маска формы логотипа: внешний ромб − средний + центр
+    mask = Image.new("L", (size, size), 0)
+    mdraw = ImageDraw.Draw(mask)
+
+    def dmask(r, fill):
+        mdraw.polygon([(mx, my - r), (mx + r, my), (mx, my + r), (mx - r, my)], fill=fill)
+
+    dmask(int(s), 255)
+    dmask(int(s * 0.58), 0)
+    dmask(int(s * 0.26), 255)
+
+    color_layer = Image.new("RGBA", (size, size), (75, 80, 90, alpha))
+    mark = Image.composite(color_layer, mark, mask)
+
+    # контурные ромбы вокруг
+    md = ImageDraw.Draw(mark)
+    for r, a in ((int(s * 1.4), 28), (int(s * 1.85), 16), (int(s * 2.25), 10)):
+        diamond(r, outline=(60, 65, 75, a), width=3)
+
+    ox = cx - size // 2
+    oy = cy - size // 2
+    base = img.convert("RGBA")
+    base.alpha_composite(mark, (ox, oy))
+    return base.convert("RGB")
+
+
 def render_profit_card(
     symbol: str,
     side: str,
@@ -91,29 +129,11 @@ def render_profit_card(
     roi_color = GREEN if roi >= 0 else RED
     roi_str = f"+{roi:.2f}%" if roi >= 0 else f"{roi:.2f}%"
 
-    # квадрат / чуть вертикальнее — без белых полей, фон на весь кадр
     W, H = 1080, 1080
     img = Image.new("RGB", (W, H), BG)
-    draw = ImageDraw.Draw(img)
 
-    # лёгкий тёмный геометрический узор справа сверху (как у Binance)
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    cx, cy = W - 80, 120
-    for i, size in enumerate((520, 420, 320, 220)):
-        a = 18 - i * 3
-        od.rectangle(
-            [cx - size // 2, cy - size // 2, cx + size // 2, cy + size // 2],
-            outline=(40, 44, 52, max(a, 6)),
-            width=3,
-        )
-    # ромб
-    s = 380
-    od.polygon(
-        [(cx, cy - s // 2), (cx + s // 2, cy), (cx, cy + s // 2), (cx - s // 2, cy)],
-        outline=(45, 50, 60, 40),
-    )
-    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    # эмблема справа сверху
+    img = _draw_binance_mark(img, cx=W - 200, cy=200, scale=1.15, alpha=42)
     draw = ImageDraw.Draw(img)
 
     font_pair = _font(52, bold=True)
@@ -128,7 +148,6 @@ def render_profit_card(
     draw.text((pad, y), pair_line, font=font_pair, fill=WHITE)
     y += 78
 
-    # «Шорт | 25x»
     side_text = f"{side_ru} "
     draw.text((pad, y), side_text, font=font_side, fill=side_color)
     sw = draw.textlength(side_text, font=font_side)
@@ -139,7 +158,6 @@ def render_profit_card(
     draw.text((pad, y), roi_str, font=font_roi, fill=roi_color)
     y += 180
 
-    # две колонки: цена входа | последняя цена
     col2_x = W // 2 + 20
     draw.text((pad, y), "Цена входа", font=font_label, fill=GREY)
     draw.text((col2_x, y), "Последняя цена", font=font_label, fill=GREY)
