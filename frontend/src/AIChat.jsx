@@ -58,19 +58,19 @@ function MarkdownMessage({ content }) {
 }
 
 const SUGGESTIONS = [
-  'Почему сканер вошёл в эту сделку?',
-  'Какие риски у текущего сигнала?',
-  'Объясни стратегию сканера',
-  'Покажи статистику за неделю',
-  'Что такое ADX и зачем он нужен?',
-  'Когда лучше не торговать?',
+  'Разбери текущий открытый сетап: bias, invalidation, R:R',
+  'Где слабость в активном сигнале относительно BTC?',
+  'Что должно случиться, чтобы сетап считать сорванным?',
+  'Сравни риск до стопа и потенциал до TP1/TP2',
+  'Как читать ADX и режим рынка на наших монетах сейчас?',
+  'Когда лучше пропустить вход даже при «красивом» сигнале?',
 ]
 
 export default function AIChat() {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: '👋 Привет! Я AI-ассистент NOWICKI. Могу объяснить текущий сигнал, риски, стратегию сканера или ответить на любой вопрос о торговле. Спрашивай!'
+      content: 'Nick · desk analyst NOWICKI. Могу разобрать открытый сетап по уровням (bias → invalidation → R:R), режим рынка и риски относительно BTC. Без школьных лекций — спрашивай по делу.'
     }
   ])
   const [input, setInput] = useState('')
@@ -111,8 +111,8 @@ export default function AIChat() {
         <div className="chat-header-left">
           <div className="ai-avatar">AI</div>
           <div>
-            <span className="chat-title">NOWICKI AI</span>
-            <span className="chat-sub">Знает текущие сигналы и рынок</span>
+            <span className="chat-title">NOWICKI Desk</span>
+            <span className="chat-sub">Разбор сетапов, риск и контекст рынка</span>
           </div>
         </div>
         <div className="chat-header-right">
@@ -164,7 +164,7 @@ export default function AIChat() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage(input)}
-          placeholder="Спроси о сигнале, рисках, стратегии..."
+          placeholder="Спроси про invalidation, R:R, BTC-контекст…"
           disabled={loading}
         />
         <button className="send-btn" onClick={() => sendMessage(input)} disabled={loading || !input.trim()}>

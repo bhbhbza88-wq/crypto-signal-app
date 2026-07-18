@@ -422,7 +422,7 @@ def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTas
 # Лимиты в памяти процесса: при рестарте сбрасываются — для Этапа 1 достаточно.
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-AI_MODEL = "gpt-4o-mini"
+AI_MODEL = os.getenv("AI_MODEL", "gpt-4o").strip() or "gpt-4o"
 AI_DAILY_LIMITS = {'free': 5, 'premium': 50, 'vip': 200}
 _ai_usage: dict[int, dict] = {}   # user_id -> {'date': 'YYYY-MM-DD', 'count': int}
 
@@ -430,32 +430,61 @@ class AIChatRequest(BaseModel):
     messages: list[dict]
 
 
+def _ai_strategy_knowledge() -> str:
+    """Стабильный блок знаний о продукте/логике — без школьного упрощения."""
+    mode = getattr(nfi_strategy, "STRATEGY_MODE", "momentum")
+    return "\n".join([
+        "ПРОДУКТ NOWICKI: маркетплейс/реле сигналов. Пользователь видит открытые сетапы "
+        "(часто от Telegram-трейдеров и ручного/webhook ввода), а не «магический бот, который всегда прав».",
+        f"ВНУТРЕННИЙ СКАНЕР V8: режим STRATEGY_MODE={mode}; авто-открытие по скану сейчас ВЫКЛЮЧЕНО "
+        "(AUTO_SCAN_ENABLED=false) — живые позиции в основном от внешних авторов + трекер.",
+        "ТРЕКЕР: ведёт TP1/TP2/TP3, стоп, BE после TP1, trailing; закрытие пишет в history с result/pnl.",
+        "РЕЖИМЫ/МЕТРИКИ, которые ты можешь объяснять профессионально: ADX (сила тренда, порог ~22), "
+        "режим UPTREND/DOWNTREND/CHOP по BTC и альте, R:R до стопа/TP, инвалидация сетапа, "
+        "корреляция с BTC, ликвидность/стоп-хант как риск-гипотеза (не как факт), position sizing по риску.",
+        "НЕ путай: бумажные стратегии xsec/trend в API — отдельные эксперименты; основной UX — сигналы + история.",
+    ])
+
+
 def _ai_market_context() -> str:
-    """Собирает актуальное состояние платформы для системного промпта AI.
-    Всё — реальные данные (цены, скринер, сигналы, фаза), чтобы ассистент
-    отвечал по факту, а не общими словами. Каждый блок в своём try — если
-    что-то недоступно, остальное всё равно попадёт в контекст."""
+    """Системный промпт: экспертный тон + живые данные платформы."""
     lines = [
-        # ── ПЕРСОНА: бывалый крипто-трейдер-наставник, а не безликий чат-бот ──
-        "Ты — Ник, крипто-наставник платформы NOWICKI. Ты бывалый трейдер, прошёл не один цикл: "
-        "эйфорию 2021-го, кровавый 2022-й с крахами LUNA и FTX, видел тысячи ликвидаций и знаешь цену жадности. "
-        "За плечами — тысячи часов у графиков.",
-        "ХАРАКТЕР И ТОН: уверенный, прямой, без воды. Говоришь по-простому, на языке трейдера "
-        "(лонг/шорт, набрать позу, поставить стоп, боковик, ловить падающий нож, откуп, слить депозит, зафиксить). "
-        "Ты спокойный наставник со стержнем, а не восторженный инфоцыган и не сухой робот. "
-        "Немного характера и трейдерского юмора уместно, но по делу.",
-        "ЖЕЛЕЗНЫЕ ПРИНЦИПЫ (не нарушай): никаких обещаний прибыли и «иксов»; всегда напоминаешь про стоп и риск; "
-        "не даёшь персональных инвест-советов и НЕ гадаешь будущую цену — только текущая картина и трезвая аналитика; "
-        "если данных нет — прямо говоришь, а не выдумываешь. Честность важнее красивого ответа — это стиль NOWICKI.",
-        "ФОРМАТ: отвечай кратко и по делу, на русском. Не растекайся, не читай лекций без запроса. "
-        "Опирайся на ДАННЫЕ НИЖЕ — это реальное состояние платформы прямо сейчас.",
+        "Ты — Nick, senior crypto desk analyst / risk mentor платформы NOWICKI.",
+        "Уровень: профессиональный трейдер и аналитик, не школьный репетитор и не YouTube-инфоцыган.",
+        "",
+        "КАК ДУМАТЬ:",
+        "- Разбирай рынок через: bias (направление) → setup (триггер) → invalidation → risk (R, стоп) → plan.",
+        "- Если есть открытый сигнал в данных — опирайся на КОНКРЕТНЫЕ уровни entry/stop/TP и причины входа.",
+        "- Отличай факт (цена, уровень, winrate из данных) от гипотезы (почему цена может сходить к TP).",
+        "- Для «почему вошли» объясняй confluence: тренд/режим, структура, импульс, риск до стопа — без воды.",
+        "- Если пользователь новичок и явно просит «простыми словами» — упрости. Иначе пиши на уровне трейдера.",
+        "",
+        "ТОН: уверенный, точный, плотный. Можно 1 короткая метафора трейдера, но не мемы и не сюсюканье.",
+        "Язык ответа = язык последнего сообщения пользователя (RU/EN/PL).",
+        "",
+        "ЖЕЛЕЗНЫЕ ПРАВИЛА:",
+        "- Не обещай прибыль, иксы, «100% зайдёт».",
+        "- Не давай персональных инвест-советов «купи/продай весь депозит».",
+        "- Не гадай точную будущую цену; давай сценарии с условиями.",
+        "- Если данных нет — скажи прямо, предложи что смотреть дальше.",
+        "- Не выдумывай сигналы/цифры, которых нет в блоке ДАННЫЕ.",
+        "",
+        "ФОРМАТ (когда уместно): короткие абзацы или маркеры; для разбора сетапа структура "
+        "Bias / Setup / Invalidation / Risk / Watch. Без длинных лекций «что такое свеча».",
+        "",
+        _ai_strategy_knowledge(),
+        "",
+        "═══ ДАННЫЕ ПЛАТФОРМЫ (сейчас) ═══",
     ]
 
     try:
         btc = api_call(exchange.fetch_ticker, 'BTC/USDT') or {}
         eth = api_call(exchange.fetch_ticker, 'ETH/USDT') or {}
-        lines.append(f"ЦЕНЫ (24ч): BTC ${btc.get('last')} ({btc.get('percentage')}%), "
-                     f"ETH ${eth.get('last')} ({eth.get('percentage')}%).")
+        lines.append(
+            f"ЦЕНЫ 24ч: BTC last={btc.get('last')} chg={btc.get('percentage')}% "
+            f"high={btc.get('high')} low={btc.get('low')}; "
+            f"ETH last={eth.get('last')} chg={eth.get('percentage')}%."
+        )
     except Exception:
         pass
 
@@ -463,20 +492,21 @@ def _ai_market_context() -> str:
         ov = data_layer.get_market_overview()
         if ov and ov.get('symbols'):
             syms = ov['symbols']
-            lines.append(f"СКРИНЕР (режим BTC: {ov.get('btc_regime')}): в аптренде "
-                         f"{ov.get('uptrend_count')}, в даунтренде {ov.get('downtrend_count')}, "
-                         f"без тренда {ov.get('chop_count')}.")
-            up = sorted([s for s in syms if s['regime'] == 'UPTREND'], key=lambda s: -s['adx'])[:6]
-            dn = sorted([s for s in syms if s['regime'] == 'DOWNTREND'], key=lambda s: -s['adx'])[:6]
+            lines.append(
+                f"СКРИНЕР: btc_regime={ov.get('btc_regime')} | "
+                f"uptrend={ov.get('uptrend_count')} downtrend={ov.get('downtrend_count')} "
+                f"chop={ov.get('chop_count')}."
+            )
+            up = sorted([s for s in syms if s['regime'] == 'UPTREND'], key=lambda s: -s['adx'])[:8]
+            dn = sorted([s for s in syms if s['regime'] == 'DOWNTREND'], key=lambda s: -s['adx'])[:8]
             if up:
-                lines.append("Сильнейший аптренд (по ADX): " +
-                             ", ".join(f"{s['symbol'].replace('/USDT','')} ADX {s['adx']}" for s in up))
+                lines.append("Топ UPTREND по ADX: " + ", ".join(
+                    f"{s['symbol'].replace('/USDT','')} ADX={s['adx']}" for s in up))
             if dn:
-                lines.append("Сильнейший даунтренд: " +
-                             ", ".join(f"{s['symbol'].replace('/USDT','')} ADX {s['adx']}" for s in dn))
-            # полный список — чтобы можно было ответить про любую монету
-            lines.append("Все монеты (символ:режим:ADX): " +
-                         "; ".join(f"{s['symbol'].replace('/USDT','')}:{s['regime']}:{s['adx']}" for s in syms))
+                lines.append("Топ DOWNTREND по ADX: " + ", ".join(
+                    f"{s['symbol'].replace('/USDT','')} ADX={s['adx']}" for s in dn))
+            lines.append("Universe (sym:regime:ADX): " + "; ".join(
+                f"{s['symbol'].replace('/USDT','')}:{s['regime']}:{s['adx']}" for s in syms))
     except Exception:
         pass
 
@@ -484,24 +514,75 @@ def _ai_market_context() -> str:
         import trend_strategy
         ph = trend_strategy.get_market_phase()
         if ph:
-            lines.append(f"ФАЗА РЫНКА (BTC, информационно, не торгует): {ph.get('phase')}, "
-                         f"моментум 60д {ph.get('momentum_60d_pct')}%.")
+            lines.append(
+                f"ФАЗА BTC (инфо, не торговый сигнал): phase={ph.get('phase')} "
+                f"momentum_60d={ph.get('momentum_60d_pct')}%."
+            )
+    except Exception:
+        pass
+
+    try:
+        risk = get_risk_status()
+        if risk:
+            lines.append(f"RISK STATUS сканера: {json.dumps(risk, ensure_ascii=False)[:800]}")
     except Exception:
         pass
 
     try:
         trades = db.load_trades()
         if trades:
-            parts = []
-            for sym, t in list(trades.items())[:8]:
-                parts.append(f"{sym.replace('/USDT','')} {t['signal']} вход {t['entry']} "
-                             f"стоп {t['stop']} TP1 {t['tp1']} (score {t.get('score')})")
-            lines.append("АКТИВНЫЕ СИГНАЛЫ СКАНЕРА: " + "; ".join(parts))
+            lines.append(f"ОТКРЫТЫХ ПОЗИЦИЙ: {len(trades)}")
+            for sym, t in list(trades.items())[:10]:
+                reasons = t.get('entry_reasons_json') or "[]"
+                try:
+                    reasons_list = json.loads(reasons) if isinstance(reasons, str) else reasons
+                except Exception:
+                    reasons_list = []
+                reasons_txt = "; ".join(str(r) for r in (reasons_list or [])[:8]) or "—"
+                entry = float(t.get('entry') or 0)
+                stop = float(t.get('stop') or 0)
+                tp1 = float(t.get('tp1') or 0)
+                risk_pct = abs(entry - stop) / entry * 100 if entry else 0
+                reward_pct = abs(tp1 - entry) / entry * 100 if entry else 0
+                rr = (reward_pct / risk_pct) if risk_pct else 0
+                lines.append(
+                    f"• {sym} {t.get('signal')} entry={t.get('entry')} stop={t.get('stop')} "
+                    f"TP1={t.get('tp1')} TP2={t.get('tp2')} TP3={t.get('tp3')} "
+                    f"score={t.get('score')} regime={t.get('regime')} "
+                    f"tp1_hit={bool(t.get('tp1_hit'))} be={bool(t.get('be_hit'))} "
+                    f"opened={t.get('opened_at')} risk≈{risk_pct:.2f}% to_tp1≈{reward_pct:.2f}% R:R≈{rr:.2f} "
+                    f"| reasons: {reasons_txt}"
+                )
         else:
-            lines.append("АКТИВНЫХ СИГНАЛОВ СКАНЕРА СЕЙЧАС НЕТ (сканер ищет сетапы каждые 2 минуты).")
+            lines.append("ОТКРЫТЫХ СИГНАЛОВ СЕЙЧАС НЕТ.")
     except Exception:
         pass
 
+    try:
+        stats = db.get_stats_summaries()
+        lines.append(
+            "СТАТИСТИКА HISTORY: "
+            f"today={json.dumps(stats.get('today'), ensure_ascii=False)} | "
+            f"week={json.dumps(stats.get('week'), ensure_ascii=False)} | "
+            f"all_time={json.dumps(stats.get('all_time'), ensure_ascii=False)}"
+        )
+    except Exception:
+        pass
+
+    try:
+        hist = db.load_history(limit=12)
+        if hist:
+            parts = []
+            for h in hist[:12]:
+                parts.append(
+                    f"{h.get('date')} {h.get('symbol')} {h.get('signal')} "
+                    f"{h.get('result')} pnl={h.get('pnl')}"
+                )
+            lines.append("ПОСЛЕДНИЕ ЗАКРЫТИЯ: " + " || ".join(parts))
+    except Exception:
+        pass
+
+    lines.append("═══ КОНЕЦ ДАННЫХ ═══")
     return "\n".join(lines)
 
 
@@ -524,8 +605,6 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
                             detail=f"Дневной лимит AI-запросов исчерпан ({limit}/день на тарифе {tier}). "
                                    f"Лимит обновится завтра.")
 
-    # Санитизация: берём только user/assistant из клиента (клиентский system
-    # игнорируем — свой системный контекст строим на сервере из реальных данных).
     msgs = []
     for m in req.messages[-20:]:
         role = m.get('role')
@@ -535,17 +614,21 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
     if not msgs or msgs[-1]['role'] != 'user':
         raise HTTPException(status_code=400, detail="Некорректный формат сообщений")
 
-    # Серверный системный промпт с актуальным состоянием платформы
     msgs.insert(0, {'role': 'system', 'content': _ai_market_context()})
 
-    payload = json.dumps({'model': AI_MODEL, 'max_tokens': 800, 'messages': msgs}).encode()
+    payload = json.dumps({
+        'model': AI_MODEL,
+        'max_tokens': 1400,
+        'temperature': 0.45,
+        'messages': msgs,
+    }).encode()
     request = urllib.request.Request(
         'https://api.openai.com/v1/chat/completions',
         data=payload,
         headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {OPENAI_API_KEY}'},
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as resp:
+        with urllib.request.urlopen(request, timeout=90) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         try:
@@ -560,7 +643,6 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
     usage['count'] += 1
     _ai_usage[user['id']] = usage
     return {"reply": reply, "used": usage['count'], "limit": limit}
-
 
 # ── API endpoints ────────────────────────────────────────────────
 
