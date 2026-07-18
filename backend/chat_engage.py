@@ -202,9 +202,11 @@ async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
             reply_to = row.get("msg_id")
             if photo:
                 from io import BytesIO
+                bio = BytesIO(photo)
+                bio.name = "pnl.png"  # без .png Telethon шлёт как файл-документ
                 await client.send_file(
                     target,
-                    BytesIO(photo),
+                    bio,
                     caption=text,
                     reply_to=reply_to,
                     force_document=False,
