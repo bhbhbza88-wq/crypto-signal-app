@@ -1,6 +1,7 @@
 """
 Карточка закрытия — стиль Binance Futures share:
-чёрный фон edge-to-edge, пара, шорт/лонг | плечо, крупный ROI, цена входа / последняя.
+чёрный фон edge-to-edge, эмблема Binance справа сверху,
+пара, шорт/лонг | плечо, крупный ROI, цена входа / последняя.
 """
 
 from __future__ import annotations
@@ -14,12 +15,13 @@ from PIL import Image, ImageDraw, ImageFont
 SHARE_LEVERAGE = int(os.getenv("PROFIT_CARD_LEVERAGE", "10"))
 PNL_SHOW_MULT = float(os.getenv("PROFIT_CARD_PNL_MULT", "1.12"))
 
-# точные цвета как на референсе
 BG = (0, 0, 0)
 WHITE = (255, 255, 255)
 GREY = (140, 145, 155)
-GREEN = (14, 203, 129)   # binance green
-RED = (246, 70, 93)      # binance red / short
+GREEN = (14, 203, 129)
+RED = (246, 70, 93)
+# watermark — заметный тёмно-серый (на чистом чёрном должен читаться)
+MARK = (55, 58, 64)
 
 
 def _font(size: int, bold: bool = False):
@@ -49,7 +51,6 @@ def _fmt_price(v: float) -> str:
         return f"{n:.4f}"
     if n >= 1:
         return f"{n:.7f}".rstrip("0").rstrip(".") if n < 10 else f"{n:.4f}"
-    # мелкие альты — больше знаков, как на бирже
     s = f"{n:.8f}".rstrip("0")
     if s.endswith("."):
         s += "0"
@@ -62,42 +63,32 @@ def _exit_from_pnl(side: str, entry: float, pnl_pct: float) -> float:
     return entry * (1 - pnl_pct / 100.0)
 
 
-def _draw_binance_mark(img: Image.Image, cx: int, cy: int, scale: float = 1.0, alpha: int = 48):
-    """Полупрозрачная эмблема Binance (ромб с вырезом) — watermark как на PnL-карточке."""
-    s = int(240 * scale)
-    size = s * 5
-    mark = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    mx = my = size // 2
-    md = ImageDraw.Draw(mark)
+def _diamond(cx: int, cy: int, r: float):
+    return [
+        (cx, cy - r),
+        (cx + r, cy),
+        (cx, cy + r),
+        (cx - r, cy),
+    ]
 
-    def diamond(r, fill=None, outline=None, width=1):
-        pts = [(mx, my - r), (mx + r, my), (mx, my + r), (mx - r, my)]
-        md.polygon(pts, fill=fill, outline=outline, width=width)
 
-    # маска формы логотипа: внешний ромб − средний + центр
-    mask = Image.new("L", (size, size), 0)
-    mdraw = ImageDraw.Draw(mask)
+def _draw_binance_emblem(draw: ImageDraw.ImageDraw, cx: int, cy: int, scale: float = 1.0):
+    """
+    Классический знак Binance: ромб-кольцо + центр.
+    Рисуем напрямую на чёрном фоне заметным серым (без почти невидимого alpha).
+    """
+    s = 210 * scale
 
-    def dmask(r, fill):
-        mdraw.polygon([(mx, my - r), (mx + r, my), (mx, my + r), (mx - r, my)], fill=fill)
+    # внешние контурные ромбы (как ореол на share-карте)
+    for r, w in ((s * 2.1, 4), (s * 1.7, 4), (s * 1.35, 5)):
+        draw.polygon(_diamond(cx, cy, r), outline=MARK, width=w)
 
-    dmask(int(s), 255)
-    dmask(int(s * 0.58), 0)
-    dmask(int(s * 0.26), 255)
-
-    color_layer = Image.new("RGBA", (size, size), (75, 80, 90, alpha))
-    mark = Image.composite(color_layer, mark, mask)
-
-    # контурные ромбы вокруг
-    md = ImageDraw.Draw(mark)
-    for r, a in ((int(s * 1.4), 28), (int(s * 1.85), 16), (int(s * 2.25), 10)):
-        diamond(r, outline=(60, 65, 75, a), width=3)
-
-    ox = cx - size // 2
-    oy = cy - size // 2
-    base = img.convert("RGBA")
-    base.alpha_composite(mark, (ox, oy))
-    return base.convert("RGB")
+    # внешний заполненный ромб
+    draw.polygon(_diamond(cx, cy, s), fill=MARK)
+    # вырез (кольцо) — чёрный
+    draw.polygon(_diamond(cx, cy, s * 0.58), fill=BG)
+    # центр
+    draw.polygon(_diamond(cx, cy, s * 0.28), fill=MARK)
 
 
 def render_profit_card(
@@ -131,10 +122,10 @@ def render_profit_card(
 
     W, H = 1080, 1080
     img = Image.new("RGB", (W, H), BG)
-
-    # эмблема справа сверху
-    img = _draw_binance_mark(img, cx=W - 200, cy=200, scale=1.15, alpha=42)
     draw = ImageDraw.Draw(img)
+
+    # эмблема — крупно, справа сверху, хорошо видна на чёрном
+    _draw_binance_emblem(draw, cx=W - 220, cy=220, scale=1.25)
 
     font_pair = _font(52, bold=True)
     font_side = _font(40, bold=True)
@@ -151,8 +142,7 @@ def render_profit_card(
     side_text = f"{side_ru} "
     draw.text((pad, y), side_text, font=font_side, fill=side_color)
     sw = draw.textlength(side_text, font=font_side)
-    rest = f"| {leverage}x"
-    draw.text((pad + sw, y), rest, font=font_side, fill=GREY)
+    draw.text((pad + sw, y), f"| {leverage}x", font=font_side, fill=GREY)
     y += 100
 
     draw.text((pad, y), roi_str, font=font_roi, fill=roi_color)
