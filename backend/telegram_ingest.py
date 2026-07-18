@@ -368,12 +368,17 @@ async def _try_close_from_channel(display_name: str, text: str):
         print(f"[telegram_ingest] {symbol} закрыт по сигналу канала {display_name} ({reason}, {pnl:+.1f}%)")
         try:
             await telegram_bot.notify_signal_closed(
-                {"symbol": symbol, "signal": trade['signal']}, 'channel_closed', pnl)
+                {"symbol": symbol, "signal": trade['signal'],
+                 "entry": trade['entry'], "exit": price},
+                'channel_closed', pnl)
         except Exception as e:
             print(f"[telegram_ingest] Ошибка публикации закрытия в TG-канал: {e}")
         try:
             import chat_engage
-            chat_engage.fire_close(symbol, trade['signal'], 'channel_closed', pnl)
+            chat_engage.fire_close(
+                symbol, trade['signal'], 'channel_closed', pnl,
+                entry=trade['entry'], exit_price=price,
+            )
         except Exception as e:
             print(f"[telegram_ingest] chat_engage close: {e}")
 

@@ -145,10 +145,19 @@ def fire_open(symbol: str, side: str, entry) -> None:
     _enqueue({"kind": "open", "symbol": symbol, "side": side, "entry": entry})
 
 
-def fire_close(symbol: str, side: str, result: str, pnl: float) -> None:
+def fire_close(symbol: str, side: str, result: str, pnl: float,
+               entry: float | None = None, exit_price: float | None = None) -> None:
     if not is_configured():
         return
-    _enqueue({"kind": "close", "symbol": symbol, "side": side, "result": result, "pnl": pnl})
+    _enqueue({
+        "kind": "close",
+        "symbol": symbol,
+        "side": side,
+        "result": result,
+        "pnl": pnl,
+        "entry": entry,
+        "exit_price": exit_price,
+    })
 
 
 async def _do_open(client, symbol: str, side: str, entry) -> None:
@@ -165,7 +174,8 @@ async def _do_open(client, symbol: str, side: str, entry) -> None:
             print(f"[chat_engage] не смог написать в {chat}: {e}")
 
 
-async def _do_close(client, symbol: str, side: str, result: str, pnl: float) -> None:
+async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
+                    entry=None, exit_price=None) -> None:
     if pnl is None or float(pnl) <= 0:
         db.clear_chat_engage_posts(symbol)
         return
@@ -173,12 +183,34 @@ async def _do_close(client, symbol: str, side: str, result: str, pnl: float) -> 
     if not posts:
         return
     text = _close_win_text(symbol, float(pnl))
+    photo = None
+    if entry is not None:
+        try:
+            from profit_card import render_profit_card
+            photo = render_profit_card(
+                symbol=symbol, side=side, entry=float(entry),
+                pnl_pct=float(pnl), exit_price=exit_price,
+            )
+        except Exception as e:
+            print(f"[chat_engage] profit_card: {e}")
+
     for i, row in enumerate(posts):
         try:
             if i:
                 await asyncio.sleep(random.uniform(3, 9))
             target = row.get("chat_ref") or row["chat_id"]
-            await client.send_message(target, text, reply_to=row.get("msg_id"))
+            reply_to = row.get("msg_id")
+            if photo:
+                from io import BytesIO
+                await client.send_file(
+                    target,
+                    BytesIO(photo),
+                    caption=text,
+                    reply_to=reply_to,
+                    force_document=False,
+                )
+            else:
+                await client.send_message(target, text, reply_to=reply_to)
             print(f"[chat_engage] close+ → {target}: {symbol} {float(pnl):+.1f}%")
         except Exception as e:
             print(f"[chat_engage] close fail {row}: {e}")
@@ -195,6 +227,8 @@ async def _worker_loop(client):
                 await _do_close(
                     client, job["symbol"], job["side"],
                     job.get("result", ""), job.get("pnl", 0),
+                    entry=job.get("entry"),
+                    exit_price=job.get("exit_price"),
                 )
         except Exception as e:
             print(f"[chat_engage] job error: {e}")

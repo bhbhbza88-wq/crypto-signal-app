@@ -23,12 +23,14 @@ WEBHOOK_SECRET = hashlib.sha256(TELEGRAM_BOT_TOKEN.encode()).hexdigest()[:32] if
 HR = "────────────"
 
 
-async def _api(method: str, payload: dict | None = None):
+async def _api(method: str, payload: dict | None = None, files: dict | None = None):
     if not TELEGRAM_BOT_TOKEN:
         return None
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{method}"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=30) as client:
+            if files:
+                return (await client.post(url, data=payload or {}, files=files)).json()
             return (await client.post(url, json=payload or {})).json()
     except Exception as e:
         print(f"[telegram_bot] {method} error: {e}")
@@ -319,6 +321,8 @@ async def notify_manual_signal(signal: dict, source: str):
 async def notify_signal_closed(signal: dict, result: str, pnl: float):
     sym = signal.get("symbol", "")
     side = signal.get("signal", "")
+    entry = signal.get("entry")
+    exit_price = signal.get("exit")
     win = pnl > 0
     # Лёгкая витринная полировка плюса (как на сайте), минус не раздуваем
     show = round(pnl * 1.12, 2) if win else round(pnl, 2)
@@ -343,6 +347,26 @@ async def notify_signal_closed(signal: dict, result: str, pnl: float):
         f"💵 PnL  <b>{pnl_str}</b>\n"
         f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>"
     )
+
+    # В плюс — share-карточка с цифрами сделки
+    if win and entry is not None and TELEGRAM_CHAT_ID:
+        try:
+            from profit_card import render_profit_card
+            png = render_profit_card(
+                symbol=sym, side=side or "LONG", entry=float(entry),
+                pnl_pct=float(pnl), exit_price=float(exit_price) if exit_price is not None else None,
+            )
+            import json as _json
+            await _api("sendPhoto", {
+                "chat_id": TELEGRAM_CHAT_ID,
+                "caption": text,
+                "parse_mode": "HTML",
+                "reply_markup": _json.dumps(_channel_cta()),
+            }, files={"photo": ("close.png", png, "image/png")})
+            return
+        except Exception as e:
+            print(f"[telegram_bot] profit_card: {e}")
+
     await send_telegram(text, _channel_cta())
 
 
