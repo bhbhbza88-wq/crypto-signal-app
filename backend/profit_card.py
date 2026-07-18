@@ -1,7 +1,6 @@
 """
-Карточка закрытия — стиль Binance Futures share:
-чёрный фон edge-to-edge, эмблема Binance справа сверху,
-пара, шорт/лонг | плечо, крупный ROI, цена входа / последняя.
+Карточка закрытия: статичный фон (assets/pnl_card_bg.png) + текст поверх.
+Фон не рендерим каждый раз — только накладываем цифры сделки.
 """
 
 from __future__ import annotations
@@ -9,19 +8,20 @@ from __future__ import annotations
 import io
 import os
 from datetime import datetime
+from functools import lru_cache
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
 SHARE_LEVERAGE = int(os.getenv("PROFIT_CARD_LEVERAGE", "10"))
 PNL_SHOW_MULT = float(os.getenv("PROFIT_CARD_PNL_MULT", "1.12"))
 
-BG = (0, 0, 0)
+BG_PATH = Path(__file__).resolve().parent / "assets" / "pnl_card_bg.png"
+
 WHITE = (255, 255, 255)
-GREY = (140, 145, 155)
+GREY = (132, 142, 156)
 GREEN = (14, 203, 129)
 RED = (246, 70, 93)
-# watermark — заметный тёмно-серый (на чистом чёрном должен читаться)
-MARK = (55, 58, 64)
 
 
 def _font(size: int, bold: bool = False):
@@ -63,32 +63,11 @@ def _exit_from_pnl(side: str, entry: float, pnl_pct: float) -> float:
     return entry * (1 - pnl_pct / 100.0)
 
 
-def _diamond(cx: int, cy: int, r: float):
-    return [
-        (cx, cy - r),
-        (cx + r, cy),
-        (cx, cy + r),
-        (cx - r, cy),
-    ]
-
-
-def _draw_binance_emblem(draw: ImageDraw.ImageDraw, cx: int, cy: int, scale: float = 1.0):
-    """
-    Классический знак Binance: ромб-кольцо + центр.
-    Рисуем напрямую на чёрном фоне заметным серым (без почти невидимого alpha).
-    """
-    s = 210 * scale
-
-    # внешние контурные ромбы (как ореол на share-карте)
-    for r, w in ((s * 2.1, 4), (s * 1.7, 4), (s * 1.35, 5)):
-        draw.polygon(_diamond(cx, cy, r), outline=MARK, width=w)
-
-    # внешний заполненный ромб
-    draw.polygon(_diamond(cx, cy, s), fill=MARK)
-    # вырез (кольцо) — чёрный
-    draw.polygon(_diamond(cx, cy, s * 0.58), fill=BG)
-    # центр
-    draw.polygon(_diamond(cx, cy, s * 0.28), fill=MARK)
+@lru_cache(maxsize=1)
+def _load_bg() -> Image.Image:
+    if not BG_PATH.exists():
+        raise FileNotFoundError(f"Нет фона карточки: {BG_PATH}")
+    return Image.open(BG_PATH).convert("RGB")
 
 
 def render_profit_card(
@@ -120,38 +99,39 @@ def render_profit_card(
     roi_color = GREEN if roi >= 0 else RED
     roi_str = f"+{roi:.2f}%" if roi >= 0 else f"{roi:.2f}%"
 
-    W, H = 1080, 1080
-    img = Image.new("RGB", (W, H), BG)
+    img = _load_bg().copy()
+    W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # эмблема — крупно, справа сверху, хорошо видна на чёрном
-    _draw_binance_emblem(draw, cx=W - 220, cy=220, scale=1.25)
+    # координаты относительно шаблона (масштабируем от эталона ~1080)
+    sx = W / 1080
+    sy = H / 1080
+    pad = int(72 * sx)
 
-    font_pair = _font(52, bold=True)
-    font_side = _font(40, bold=True)
-    font_roi = _font(120, bold=True)
-    font_label = _font(32)
-    font_val = _font(40, bold=True)
+    font_pair = _font(max(28, int(52 * sx)), bold=True)
+    font_side = _font(max(22, int(40 * sx)), bold=True)
+    font_roi = _font(max(48, int(120 * sx)), bold=True)
+    font_label = _font(max(18, int(32 * sx)))
+    font_val = _font(max(22, int(40 * sx)), bold=True)
 
-    pad = 72
-    y = 100
-
+    y = int(100 * sy)
     draw.text((pad, y), pair_line, font=font_pair, fill=WHITE)
-    y += 78
 
+    y = int(178 * sy)
     side_text = f"{side_ru} "
     draw.text((pad, y), side_text, font=font_side, fill=side_color)
     sw = draw.textlength(side_text, font=font_side)
     draw.text((pad + sw, y), f"| {leverage}x", font=font_side, fill=GREY)
-    y += 100
 
+    y = int(280 * sy)
     draw.text((pad, y), roi_str, font=font_roi, fill=roi_color)
-    y += 180
 
-    col2_x = W // 2 + 20
+    y = int(460 * sy)
+    col2_x = int(W * 0.52)
     draw.text((pad, y), "Цена входа", font=font_label, fill=GREY)
     draw.text((col2_x, y), "Последняя цена", font=font_label, fill=GREY)
-    y += 52
+
+    y = int(512 * sy)
     draw.text((pad, y), _fmt_price(entry), font=font_val, fill=WHITE)
     draw.text((col2_x, y), _fmt_price(exit_price), font=font_val, fill=WHITE)
 
