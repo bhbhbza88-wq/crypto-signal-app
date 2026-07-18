@@ -102,7 +102,7 @@ def render_profit_card(
     W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # ещё чуть ниже — ближе к первому референсу Binance
+    # текст ниже эмблемы Binance справа сверху — не пересекается с ней
     pad = int(W * 0.07)
     col2_x = int(W * 0.48)
 
@@ -112,18 +112,18 @@ def render_profit_card(
     font_label = _font(max(18, int(H * 0.028)), bold=False)
     font_val = _font(max(22, int(H * 0.036)), bold=True)
 
-    draw.text((pad, int(H * 0.205)), pair_line, font=font_pair, fill=WHITE)
+    draw.text((pad, int(H * 0.255)), pair_line, font=font_pair, fill=WHITE)
 
-    y_side = int(H * 0.270)
+    y_side = int(H * 0.320)
     side_text = f"{side_ru} "
     draw.text((pad, y_side), side_text, font=font_side, fill=side_color)
     sw = draw.textlength(side_text, font=font_side)
     draw.text((pad + sw, y_side), f"| {leverage}x", font=font_side, fill=GREY)
 
-    draw.text((pad, int(H * 0.400)), roi_str, font=font_roi, fill=roi_color)
+    draw.text((pad, int(H * 0.455)), roi_str, font=font_roi, fill=roi_color)
 
-    y_lab = int(H * 0.640)
-    y_val = int(H * 0.695)
+    y_lab = int(H * 0.690)
+    y_val = int(H * 0.745)
     draw.text((pad, y_lab), "Цена входа", font=font_label, fill=GREY)
     draw.text((col2_x, y_lab), "Последняя цена", font=font_label, fill=GREY)
     draw.text((pad, y_val), _fmt_price(entry), font=font_val, fill=WHITE)
