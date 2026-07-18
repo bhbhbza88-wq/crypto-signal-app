@@ -102,32 +102,29 @@ def render_profit_card(
     W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # доли от реального размера шаблона (1024×929) — как на референсе Binance
-    pad = int(W * 0.065)
+    # раскладка по первому референсу: блок текста НИЖЕ, не прилипает к верху
+    pad = int(W * 0.07)
     col2_x = int(W * 0.48)
 
-    font_pair = _font(max(28, int(H * 0.048)), bold=True)
-    font_side = _font(max(22, int(H * 0.036)), bold=False)   # не bold — как оригинал
-    font_roi = _font(max(52, int(H * 0.115)), bold=True)
-    font_label = _font(max(18, int(H * 0.030)), bold=False)
-    font_val = _font(max(22, int(H * 0.038)), bold=True)
+    font_pair = _font(max(28, int(H * 0.045)), bold=True)
+    font_side = _font(max(22, int(H * 0.034)), bold=False)
+    font_roi = _font(max(52, int(H * 0.110)), bold=True)
+    font_label = _font(max(18, int(H * 0.028)), bold=False)
+    font_val = _font(max(22, int(H * 0.036)), bold=True)
 
-    # 1) пара — верх
-    draw.text((pad, int(H * 0.095)), pair_line, font=font_pair, fill=WHITE)
+    # опустили весь блок ~на 8–10% вниз относительно прошлой версии
+    draw.text((pad, int(H * 0.175)), pair_line, font=font_pair, fill=WHITE)
 
-    # 2) Шорт | 25x — плотно под парой
-    y_side = int(H * 0.160)
+    y_side = int(H * 0.240)
     side_text = f"{side_ru} "
     draw.text((pad, y_side), side_text, font=font_side, fill=side_color)
     sw = draw.textlength(side_text, font=font_side)
     draw.text((pad + sw, y_side), f"| {leverage}x", font=font_side, fill=GREY)
 
-    # 3) крупный % — заметный зазор после стороны
-    draw.text((pad, int(H * 0.275)), roi_str, font=font_roi, fill=roi_color)
+    draw.text((pad, int(H * 0.365)), roi_str, font=font_roi, fill=roi_color)
 
-    # 4) цены — ниже, с воздухом после %
-    y_lab = int(H * 0.52)
-    y_val = int(H * 0.575)
+    y_lab = int(H * 0.600)
+    y_val = int(H * 0.655)
     draw.text((pad, y_lab), "Цена входа", font=font_label, fill=GREY)
     draw.text((col2_x, y_lab), "Последняя цена", font=font_label, fill=GREY)
     draw.text((pad, y_val), _fmt_price(entry), font=font_val, fill=WHITE)
