@@ -108,37 +108,39 @@ POST /api/backtest, /api/backtest/multi                         — бэктес
 POST /api/backtest/robustness, GET /api/backtest/robustness/{job_id} — проверка на прочность (Premium)
 ```
 
-## Auth: Google + Gmail
+## Auth: Google + email
 
-Поддерживается вход через **Google** и регистрация email+пароль с подтверждением через **Gmail SMTP**.
+Вход через **Google** и регистрация email+пароль с письмами (verify / reset).
+
+**Важно:** Railway блокирует исходящий SMTP (`Network is unreachable`). Письма шлём по **HTTPS** через [Resend](https://resend.com) (предпочтительно) или Gmail API.
 
 ### Railway / env (backend)
 
 | Переменная | Зачем |
 |---|---|
-| `GOOGLE_CLIENT_ID` | OAuth 2.0 Client ID (тип «Веб-приложение») из Google Cloud Console |
-| `SMTP_USER` | Gmail-адрес отправителя |
-| `SMTP_PASSWORD` | [Пароль приложения](https://myaccount.google.com/apppasswords) Google (не обычный пароль) |
-| `SMTP_HOST` | опционально, по умолчанию `smtp.gmail.com` |
-| `SMTP_PORT` | опционально, по умолчанию `587` |
-| `SMTP_FROM` | опционально, по умолчанию = `SMTP_USER` |
+| `GOOGLE_CLIENT_ID` | OAuth Client ID (веб) — кнопка «Войти через Google» |
+| `RESEND_API_KEY` | API key из resend.com |
+| `RESEND_DOMAIN_VERIFIED` | `1` после успешной верификации `send.nowicki.trade` |
+| `EMAIL_FROM` | например `NOWICKI <noreply@send.nowicki.trade>` |
 | `FRONTEND_URL` | `https://nowicki.trade` — ссылки в письмах |
-| `REQUIRE_EMAIL_VERIFY` | `1` (по умолчанию) — без подтверждения нельзя войти по паролю; `0` чтобы отключить |
+| `REQUIRE_EMAIL_VERIFY` | `1` (по умолчанию) |
+| `GOOGLE_CLIENT_SECRET` + `GOOGLE_REFRESH_TOKEN` | опционально: Gmail API вместо Resend |
+| `SMTP_*` | fallback; на Railway обычно не работает |
 
-Без SMTP регистрация всё равно работает (сразу логинит). Без `GOOGLE_CLIENT_ID` кнопка Google скрыта.
+### Resend (рекомендуется)
 
-### Google Cloud Console
+1. Domains → Add `send.nowicki.trade`  
+2. В DNS Namecheap (домен `nowicki.trade`) добавь записи из Resend (DKIM + MX/SPF на `send.send`)  
+3. Verify domain → `RESEND_DOMAIN_VERIFIED=1`, `EMAIL_FROM=NOWICKI <noreply@send.nowicki.trade>`  
+4. `RESEND_API_KEY` на Railway  
 
-1. APIs & Services → Credentials → Create OAuth client ID → Web application  
+Без verified-домена Resend шлёт только на email владельца аккаунта Resend.
+
+### Google Cloud Console (логин)
+
+1. Credentials → OAuth client → Web application  
 2. Authorized JavaScript origins: `https://nowicki.trade`, `http://localhost:5173`  
-3. Authorized redirect URIs можно оставить пустыми (используем GIS popup + ID token)  
-4. Скопируй Client ID → `GOOGLE_CLIENT_ID` на Railway  
-
-### Gmail
-
-1. Включи 2FA на Google-аккаунте  
-2. Создай App Password для «Mail»  
-3. `SMTP_USER` = твой Gmail, `SMTP_PASSWORD` = app password  
+3. Client ID → `GOOGLE_CLIENT_ID`  
 
 Эндпоинты: `POST /api/auth/google`, `/api/auth/verify-email`, `/api/auth/forgot-password`, `/api/auth/reset-password`, `GET /api/auth/config`.
 
