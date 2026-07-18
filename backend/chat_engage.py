@@ -97,10 +97,12 @@ def _open_text(symbol: str, side: str, entry) -> str:
     coin = _coin(symbol)
     side_ru = "лонг" if side == "LONG" else "шорт"
     templates = [
-        f"здарова, вот {coin} нашёл, зашёл в {side_ru} от {_fmt_entry(entry)}, че думаете вообще",
-        f"пацаны, глянул {coin} — открыл {side_ru} около {_fmt_entry(entry)}, как вам сетап?",
-        f"ну смотрите, {coin} интересный, я уже в {side_ru} с {_fmt_entry(entry)}, кто тоже смотрит?",
-        f"короче {coin}, зашёл в {side_ru} от {_fmt_entry(entry)}. если кто в теме — напишите что думаете",
+        f"Взял {side_ru} по {coin} от {_fmt_entry(entry)}, че думаете?",
+        f"Зашёл в {side_ru} по {coin} около {_fmt_entry(entry)}. Как вам сетап?",
+        f"Пробую {side_ru} {coin} от {_fmt_entry(entry)}, стоп короткий",
+        f"По {coin} взял {side_ru} с {_fmt_entry(entry)}, посмотрим",
+        f"Зашёл {coin} {side_ru} от {_fmt_entry(entry)}. Кто тоже смотрит?",
+        f"Взял такой {side_ru} по {coin}, вход {_fmt_entry(entry)}",
     ]
     return random.choice(templates)
 
@@ -109,19 +111,20 @@ def _close_win_text(symbol: str, pnl: float) -> str:
     coin = _coin(symbol)
     show = round(pnl * PNL_SHOW_MULT, 1)
     templates = [
-        f"ну вот, та {coin} отработала нормально, примерно +{show}%",
-        f"закрыл {coin}, плюс вышел около +{show}%. приятно когда план сходится",
-        f"по {coin} зафиксировал, вышло примерно +{show}%. кто тоже был — шарю",
-        f"та сделка по {coin} зашла, около +{show}%. не космос, но чисто",
+        f"По {coin} закрыл, примерно +{show}%",
+        f"{coin} закрыл в плюс, около +{show}%",
+        f"По {coin} зафиксировал, вышло ~+{show}%",
+        f"Закрыл {coin}, +{show}% примерно. Норм зашло",
+        f"По той сделке {coin} вышли около +{show}%",
     ]
     return random.choice(templates)
 
 
 def _soft_promo_reply() -> str:
     templates = [
-        f"если честно смотрю сканер на {SITE_URL}, ещё сигналы кидают в {CHANNEL_URL}",
-        f"у меня связка сайт + тг: {SITE_URL} и канал {CHANNEL_URL}",
-        f"обычно через nowicki — {SITE_URL}, канал {CHANNEL_URL}",
+        f"Смотрю сканер на {SITE_URL}, ещё кидают в {CHANNEL_URL}",
+        f"Обычно через nowicki — {SITE_URL}, канал {CHANNEL_URL}",
+        f"Беру оттуда: {SITE_URL} и тг {CHANNEL_URL}",
     ]
     return random.choice(templates)
 
