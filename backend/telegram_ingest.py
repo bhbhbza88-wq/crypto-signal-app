@@ -43,6 +43,26 @@ AI_MODEL = "gpt-4o-mini"
 SOURCE_TYPE = "telegram_aggregate"
 AGG_MAX_OPEN = 8  # с 7 источниками лимит 5 слишком рано режет поток
 
+# Отбор лучших сетапов: чем выше вес — тем охотнее берём канал.
+# Foxtrot шумный → ниже; VIP/качество → выше.
+CHANNEL_WEIGHTS = {
+    "Aggregated Stream: Alpha": 1.15,
+    "Aggregated Stream: Beta": 1.10,
+    "Aggregated Stream: Gamma": 1.15,
+    "Aggregated Stream: Delta": 1.08,
+    "Aggregated Stream: Echo": 1.00,
+    "Aggregated Stream: Foxtrot": 0.82,
+    "Aggregated Stream: Golf": 1.05,
+}
+MIN_QUALITY_SCORE = 58          # ниже — не открываем
+MIN_RR = 1.15                   # TP1 / риск
+MIN_RISK_PCT = 0.004            # стоп ближе 0.4% — шум
+MAX_RISK_PCT = 0.09             # стоп шире 9% — мусор
+MAX_ENTRY_SLIP_PCT = 0.025      # цена ушла >2.5% от entry — поздно
+MAX_PER_CHANNEL_DAY = 4         # чтобы один канал не забил слоты
+
+_channel_day_counts: dict[str, tuple[str, int]] = {}  # alias -> (YYYY-MM-DD, count)
+
 EXTRACTOR_SYSTEM_PROMPT = (
     "Ты извлекаешь параметры торгового сигнала из сообщения крипто-канала. "
     "Верни ТОЛЬКО JSON без пояснений: "
@@ -169,6 +189,82 @@ def _derive_tp_ladder(side: str, entry: float, tp1: float) -> tuple[float, float
     step = tp1 - entry if side == 'LONG' else entry - tp1
     sign = 1 if side == 'LONG' else -1
     return tp1 + sign * step, tp1 + sign * 2 * step
+
+
+def _channel_day_count(display_name: str) -> int:
+    from datetime import date
+    today = date.today().isoformat()
+    day, count = _channel_day_counts.get(display_name, (today, 0))
+    return 0 if day != today else count
+
+
+def _channel_day_ok(display_name: str) -> bool:
+    """Лимит сигналов с одного потока за сутки — иначе шумный канал съест квоту."""
+    return _channel_day_count(display_name) < MAX_PER_CHANNEL_DAY
+
+
+def _channel_day_bump(display_name: str) -> None:
+    from datetime import date
+    today = date.today().isoformat()
+    day, count = _channel_day_counts.get(display_name, (today, 0))
+    if day != today:
+        count = 0
+    _channel_day_counts[display_name] = (today, count + 1)
+
+
+def _score_setup(side: str, entry: float, stop: float, tp1: float,
+                 last_price: float | None, display_name: str) -> tuple[float | None, str]:
+    """Оценка качества сетапа. (None, reason) = отклонить; (score, detail) = ок."""
+    if entry <= 0 or stop <= 0 or tp1 <= 0:
+        return None, "bad_prices"
+
+    if side == "LONG":
+        if not (stop < entry < tp1):
+            return None, "bad_long_geometry"
+        risk = (entry - stop) / entry
+        reward = (tp1 - entry) / entry
+    else:
+        if not (stop > entry > tp1):
+            return None, "bad_short_geometry"
+        risk = (stop - entry) / entry
+        reward = (entry - tp1) / entry
+
+    if risk < MIN_RISK_PCT:
+        return None, f"stop_too_tight ({risk*100:.2f}%)"
+    if risk > MAX_RISK_PCT:
+        return None, f"stop_too_wide ({risk*100:.2f}%)"
+
+    rr = reward / risk if risk > 0 else 0
+    if rr < MIN_RR:
+        return None, f"rr_low ({rr:.2f})"
+
+    slip = 0.0
+    if last_price and last_price > 0:
+        slip = abs(last_price - entry) / entry
+        if slip > MAX_ENTRY_SLIP_PCT:
+            return None, f"entry_stale (slip {slip*100:.1f}%)"
+
+    # База + R:R + «золотая» зона риска + близость к рынку
+    score = 38.0
+    score += min(32.0, rr * 12.0)                          # rr 1.5→18, 2.5→30
+    risk_pct = risk * 100
+    if 1.0 <= risk_pct <= 4.0:
+        score += 16
+    elif 0.6 <= risk_pct <= 6.0:
+        score += 8
+    if slip < 0.008:
+        score += 12
+    elif slip < 0.015:
+        score += 6
+
+    weight = CHANNEL_WEIGHTS.get(display_name, 1.0)
+    score = round(score * weight, 1)
+
+    if score < MIN_QUALITY_SCORE:
+        return None, f"score_low ({score}<{MIN_QUALITY_SCORE}, rr={rr:.2f})"
+
+    detail = f"score={score} rr={rr:.2f} risk={risk_pct:.1f}% slip={slip*100:.1f}%"
+    return score, detail
 
 
 def _count_open_aggregated() -> int:
@@ -309,11 +405,21 @@ async def _handle_message(display_name: str, msg):
         print(f"[telegram_ingest] {display_name}: символ {symbol} не торгуется на Bybit, пропуск")
         return
 
+    last = ticker.get("last")
+    entry, stop, tp1 = float(parsed["entry"]), float(parsed["stop"]), float(parsed["tp1"])
+    quality, qdetail = _score_setup(side, entry, stop, tp1, last, display_name)
+    if quality is None:
+        print(f"[telegram_ingest] {display_name}: {symbol} отклонён — {qdetail}")
+        return
+
+    if not _channel_day_ok(display_name):
+        print(f"[telegram_ingest] {display_name}: дневной лимит ({MAX_PER_CHANNEL_DAY}), пропуск {symbol}")
+        return
+
     if _count_open_aggregated() >= AGG_MAX_OPEN:
         print(f"[telegram_ingest] Лимит агрегатора ({AGG_MAX_OPEN}) достигнут, пропуск {symbol} от {display_name}")
         return
 
-    entry, stop, tp1 = float(parsed["entry"]), float(parsed["stop"]), float(parsed["tp1"])
     tp2, tp3 = _derive_tp_ladder(side, entry, tp1)
 
     trader_id = db.get_or_create_source_trader(
@@ -324,15 +430,20 @@ async def _handle_message(display_name: str, msg):
     opened_symbol, err = open_signal(
         symbol, side, entry, stop, tp1, tp2, tp3,
         trader_id=trader_id, regime=SOURCE_TYPE,
-        reasons=[f"Сигнал получен методом автоматического импорта из внешнего потока: {display_name}"],
+        reasons=[
+            f"Автоимпорт из потока: {display_name}",
+            f"Quality filter: {qdetail}",
+        ],
+        score=quality,
     )
     if err:
         print(f"[telegram_ingest] {display_name}: {symbol} пропущен ({err})")
         return
 
+    _channel_day_bump(display_name)
     db.add_event(opened_symbol, "telegram_aggregate_signal",
-                 f"{display_name}: {side} {opened_symbol} @ {entry}")
-    print(f"[telegram_ingest] Открыт сигнал {opened_symbol} от {display_name}")
+                 f"{display_name}: {side} {opened_symbol} @ {entry} ({qdetail})")
+    print(f"[telegram_ingest] Открыт сигнал {opened_symbol} от {display_name} ({qdetail})")
 
     # Публикуем в наш собственный TG-канал тем же путём, что ручные сигналы
     # админа и TradingView-вебхук (telegram_bot.notify_manual_signal) — источник

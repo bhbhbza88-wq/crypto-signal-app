@@ -21,7 +21,7 @@ def normalize_symbol(raw: str) -> str:
     return s
 
 
-def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime, reasons=None):
+def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime, reasons=None, score=None):
     """Валидирует и открывает позицию через db.insert_trade_if_not_exists.
 
     Возвращает (symbol, None) при успехе или (None, причина) при отказе,
@@ -49,7 +49,7 @@ def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime, r
         "entry": entry,
         "stop": stop,
         "tp1": tp1, "tp2": tp2, "tp3": tp3,
-        "score": None,
+        "score": score,
         "regime": regime,
         "opened_at": datetime.now().isoformat(),
         "entry_reasons_json": json.dumps(reasons or [], ensure_ascii=False),
