@@ -12,7 +12,7 @@ import telegram_bot
 from data_layer import fetch_data_cached, build_features, fetch_ticker
 from nfi_strategy import (
     set_cooldown, record_daily_loss,
-    calc_chandelier_exit, calc_supertrend
+    calc_chandelier_exit,
 )
 
 

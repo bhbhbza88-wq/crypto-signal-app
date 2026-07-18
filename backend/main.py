@@ -50,7 +50,47 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Crypto Signal App V8", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+def _cors_origins() -> list[str]:
+    raw = os.getenv("CORS_ORIGINS", "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    return [
+        "https://nowicki.trade",
+        "https://www.nowicki.trade",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Telegram-Bot-Api-Secret-Token"],
+)
+
+# Простой in-memory rate limit (per-process; на одном инстансе Railway достаточно)
+_rate_buckets: dict[str, list[float]] = {}
+
+
+def _rate_limit(key: str, limit: int = 10, window: float = 60.0) -> None:
+    now = _time.time()
+    bucket = _rate_buckets.setdefault(key, [])
+    bucket[:] = [t for t in bucket if now - t < window]
+    if len(bucket) >= limit:
+        raise HTTPException(status_code=429, detail="Слишком много попыток, подожди минуту")
+    bucket.append(now)
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 @app.post("/api/telegram-webhook")
@@ -58,7 +98,11 @@ async def telegram_webhook(request: Request,
                             x_telegram_bot_api_secret_token: str | None = Header(default=None)):
     """Вебхук бота: /start, /help, /premium, /status и callback-кнопки.
     secret_token проверяем, чтобы принимать только запросы от Telegram."""
-    if telegram_bot.WEBHOOK_SECRET and x_telegram_bot_api_secret_token != telegram_bot.WEBHOOK_SECRET:
+    if not telegram_bot.WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Webhook not configured")
+    if not x_telegram_bot_api_secret_token or not hmac.compare_digest(
+        x_telegram_bot_api_secret_token, telegram_bot.WEBHOOK_SECRET
+    ):
         raise HTTPException(status_code=403, detail="Invalid secret token")
 
     update = await request.json()
@@ -143,7 +187,8 @@ def require_admin(authorization: str | None = Header(default=None)):
 
 
 @app.post("/api/auth/register")
-def auth_register(req: AuthRequest):
+def auth_register(req: AuthRequest, request: Request):
+    _rate_limit(f"auth:reg:{_client_ip(request)}", limit=5, window=60)
     user, token = auth.register(req.email, req.password)
     if not user:
         raise HTTPException(status_code=400, detail=token)  # token=сообщение об ошибке
@@ -151,7 +196,8 @@ def auth_register(req: AuthRequest):
 
 
 @app.post("/api/auth/login")
-def auth_login(req: AuthRequest):
+def auth_login(req: AuthRequest, request: Request):
+    _rate_limit(f"auth:login:{_client_ip(request)}", limit=10, window=60)
     user, token = auth.login(req.email, req.password)
     if not user:
         raise HTTPException(status_code=401, detail=token)
@@ -175,18 +221,18 @@ def auth_me(authorization: str | None = Header(default=None)):
 
 
 @app.post("/api/billing/upgrade")
-def billing_upgrade(req: UpgradeRequest, authorization: str | None = Header(default=None)):
-    """
-    ЗАГЛУШКА оплаты: пока просто меняет тариф (для теста гейтинга).
-    Реальную оплату подключим отдельным шагом (Этап 1.5).
-    """
-    user = auth.user_from_token(_token_from_header(authorization))
-    if not user:
-        raise HTTPException(status_code=401, detail="Требуется вход")
+def billing_upgrade(req: UpgradeRequest, user=Depends(require_user)):
+    """Смена тарифа: только админ, либо BILLING_STUB=1 для локальных тестов."""
+    stub = os.getenv("BILLING_STUB", "").strip().lower() in ("1", "true", "yes")
+    if not stub and not user.get("is_admin"):
+        raise HTTPException(
+            status_code=403,
+            detail="Смена тарифа только через оплату. Напиши @Kupyansk_2 после перевода.",
+        )
     if req.tier not in ('free', 'premium', 'vip'):
         raise HTTPException(status_code=400, detail="Неизвестный тариф")
     db.set_user_tier(user['id'], req.tier)
-    return {"ok": True, "tier": req.tier, "note": "ЗАГЛУШКА — реальная оплата будет позже"}
+    return {"ok": True, "tier": req.tier}
 
 
 # ── Трейдеры и ручные сигналы (ТВХ от людей) ──────────────────────
@@ -701,8 +747,8 @@ def get_xsec_ranking():
 
 
 @app.post("/api/xsec/rebalance")
-def force_xsec_rebalance():
-    """Ручной запуск ребаланса (для теста)."""
+def force_xsec_rebalance(admin=Depends(require_admin)):
+    """Ручной запуск ребаланса (только админ)."""
     import xsec_strategy
     return xsec_strategy.rebalance(force=True)
 
@@ -721,8 +767,8 @@ def get_trend_history(limit: int = 100):
 
 
 @app.post("/api/trend/check")
-def force_trend_check():
-    """Ручная проверка сигналов (для теста)."""
+def force_trend_check(admin=Depends(require_admin)):
+    """Ручная проверка сигналов (только админ)."""
     import trend_strategy
     trend_strategy.tick()
     return trend_strategy.get_status()
@@ -1097,7 +1143,7 @@ def _run_one(symbol: str, period_days: int, deposit: float,
 
 
 @app.post("/api/backtest")
-def run_backtest(req: BacktestRequest):
+def run_backtest(req: BacktestRequest, user=Depends(require_user)):
     """
     Бэктест одной пары с кривой доходности. strategy: trend | mean_reversion | breakout | momentum
     ВАЖНО: STRATEGY_MODE — общая переменная с живым сканером в этом же процессе.
@@ -1172,7 +1218,7 @@ def start_robustness(req: RobustnessRequest, authorization: str | None = Header(
         raise HTTPException(status_code=400, detail="Неизвестная стратегия")
     period = max(30, min(365, req.period_days))
 
-    job_id = robustness_mod.create_job()
+    job_id = robustness_mod.create_job(user_id=user["id"])
 
     def _worker():
         # Тот же паттерн, что /api/backtest: временно ставим режим стратегии и
@@ -1198,7 +1244,8 @@ def robustness_status(job_id: str, authorization: str | None = Header(default=No
     if not user:
         raise HTTPException(status_code=401, detail="Требуется вход")
     job = robustness_mod.get_job(job_id)
-    if not job:
+    owner = job.get("user_id") if job else None
+    if not job or (owner is not None and owner != user["id"]):
         raise HTTPException(status_code=404, detail="Джоба не найдена (возможно, устарела)")
     return {"status": job["status"], "progress": job["progress"],
             "result": job["result"], "error": job["error"]}
@@ -1307,7 +1354,7 @@ def get_channels_ranking(admin=Depends(require_admin)):
 
 
 @app.post("/api/backtest/multi")
-def run_multi_backtest(req: MultiBacktestRequest):
+def run_multi_backtest(req: MultiBacktestRequest, user=Depends(require_user)):
     """
     Мульти-символьный бэктест. strategy: trend | mean_reversion | breakout | momentum
     ВАЖНО: см. комментарий в run_backtest — сохраняем/восстанавливаем live-режим,

@@ -26,9 +26,17 @@ Thumbs.db
 .env
 .env.*
 
-# Локальный логин chat-engage (секреты)
-backend/_tmp_api.env
-backend/_chat_login_state.json
-backend/_chat_session_out.txt
-backend/_chat_login_steps.py
+# Локальный scratch / секреты Telegram (не коммитить)
+backend/_tmp*
+backend/_tg_*
+backend/_chat_*
+backend/_jambo_*
+backend/_send_*
+backend/_test_*
+backend/_live_*
+backend/_analyze_*
+backend/_practice*
+backend/_retest_*
+backend/*_session_out.txt
+backend/practice_chat_engage.py
 backend/_fetch_api_for_login.py

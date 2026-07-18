@@ -65,8 +65,8 @@ def register(email: str, password: str):
     email = (email or '').lower().strip()
     if not email or '@' not in email:
         return None, 'Некорректный email'
-    if not password or len(password) < 6:
-        return None, 'Пароль минимум 6 символов'
+    if not password or len(password) < 8:
+        return None, 'Пароль минимум 8 символов'
     if db.get_user_by_email(email):
         return None, 'Email уже зарегистрирован'
     h, salt = hash_password(password)

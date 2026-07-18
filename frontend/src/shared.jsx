@@ -125,12 +125,6 @@ export function CountUp({ value, suffix = '', className }) {
   return <span className={className}>{out}{suffix}</span>
 }
 
-export function onSpot(e) {
-  const r = e.currentTarget.getBoundingClientRect()
-  e.currentTarget.style.setProperty('--mx', `${((e.clientX - r.left) / r.width) * 100}%`)
-  e.currentTarget.style.setProperty('--my', `${((e.clientY - r.top) / r.height) * 100}%`)
-}
-
 export function useReveal(deps = []) {
   useEffect(() => {
     const io = new IntersectionObserver((entries) => {

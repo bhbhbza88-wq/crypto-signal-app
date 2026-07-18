@@ -139,15 +139,21 @@ _jobs_lock = threading.Lock()
 MAX_JOBS = 20
 
 
-def create_job() -> str:
+def create_job(user_id: int | None = None) -> str:
     job_id = uuid.uuid4().hex[:12]
     with _jobs_lock:
         # не даём словарю расти бесконечно
         if len(_jobs) >= MAX_JOBS:
             oldest = sorted(_jobs.items(), key=lambda kv: kv[1]['created'])[0][0]
             del _jobs[oldest]
-        _jobs[job_id] = {"status": "running", "progress": {"step": "старт", "done": 0, "total": 1},
-                         "result": None, "error": None, "created": time.time()}
+        _jobs[job_id] = {
+            "status": "running",
+            "progress": {"step": "старт", "done": 0, "total": 1},
+            "result": None,
+            "error": None,
+            "created": time.time(),
+            "user_id": user_id,
+        }
     return job_id
 
 

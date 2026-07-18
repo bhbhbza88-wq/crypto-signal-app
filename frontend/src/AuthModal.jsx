@@ -85,7 +85,7 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
             className="am-input"
             type="password"
             autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            placeholder="Пароль (мин. 6 символов)"
+            placeholder="Пароль (мин. 8 символов)"
             value={password}
             onChange={e => setPassword(e.target.value)}
             required
