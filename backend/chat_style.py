@@ -58,7 +58,9 @@ STYLE_SOURCE_CHATS = [
 ]
 
 _FETCH_PER_CHAT = int(os.getenv("CHAT_STYLE_FETCH_LIMIT", "120") or "120")
-_MAX_SAMPLES_TOTAL = int(os.getenv("CHAT_STYLE_MAX_SAMPLES", "250") or "250")
+_MAX_SAMPLES_TOTAL = int(os.getenv("CHAT_STYLE_MAX_SAMPLES", "800") or "800")
+_BACKUP_SEED_PATH = os.path.join(os.path.dirname(__file__), "assets", "chat_style_backup.json")
+_BACKUP_CHAT_REF = "tg_chat_backup"
 
 _LINK_RE = re.compile(r"https?://|t\.me/|@\w{4,}", re.I)
 _CYR_RE = re.compile(r"[а-яёА-ЯЁ]")
@@ -216,7 +218,7 @@ async def fetch_chat_history(client, chat: str, limit: int = _FETCH_PER_CHAT) ->
 
 
 async def ingest_style_chats(client, chats: list[str] | None = None) -> dict:
-    """Загрузить историю из чатов-учителей в БД. Возвращает статистику."""
+    """Загрузить историю из чатов-учителей + локальный backup в БД."""
     targets = chats or STYLE_SOURCE_CHATS
     total = 0
     per: dict[str, int] = {}
@@ -227,8 +229,47 @@ async def ingest_style_chats(client, chats: list[str] | None = None) -> dict:
         total += n
         print(f"[chat_style] @{chat}: сохранено {n} фраз")
         await asyncio_sleep_brief()
+    backup_n = seed_from_local_backup(force=True)
+    per[_BACKUP_CHAT_REF] = backup_n
+    total += backup_n
     db.trim_chat_style_samples(_MAX_SAMPLES_TOTAL)
     return {"ok": True, "total": total, "per_chat": per, "chats": targets}
+
+
+def seed_from_local_backup(*, force: bool = False) -> int:
+    """Подтянуть примеры из tg/chat_backup.json (зашитый seed в assets/)."""
+    import json
+    from pathlib import Path
+
+    path = Path(_BACKUP_SEED_PATH)
+    if not path.exists():
+        print(f"[chat_style] backup seed не найден: {path}")
+        return 0
+    existing = [
+        r for r in db.list_chat_style_samples(limit=500, chat_ref=_BACKUP_CHAT_REF)
+    ]
+    if existing and not force:
+        return len(existing)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[chat_style] backup seed read fail: {e}")
+        return 0
+    texts: list[str] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, str):
+                texts.append(item)
+            elif isinstance(item, dict) and item.get("text"):
+                texts.append(str(item["text"]))
+    cleaned = []
+    for t in texts:
+        c = _clean_msg(t) or (t.strip() if 4 <= len((t or "").strip()) <= 160 else None)
+        if c:
+            cleaned.append(c)
+    n = db.replace_chat_style_samples(_BACKUP_CHAT_REF, cleaned)
+    print(f"[chat_style] {_BACKUP_CHAT_REF}: сохранено {n} фраз из локального бэкапа")
+    return n
 
 
 async def asyncio_sleep_brief():
@@ -443,7 +484,7 @@ async def compose_natural(kind: str, **ctx) -> str | None:
 
     user = f"Твоя задача сейчас:\n{task}"
     if shots:
-        src = "из реальных крипто-чатов (@BinanceRussianSpeaking, @cryptoinside_chat)"
+        src = "из реальных крипто-чатов и твоего старого бэкапа переписки"
         user = (
             f"Как пишут живые люди {src} (только стиль и тон, не копируй дословно):\n"
             f"{shots}\n\n"

@@ -203,13 +203,15 @@ def _mark_replied(chat_key: str) -> None:
 
 
 async def _refresh_style_samples(client, *, force: bool = False) -> dict:
-    """Скачать живые реплики из @BinanceRussianSpeaking и @cryptoinside_chat."""
+    """Скачать живые реплики из чатов + подтянуть локальный tg backup."""
     import chat_style
     try:
+        # Локальный бэкап можно засеять даже без Telegram-fetch
+        backup_n = chat_style.seed_from_local_backup(force=force)
         n = db.count_chat_style_samples()
-        if not force and n >= 40:
-            print(f"[chat_engage] style samples уже есть ({n}), skip fetch")
-            return {"ok": True, "skipped": True, "total": n}
+        if not force and n >= 80:
+            print(f"[chat_engage] style samples уже есть ({n}), skip telegram fetch")
+            return {"ok": True, "skipped": True, "total": n, "backup": backup_n}
         stats = await chat_style.ingest_style_chats(client)
         print(f"[chat_engage] style ingest: {stats}")
         return stats

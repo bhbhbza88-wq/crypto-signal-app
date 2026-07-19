@@ -454,8 +454,8 @@ def admin_chat_engage_test(req: ChatEngageTestRequest, admin=Depends(require_adm
 def admin_chat_style_stats(admin=Depends(require_admin)):
     return {
         "total": db.count_chat_style_samples(),
-        "sources": ["BinanceRussianSpeaking", "cryptoinside_chat"],
-        "note": "Сэмплы качаются при старте chat_engage и обновляются каждые ~8ч.",
+        "sources": ["BinanceRussianSpeaking", "cryptoinside_chat", "tg_chat_backup"],
+        "note": "Сэмплы: живые чаты + локальный backup из Desktop/tg/chat_backup.json.",
     }
 
 
