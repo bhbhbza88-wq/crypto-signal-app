@@ -291,6 +291,10 @@ def init_db():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chat_style_chat ON chat_style_samples(chat_ref)"
         )
+        # Чистим протухшие сессии/токены при старте, чтобы БД не пухла.
+        now = datetime.now().isoformat()
+        conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
+        conn.execute("DELETE FROM auth_tokens WHERE expires_at <= ?", (now,))
 
 
 def replace_chat_style_samples(chat_ref: str, texts: list) -> int:
@@ -764,7 +768,11 @@ def create_auth_token(token: str, user_id: int, kind: str, expires_at: str):
 
 
 def consume_auth_token(token: str, kind: str):
-    """Возвращает user_id если токен валиден, иначе None. Токен удаляется."""
+    """Возвращает user_id если токен валиден и не истёк, иначе None.
+
+    Валидный токен удаляется (одноразовый). Просроченный/битый — тоже удаляется
+    как мусор, но user_id не возвращается.
+    """
     if not token:
         return None
     with _lock, get_conn() as conn:
@@ -775,13 +783,21 @@ def consume_auth_token(token: str, kind: str):
         if not row:
             return None
         data = dict(row)
-        conn.execute("DELETE FROM auth_tokens WHERE token=?", (token,))
         try:
-            if datetime.now() > datetime.fromisoformat(data["expires_at"]):
-                return None
+            expired = datetime.now() > datetime.fromisoformat(data["expires_at"])
         except (ValueError, TypeError):
-            return None
-        return data["user_id"]
+            expired = True
+        conn.execute("DELETE FROM auth_tokens WHERE token=?", (token,))
+        return None if expired else data["user_id"]
+
+
+def purge_expired_auth() -> int:
+    """Удаляет истёкшие сессии и одноразовые токены. Возвращает число строк."""
+    now = datetime.now().isoformat()
+    with _lock, get_conn() as conn:
+        c1 = conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,)).rowcount
+        c2 = conn.execute("DELETE FROM auth_tokens WHERE expires_at <= ?", (now,)).rowcount
+    return (c1 or 0) + (c2 or 0)
 
 
 def create_session(token, user_id, expires_at):

@@ -147,6 +147,16 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const onUnauthorized = () => {
+      setUser(null)
+      setAuthMode('login')
+      setShowAuth(true)
+    }
+    window.addEventListener('auth:unauthorized', onUnauthorized)
+    return () => window.removeEventListener('auth:unauthorized', onUnauthorized)
+  }, [])
+
+  useEffect(() => {
     const wanted = searchParams.get('auth')
     if (wanted === 'register' || wanted === 'login') {
       if (!getToken()) { setAuthMode(wanted); setShowAuth(true) }
@@ -432,7 +442,7 @@ export default function App() {
                 </div>
                 {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal t={t} /> : (
                   <div className="signals-grid">
-                    {signals.map(s => <SignalCard key={s.symbol} signal={s} />)}
+                    {signals.map(s => <SignalCard key={s.id ?? s.symbol} signal={s} />)}
                   </div>
                 )}
               </section>

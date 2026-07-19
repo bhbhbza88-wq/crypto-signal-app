@@ -18,9 +18,20 @@ function authHeaders() {
   return t ? { Authorization: `Bearer ${t}` } : {}
 }
 
+// Протухший/невалидный токен: чистим и сообщаем приложению, чтобы разлогинить.
+function handleUnauthorized() {
+  if (!getToken()) return
+  setToken(null)
+  window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+}
+
 async function get(path) {
   const res = await fetch(`${BASE_URL}${path}`, { headers: { ...authHeaders() } })
-  if (!res.ok) throw new Error(`Request failed: ${path}`)
+  if (res.status === 401) handleUnauthorized()
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || `Request failed: ${path}`)
+  }
   return res.json()
 }
 
@@ -30,6 +41,7 @@ async function post(path, body) {
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: body ? JSON.stringify(body) : undefined,
   })
+  if (res.status === 401) handleUnauthorized()
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.detail || `Request failed: ${path}`)
   return data

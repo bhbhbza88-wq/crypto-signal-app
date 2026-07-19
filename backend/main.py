@@ -290,8 +290,16 @@ def auth_me(authorization: str | None = Header(default=None)):
 
 @app.post("/api/billing/upgrade")
 def billing_upgrade(req: UpgradeRequest, user=Depends(require_user)):
-    """Смена тарифа: только админ, либо BILLING_STUB=1 для локальных тестов."""
-    stub = os.getenv("BILLING_STUB", "").strip().lower() in ("1", "true", "yes")
+    """Смена тарифа: только админ, либо BILLING_STUB=1 для локальных тестов.
+
+    BILLING_STUB игнорируется на Railway (проде) — иначе случайно выставленная
+    переменная позволила бы любому юзеру выдать себе premium/vip.
+    """
+    on_railway = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"))
+    stub = (
+        not on_railway
+        and os.getenv("BILLING_STUB", "").strip().lower() in ("1", "true", "yes")
+    )
     if not stub and not user.get("is_admin"):
         raise HTTPException(
             status_code=403,

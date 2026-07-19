@@ -396,7 +396,7 @@ export default function Admin() {
         <div className="adm-open-list">
           {openSignals.length === 0 && <div className="adm-empty">Открытых позиций нет</div>}
           {openSignals.map(s => (
-            <div key={s.symbol} className="adm-open-row">
+            <div key={s.id ?? s.symbol} className="adm-open-row">
               <span className={`adm-open-side ${s.signal === 'LONG' ? 'pos' : 'neg'}`}>{s.signal}</span>
               <span className="adm-open-sym">{s.symbol}</span>
               <span className="adm-open-trader">{s.trader ? s.trader.name : '— (авто/старое)'}</span>
