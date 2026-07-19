@@ -25,6 +25,8 @@ export default function Admin() {
   const [premiumRequests, setPremiumRequests] = useState([])
   const [engageBusy, setEngageBusy] = useState(false)
   const [engageMsg, setEngageMsg] = useState(null)
+  const [backfillBusy, setBackfillBusy] = useState(false)
+  const [backfillMsg, setBackfillMsg] = useState(null)
 
   const [channelDays, setChannelDays] = useState(14)
   const [channelStats, setChannelStats] = useState({ rows: [], since: null, days: 14 })
@@ -87,6 +89,22 @@ export default function Admin() {
       setEngageMsg({ ok: false, text: err.message })
     } finally {
       setEngageBusy(false)
+    }
+  }
+
+  async function runBackfillHistory() {
+    if (!confirm(
+      'Опубликовать всю ещё не отправленную историю сделок в @papayaqq?\n' +
+      'Крупные минусы отфильтруются автоматически, посты уходят с паузами (не сразу все).'
+    )) return
+    setBackfillBusy(true); setBackfillMsg(null)
+    try {
+      const r = await api.adminBackfillChannelHistory()
+      setBackfillMsg({ ok: true, text: r.detail })
+    } catch (err) {
+      setBackfillMsg({ ok: false, text: err.message })
+    } finally {
+      setBackfillBusy(false)
     }
   }
 
@@ -246,6 +264,26 @@ export default function Admin() {
           style={{ marginTop: 8 }}
         >
           {engageBusy ? 'Отправка…' : 'Практика → Kupyansk_2'}
+        </button>
+      </section>
+
+      {/* Бэкфилл истории в публичный канал */}
+      <section className="adm-card" style={{ marginTop: 16 }}>
+        <h2 className="section-title">История → канал результатов</h2>
+        <p className="adm-hint" style={{ marginTop: -6 }}>
+          Публикует уже закрытые сделки из истории в <b>@papayaqq</b>, которые туда
+          ещё не попали. Профит и небольшой минус — с карточкой, крупный минус
+          пропускается. Повторный запуск шлёт только новое (не дублирует).
+        </p>
+        {backfillMsg && <div className={backfillMsg.ok ? 'adm-msg-ok' : 'adm-msg-err'}>{backfillMsg.text}</div>}
+        <button
+          className="adm-submit"
+          type="button"
+          disabled={backfillBusy}
+          onClick={runBackfillHistory}
+          style={{ marginTop: 8 }}
+        >
+          {backfillBusy ? 'Запуск…' : 'Опубликовать историю → @papayaqq'}
         </button>
       </section>
 

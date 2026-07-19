@@ -418,6 +418,31 @@ def admin_chat_style_stats(admin=Depends(require_admin)):
     }
 
 
+@app.post("/api/admin/backfill-channel-history")
+def admin_backfill_channel_history(
+    background_tasks: BackgroundTasks,
+    limit: int | None = None,
+    reset: bool = False,
+    admin=Depends(require_admin),
+):
+    """Публикует ещё не отправленную историю закрытых сделок в публичный канал
+    результатов (папаяqq). Идемпотентно — помнит id последней отправленной
+    записи, повторный вызов шлёт только новое (reset=true — перепостить всё).
+    Крупные минусы отфильтровываются автоматически (telegram_bot.PUBLIC_CHANNEL_MAX_LOSS_PCT).
+    Работает в фоне — между постами пауза 2.5-5.5с, чтобы не спамить канал."""
+    import asyncio
+    import backfill_telegram
+
+    def _run():
+        asyncio.run(backfill_telegram.run_backfill(limit=limit, reset=reset))
+
+    background_tasks.add_task(_run)
+    return {
+        "ok": True,
+        "detail": "Бэкфилл запущен в фоне — сообщения появятся в канале постепенно.",
+    }
+
+
 @app.get("/api/admin/premium-requests")
 def admin_premium_requests(admin=Depends(require_admin)):
     """Последние заявки «Я оплатил» из Telegram-бота."""

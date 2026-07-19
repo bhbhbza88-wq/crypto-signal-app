@@ -72,6 +72,13 @@ export const api = {
   adminChatEngageTest: (data = {}) =>
     post('/admin/chat-engage-test', { target: 'Kupyansk_2', ...data }),
   adminPremiumRequests: () => get('/admin/premium-requests'),
+  adminBackfillChannelHistory: (opts = {}) => {
+    const params = new URLSearchParams()
+    if (opts.limit) params.set('limit', opts.limit)
+    if (opts.reset) params.set('reset', 'true')
+    const qs = params.toString()
+    return post(`/admin/backfill-channel-history${qs ? `?${qs}` : ''}`, {})
+  },
   adminChannelDaily: (days = 14) => get(`/admin/channel-daily?days=${days}`),
   analyzeChannel: (channelUrl, days = 30, entryTimeoutHours = 6, maxHoldHours = 168, riskPerTradeUsd = 100) =>
     post('/analyze-channel', {

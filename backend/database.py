@@ -291,10 +291,34 @@ def init_db():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chat_style_chat ON chat_style_samples(chat_ref)"
         )
+        # Общий key-value склад для мелких флагов/маркеров (напр. до какого id
+        # истории уже сделан бэкфилл в публичный канал) — чтобы не городить
+        # отдельную таблицу под каждую мелочь.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
         # Чистим протухшие сессии/токены при старте, чтобы БД не пухла.
         now = datetime.now().isoformat()
         conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
         conn.execute("DELETE FROM auth_tokens WHERE expires_at <= ?", (now,))
+
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, str(value)),
+        )
 
 
 def replace_chat_style_samples(chat_ref: str, texts: list) -> int:
