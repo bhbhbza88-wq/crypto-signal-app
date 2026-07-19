@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import random
 import re
@@ -16,7 +17,12 @@ import httpx
 import database as db
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-AI_MODEL = os.getenv("AI_MODEL", "gpt-4o").strip() or "gpt-4o"
+# Для чата — лёгкая модель (выше лимиты); тяжёлый gpt-4o часто упирается в 429 от ingest
+AI_MODEL = (
+    os.getenv("CHAT_ENGAGE_AI_MODEL")
+    or os.getenv("AI_MODEL_CHAT")
+    or "gpt-4o-mini"
+).strip() or "gpt-4o-mini"
 
 # Чаты-«учителя» стиля (можно переопределить env CSV).
 _DEFAULT_STYLE_CHATS = "BinanceRussianSpeaking,cryptoinside_chat"
@@ -56,33 +62,62 @@ _SPAM_RE = re.compile(
 )
 
 _CASUAL_FALLBACKS = [
-    "норм)",
-    "ага",
-    "хз, посмотрим",
-    "ну такое",
-    "понял",
-    "лол",
-    "да уж",
-    "интересно",
-    "ну бывает",
-    "ок)",
-    "согласен",
-    "хм",
-    "ну да",
-    "жиза",
-    "ладно",
+    "норм, ты как?",
+    "да ничего особого",
+    "ку, норм",
+    "пока тихо относительно",
 ]
 
 _CRYPTO_FALLBACKS = [
     "хз, смотрю пока",
-    "ну рынок странный",
+    "ну рынок странный сегодня",
     "имхо рано ещё",
     "осторожно там",
     "посмотрим",
-    "ну может и да",
-    "не уверен",
-    "норм идея в целом",
 ]
+
+_MONEY_FALLBACKS = [
+    "сканер гоняю + смотрю поток, без магии",
+    "ну сетапы по сканеру, иногда в тг кидают",
+    "просто фильтрую шум, не сигнальный чат всякий",
+    "есть сканер, плюс свой канал — оттуда идеи",
+]
+
+_GREET_RE = re.compile(
+    r"^(ку|привет|здаров|хай|йо|че как|чё как|как дела|ау+|йоу)\b",
+    re.I,
+)
+_MONEY_RE = re.compile(
+    r"(деньг|поднима|заработ|плюс|сделк|как\s*\?|как\s+ты\s+|откуда|где\s+бер|"
+    r"как\s+(вход|торгу|бер))",
+    re.I,
+)
+
+
+def fallback_reply(kind: str, incoming: str = "") -> str:
+    """Умный fallback без LLM — чтобы при 429 не отвечать тупым «ага»."""
+    t = (incoming or "").strip()
+    if _GREET_RE.search(t) or re.search(r"как дела|че как|чё как", t, re.I):
+        return random.choice([
+            "норм, ты как?",
+            "да ничего, потихоньку",
+            "ку, норм)",
+            "хай, пока ок",
+        ])
+    if kind == "reply_crypto" or _CRYPTO_RE.search(t):
+        if _MONEY_RE.search(t):
+            return random.choice(_MONEY_FALLBACKS)
+        return random.choice(_CRYPTO_FALLBACKS)
+    if _MONEY_RE.search(t):
+        return random.choice(_MONEY_FALLBACKS)
+    if "?" in t:
+        return random.choice([
+            "хз если честно",
+            "ну смотря как смотреть",
+            "короче по ситуации",
+            "могу попозже скинуть как делаю",
+        ])
+    return random.choice(_CASUAL_FALLBACKS)
 
 
 def _clean_msg(text: str) -> str | None:
@@ -166,12 +201,6 @@ def _few_shot_block(n: int = 18) -> str:
     picks = random.sample(rows, min(n, len(rows)))
     lines = [f"- {r['text']}" for r in picks]
     return "\n".join(lines)
-
-
-def fallback_reply(kind: str) -> str:
-    if kind == "reply_crypto":
-        return random.choice(_CRYPTO_FALLBACKS)
-    return random.choice(_CASUAL_FALLBACKS)
 
 
 def heuristic_intent(text: str, *, ask_re) -> str:
@@ -310,15 +339,17 @@ async def compose_natural(kind: str, **ctx) -> str | None:
         )
     elif kind == "reply_casual":
         task = (
-            "Ответь на сообщение коротко и по-человечески (small talk). "
-            "Можно 1–2 короткие реплики через перевод строки. "
-            "Без ссылок и без продажи.\n"
+            "Ответь на сообщение коротко и ПО СМЫСЛУ (не «ага/понял/ок»). "
+            "Если спросили как дела — скажи как ты и спроси обратно. "
+            "Если спросили как зарабатываешь/откуда сделки — мягко про сканер/поток, без ссылок. "
+            "Можно 1–2 короткие реплики через перевод строки.\n"
             f"{mem}\nСообщение:\n{incoming or '(пусто)'}"
         )
     elif kind == "reply_crypto":
         task = (
-            "Ответь как обычный трейдер на реплику про рынок. "
-            "1–2 коротких пузыря через перевод строки. Без сигналов «входи», без ссылок.\n"
+            "Ответь как обычный трейдер ПО СМЫСЛУ на реплику. Не односложное «ага». "
+            "Если спрашивают как берёшь плюс/сделки — скажи что смотришь сканер/сетапы. "
+            "1–2 коротких пузыря. Без «входи сюда», без ссылок.\n"
             f"{mem}\nСообщение:\n{incoming or '(пусто)'}"
         )
     elif kind == "oars":
@@ -351,7 +382,7 @@ async def compose_natural(kind: str, **ctx) -> str | None:
 
     allow_links = kind == "oars" and int(ctx.get("oars_step") or 1) >= 4
 
-    for _attempt in range(2):
+    for _attempt in range(3):
         payload = {
             "model": AI_MODEL,
             "max_tokens": 120,
@@ -368,13 +399,17 @@ async def compose_natural(kind: str, **ctx) -> str | None:
                     json=payload,
                     headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
                 )
+                if resp.status_code == 429:
+                    wait = 2.0 * (_attempt + 1)
+                    print(f"[chat_style] compose {kind}: 429, retry in {wait}s")
+                    await asyncio.sleep(wait)
+                    continue
                 resp.raise_for_status()
                 data = resp.json()
             text = _normalize_reply(
                 data["choices"][0]["message"]["content"] or "",
                 keep_newlines=keep_nl,
             )
-            # для multi-bubble проверяем каждую строку
             ok = True
             for part in (text.splitlines() or [text]):
                 if part and not passes_human_filter(part, allow_links=allow_links):
@@ -384,5 +419,5 @@ async def compose_natural(kind: str, **ctx) -> str | None:
                 return text
         except Exception as e:
             print(f"[chat_style] compose {kind}: {e}")
-            return None
+            await asyncio.sleep(1.0 * (_attempt + 1))
     return None

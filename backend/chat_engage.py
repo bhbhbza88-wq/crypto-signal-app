@@ -73,8 +73,10 @@ ASK_RE = re.compile(
     r"(где\s+(бер|наход|смотр|берёшь|берешь|нашел|нашёл)|"
     r"какой\s+(сайт|канал|бот)|"
     r"скинь\s+(ссыл|канал|сайт)|"
-    r"откуда\s+(сигнал|монет)|"
-    r"how\s+do\s+you\s+find|"
+    r"откуда\s+(сигнал|монет|бер)|"
+    r"как\s+(ты\s+)?(деньг|поднима|заработ|вход|плюс|торгу|берёшь|берешь)|"
+    r"как\s*\?|"
+    r"how\s+do\s+you\s+(find|make|trade)|"
     r"what('?s|\s+is)\s+your\s+(channel|site))",
     re.IGNORECASE,
 )
@@ -732,7 +734,7 @@ async def _compose_dialogue_reply(intent: str, incoming: str, memory: list | Non
     except Exception as e:
         print(f"[chat_engage] dialogue compose: {e}")
     return _pick_unique(
-        [chat_style.fallback_reply(kind)],
+        [chat_style.fallback_reply(kind, incoming)],
         _recent_casual,
         remember=12,
     )
@@ -849,11 +851,15 @@ def _register_ask_handler(client, me):
                 reply = await _compose_dialogue_reply("smalltalk", text, memory)
 
             entity = await event.get_input_chat()
+            # В ЛС не цитируем каждое сообщение — выглядит как бот
+            reply_to = None
+            if reply_to_us or (mentioned and not event.is_private):
+                reply_to = event.id
             await _human_send(
                 client,
                 entity,
                 reply,
-                reply_to=event.id if (reply_to_us or mentioned or event.is_private) else None,
+                reply_to=reply_to,
                 read_msg_id=event.id,
             )
             db.add_dialog_memory(peer, "assistant", reply)
