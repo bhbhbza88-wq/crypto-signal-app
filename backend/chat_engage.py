@@ -79,7 +79,39 @@ def needs_own_client() -> bool:
 
 
 def _whitelist() -> list[str]:
-    return [p.strip().lstrip("@") for p in TELEGRAM_CHAT_WHITELIST.split(",") if p.strip()]
+    """Чаты/юзеры для профит-постов. Телефоны оставляем с '+'."""
+    out = []
+    for p in TELEGRAM_CHAT_WHITELIST.split(","):
+        p = p.strip()
+        if not p:
+            continue
+        if p.startswith("+") or p.isdigit():
+            out.append(p if p.startswith("+") else f"+{p}")
+        else:
+            out.append(p.lstrip("@"))
+    return out
+
+
+async def _resolve_entity(client, target: str):
+    """Юзернейм/id — get_entity; телефон — ImportContacts (иначе Telethon не найдёт)."""
+    target = (target or "").strip()
+    if not target:
+        raise ValueError("empty engage target")
+    if target.startswith("+") or (target.isdigit() and len(target) >= 10):
+        from telethon.tl.functions.contacts import ImportContactsRequest
+        from telethon.tl.types import InputPhoneContact
+        phone = target if target.startswith("+") else f"+{target}"
+        try:
+            res = await client(ImportContactsRequest([
+                InputPhoneContact(client_id=random.randint(1, 10**9), phone=phone,
+                                  first_name="TG", last_name=""),
+            ]))
+            if res.users:
+                return res.users[0]
+        except Exception as e:
+            print(f"[chat_engage] ImportContacts {phone}: {e}")
+        return await client.get_entity(phone)
+    return await client.get_entity(target)
 
 
 def _coin(symbol: str) -> str:
@@ -302,7 +334,7 @@ def _render_card(symbol, side, entry, pnl, exit_price, exchange=None, duration_m
 
 
 async def _send_profit(client, target, text: str, photo: bytes | None) -> None:
-    entity = await client.get_entity(target)
+    entity = await _resolve_entity(client, target)
     if photo:
         bio = BytesIO(photo)
         bio.name = "pnl.png"
