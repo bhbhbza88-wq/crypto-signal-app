@@ -95,15 +95,15 @@ def _bg_for_text() -> Image.Image:
     """Фон с чистой левой зоной: эмблема Binance остаётся справа, под текст не залезает."""
     img = _load_bg().copy()
     W, H = img.size
-    clear_w = int(W * 0.48)
-    clear_h = int(H * 0.58)
+    clear_w = int(W * 0.58)
+    clear_h = int(H * 0.62)
     px = img.load()
     for y in range(clear_h):
         for x in range(clear_w):
             r, g, b = px[x, y]
             # слева гасим эмблему почти в ноль, у правого края зоны — плавный переход
             t = 1.0 - (x / max(clear_w - 1, 1))  # 1 → 0
-            keep = 1.0 - t * 0.94
+            keep = 1.0 - t * 0.97
             px[x, y] = (int(r * keep), int(g * keep), int(b * keep))
     return img
 
@@ -141,9 +141,10 @@ def render_profit_card(
     W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # Текст в левой зоне; эмблема только справа (фон уже почищен).
+    # Текст целиком внутри очищенной зоны (эмблема только справа).
     pad = int(W * 0.078)
-    text_max_w = int(W * 0.48)
+    clear_w = int(W * 0.58)
+    text_max_w = max(120, clear_w - pad - int(W * 0.04))
     col2_x = int(W * 0.50)
 
     def fit_font(text: str, start: int, bold: bool, min_size: int = 14) -> ImageFont.FreeTypeFont:
