@@ -61,13 +61,57 @@ def _ticker_ok(ticker):
     return bool(ticker and ticker.get('last') is not None)
 
 
-def resolve_listed_exchange(symbol):
-    """Сначала Bybit, иначе Binance USDM. None если нигде нет тикера с last."""
+def parse_listed_on(raw):
+    """'bybit,binance' | list → упорядоченный список id."""
+    if isinstance(raw, (list, tuple)):
+        parts = [str(x).lower().strip() for x in raw]
+    elif raw:
+        parts = [p.strip().lower() for p in str(raw).split(',')]
+    else:
+        parts = []
+    out = []
+    for p in parts:
+        if p in ('bybit', 'binance') and p not in out:
+            out.append(p)
+    return out
+
+
+def listings_label(listed_on) -> str:
+    """Текст для TG/UI: где торгуется монета."""
+    listed = parse_listed_on(listed_on)
+    has_b = 'bybit' in listed
+    has_n = 'binance' in listed
+    if has_b and has_n:
+        return 'Bybit и Binance Futures'
+    if has_n and not has_b:
+        return 'только Binance Futures'
+    if has_b and not has_n:
+        return 'только Bybit Futures'
+    return 'Bybit Futures'
+
+
+def probe_listings(symbol):
+    """Проверяет обе биржи. Возвращает (listed_ids, preferred_id, ticker_on_preferred).
+
+    preferred: Bybit если есть, иначе Binance. (None, None, None) если нигде нет.
+    """
+    listed = []
+    tickers = {}
     for ex_id in ('bybit', 'binance'):
         ticker = api_call(get_exchange(ex_id).fetch_ticker, symbol)
         if _ticker_ok(ticker):
-            return ex_id
-    return None
+            listed.append(ex_id)
+            tickers[ex_id] = ticker
+    if not listed:
+        return [], None, None
+    preferred = 'bybit' if 'bybit' in listed else listed[0]
+    return listed, preferred, tickers[preferred]
+
+
+def resolve_listed_exchange(symbol):
+    """Сначала Bybit, иначе Binance USDM. None если нигде нет тикера с last."""
+    _, preferred, _ = probe_listings(symbol)
+    return preferred
 
 
 def fetch_data(symbol, exchange_id=None):

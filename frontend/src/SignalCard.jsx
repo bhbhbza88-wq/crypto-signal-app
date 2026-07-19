@@ -1,6 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { createChart, ColorType, LineStyle, CrosshairMode } from 'lightweight-charts'
 
+/** Где торгуется монета — для мелкой подписи на карточке. */
+function formatListingsNote(listedOn) {
+  const parts = String(listedOn || 'bybit')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean)
+  const bybit = parts.includes('bybit')
+  const binance = parts.includes('binance')
+  if (bybit && binance) return 'Bybit и Binance Futures'
+  if (binance && !bybit) return 'только Binance Futures'
+  if (bybit && !binance) return 'только Bybit Futures'
+  return 'Bybit Futures'
+}
+
 function ConfidenceBar({ score, maxScore = 20 }) {
   const pct = Math.round((score / maxScore) * 100)
   const color = pct >= 80 ? 'var(--long)' : pct >= 60 ? 'var(--amber)' : 'var(--short)'
@@ -168,8 +182,9 @@ export default function SignalCard({ signal }) {
   const tone = isLong ? 'var(--long)' : 'var(--short)'
   const toneSoft = isLong ? 'var(--long-soft)' : 'var(--short-soft)'
   const sym = signal.symbol.replace('/USDT', '')
-  // Premium Aggregator: confidence от техсканера нет; свечи догружаются с Bybit
+  // Premium Aggregator: confidence от техсканера нет; свечи с биржи трекинга
   const isAggregated = signal.trader?.source_type === 'telegram_aggregate'
+  const venuesNote = formatListingsNote(signal.listed_on || signal.exchange)
 
   const candles = signal.candles || []
   const lastClose = candles.length ? candles[candles.length - 1].close : null
@@ -200,7 +215,8 @@ export default function SignalCard({ signal }) {
                 {signal.signal}
               </span>
             </div>
-            <span className="signal-pair">/ USDT · Bybit</span>
+            <span className="signal-pair">/ USDT</span>
+            <div className="signal-venues">{venuesNote}</div>
           </div>
         </div>
         <div className="signal-meta">
@@ -261,7 +277,7 @@ export default function SignalCard({ signal }) {
           <ul className="reasons-list">
             <li>Мультифакторный сетап: тренд + сила движения</li>
             <li>Риск/награда по уровням entry → TP согласованы</li>
-            <li>Фильтр волатильности пройден на Bybit</li>
+            <li>Фильтр волатильности пройден · {venuesNote}</li>
           </ul>
         ) : signal.entry_reasons?.length > 0 ? (
           <ul className="reasons-list">
@@ -302,6 +318,13 @@ export default function SignalCard({ signal }) {
         .signal-sym-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
         .symbol { font-size: 22px; font-weight: 800; color: var(--text); font-family: var(--font-mono); letter-spacing: -0.02em; }
         .signal-pair { font-size: 11px; color: var(--text-tertiary); }
+        .signal-venues {
+          margin-top: 2px;
+          font-size: 10px;
+          line-height: 1.3;
+          color: var(--text-tertiary);
+          opacity: 0.9;
+        }
         .badge {
           font-size: 11px; font-weight: 700;
           padding: 4px 10px; border-radius: 7px;

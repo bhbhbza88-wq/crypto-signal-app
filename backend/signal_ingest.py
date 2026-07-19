@@ -22,7 +22,8 @@ def normalize_symbol(raw: str) -> str:
 
 
 def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime,
-                reasons=None, score=None, candles_json=None, exchange='bybit'):
+                reasons=None, score=None, candles_json=None, exchange='bybit',
+                listed_on=None):
     """Валидирует и открывает позицию через db.insert_trade_if_not_exists.
 
     Возвращает (symbol, None) при успехе или (None, причина) при отказе,
@@ -37,9 +38,21 @@ def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime,
     """
     symbol = normalize_symbol(symbol)
     signal = signal.upper().strip()
+
+    import data_layer
+    listed = data_layer.parse_listed_on(listed_on) if listed_on else []
+    if not listed:
+        listed, preferred, _ = data_layer.probe_listings(symbol)
+        if preferred:
+            exchange = preferred
+        elif not exchange:
+            exchange = 'bybit'
     exchange = (exchange or 'bybit').lower().strip()
     if exchange not in ('bybit', 'binance'):
         exchange = 'bybit'
+    if not listed:
+        listed = [exchange]
+    listed_csv = ','.join(listed)
 
     if signal == 'LONG':
         ok = stop < entry < tp1 < tp2 < tp3
@@ -50,7 +63,6 @@ def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime,
 
     if not candles_json:
         try:
-            import data_layer
             candles_json = data_layer.fetch_candles_json(symbol, exchange_id=exchange)
         except Exception:
             candles_json = None
@@ -67,6 +79,7 @@ def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime,
         "entry_reasons_json": json.dumps(reasons or [], ensure_ascii=False),
         "trader_id": trader_id,
         "exchange": exchange,
+        "listed_on": listed_csv,
     }
     rowcount = db.insert_trade_if_not_exists(symbol, trade)
     if rowcount == 0:

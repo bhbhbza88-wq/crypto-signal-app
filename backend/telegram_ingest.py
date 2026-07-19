@@ -411,16 +411,13 @@ async def _handle_message(display_name: str, msg):
         return
 
     symbol = normalize_symbol(str(parsed["symbol"]))
-    exchange_id = await asyncio.to_thread(data_layer.resolve_listed_exchange, symbol)
-    if not exchange_id:
+    listed, exchange_id, ticker = await asyncio.to_thread(data_layer.probe_listings, symbol)
+    if not exchange_id or not ticker:
         print(f"[telegram_ingest] {display_name}: символ {symbol} не торгуется на Bybit/Binance, пропуск")
         return
 
-    ticker = await asyncio.to_thread(data_layer.fetch_ticker, symbol, exchange_id)
-    if not ticker:
-        print(f"[telegram_ingest] {display_name}: нет тикера {symbol} на {exchange_id}, пропуск")
-        return
-    print(f"[telegram_ingest] {display_name}: {symbol} via {exchange_id}")
+    listed_csv = ','.join(listed)
+    print(f"[telegram_ingest] {display_name}: {symbol} via {exchange_id} (listed: {listed_csv})")
 
     last = ticker.get("last")
     entry, stop, tp1 = float(parsed["entry"]), float(parsed["stop"]), float(parsed["tp1"])
@@ -450,10 +447,11 @@ async def _handle_message(display_name: str, msg):
         reasons=[
             f"Автоимпорт из потока: {display_name}",
             f"Quality filter: {qdetail}",
-            f"Exchange: {exchange_id}",
+            f"Листинг: {data_layer.listings_label(listed)}",
         ],
         score=quality,
         exchange=exchange_id,
+        listed_on=listed_csv,
     )
     if err:
         print(f"[telegram_ingest] {display_name}: {symbol} пропущен ({err})")
@@ -461,7 +459,7 @@ async def _handle_message(display_name: str, msg):
 
     _channel_day_bump(display_name)
     db.add_event(opened_symbol, "telegram_aggregate_signal",
-                 f"{display_name}: {side} {opened_symbol} @ {entry} ({qdetail}, {exchange_id})")
+                 f"{display_name}: {side} {opened_symbol} @ {entry} ({qdetail}, {listed_csv})")
     print(f"[telegram_ingest] Открыт сигнал {opened_symbol} от {display_name} ({qdetail}, via {exchange_id})")
 
     # Публикуем в наш собственный TG-канал тем же путём, что ручные сигналы
@@ -473,6 +471,7 @@ async def _handle_message(display_name: str, msg):
             "entry": entry, "stop": stop,
             "tp1": tp1, "tp2": tp2, "tp3": tp3,
             "exchange": exchange_id,
+            "listed_on": listed_csv,
         }, display_name)
     except Exception as e:
         print(f"[telegram_ingest] Ошибка публикации в TG-канал: {e}")

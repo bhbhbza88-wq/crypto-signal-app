@@ -406,10 +406,13 @@ def admin_add_signal(req: AddSignalRequest, background_tasks: BackgroundTasks, a
         raise HTTPException(status_code=400, detail=detail)
 
     db.add_event(symbol, 'manual_signal', f"Новый сигнал от {trader['name']}: {signal} {symbol} @ {req.entry}")
+    opened = db.get_trade(symbol) or {}
     background_tasks.add_task(telegram_bot.notify_manual_signal, {
         "symbol": symbol, "signal": signal,
         "entry": req.entry, "stop": req.stop,
         "tp1": req.tp1, "tp2": req.tp2, "tp3": req.tp3,
+        "exchange": opened.get("exchange") or "bybit",
+        "listed_on": opened.get("listed_on") or opened.get("exchange") or "bybit",
     }, trader['name'])
     try:
         import chat_engage
@@ -464,10 +467,13 @@ def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTas
     db.add_event(symbol, 'tradingview_signal',
                  f"{req.indicator_name}: {signal} {symbol} @ {entry}")
 
+    opened = db.get_trade(symbol) or {}
     background_tasks.add_task(telegram_bot.notify_manual_signal, {
         "symbol": symbol, "signal": signal,
         "entry": entry, "stop": stop,
         "tp1": tp1, "tp2": tp2, "tp3": tp3,
+        "exchange": opened.get("exchange") or "bybit",
+        "listed_on": opened.get("listed_on") or opened.get("exchange") or "bybit",
     }, f"TradingView · {trader['name']}")
 
     try:
@@ -748,6 +754,8 @@ def get_active_signals():
             "candles": candles,
             "entry_reasons": entry_reasons,
             "position_size": t.get('position_size'),
+            "exchange": t.get('exchange') or 'bybit',
+            "listed_on": t.get('listed_on') or (t.get('exchange') or 'bybit'),
             "trader": {"id": trader['id'], "name": trader['name'], "avatar_url": trader.get('avatar_url'), "source_type": trader.get('source_type')} if trader else None,
         })
     return out

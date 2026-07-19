@@ -538,8 +538,12 @@ def _levels_block(entry, stop, tp1, tp2, tp3) -> str:
 
 
 def _exchange_label(signal: dict) -> str:
-    ex = (signal.get("exchange") or "bybit").lower().strip()
-    return "Binance" if ex == "binance" else "Bybit"
+    """Где доступна монета: только Bybit / только Binance / обе."""
+    from data_layer import listings_label
+    listed = signal.get("listed_on")
+    if not listed:
+        listed = signal.get("exchange") or "bybit"
+    return listings_label(listed)
 
 
 async def notify_new_signal(signal: dict):
@@ -556,18 +560,20 @@ async def notify_new_signal(signal: dict):
     side_emoji = "🟢 LONG" if side == "LONG" else "🔴 SHORT"
     conf = round((score / 20) * 100) if score else 0
     conf_line = f"\n⚡ Уверенность · <b>{conf}%</b>" if conf else ""
-    venue = _exchange_label(signal)
+    venues = _exchange_label(signal)
 
     text = (
         f"<b>◈ NOWICKI SIGNAL</b>\n"
         f"{HR}\n"
         f"{side_emoji}\n"
-        f"<b>{sym}</b>  ·  {venue}{conf_line}\n"
+        f"<b>{sym}</b>{conf_line}\n"
+        f"<i>доступно: {venues}</i>\n"
         f"{HR}\n"
         f"{_levels_block(entry, stop, tp1, tp2, tp3)}\n"
     )
     if reasons:
-        clean = [r for r in reasons[:3] if r and "агрегированн" not in r.lower() and "Aggregated" not in r]
+        clean = [r for r in reasons[:3] if r and "агрегированн" not in r.lower()
+                 and "Aggregated" not in r and not str(r).startswith("Листинг:")]
         if clean:
             text += f"{HR}\n" + "\n".join(f"· {r}" for r in clean) + "\n"
     text += f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>  ·  <i>не фин. совет</i>"
@@ -583,13 +589,14 @@ async def notify_manual_signal(signal: dict, source: str):
     tp3 = signal.get("tp3", 0)
     stop = signal.get("stop", 0)
     side_emoji = "🟢 LONG" if side == "LONG" else "🔴 SHORT"
-    venue = _exchange_label(signal)
+    venues = _exchange_label(signal)
 
     text = (
         f"<b>◈ NOWICKI SIGNAL</b>\n"
         f"{HR}\n"
         f"{side_emoji}\n"
-        f"<b>{sym}</b>  ·  {venue}\n"
+        f"<b>{sym}</b>\n"
+        f"<i>доступно: {venues}</i>\n"
         f"{HR}\n"
         f"{_levels_block(entry, stop, tp1, tp2, tp3)}\n"
         f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>  ·  <i>не фин. совет</i>"
