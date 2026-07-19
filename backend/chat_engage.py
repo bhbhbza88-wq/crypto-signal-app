@@ -8,7 +8,8 @@ Chat Engage — пишет в whitelist-чаты «как человек» по 
 
 Env:
   TELEGRAM_API_ID / TELEGRAM_API_HASH
-  TELEGRAM_CHAT_WHITELIST              — username чатов через запятую (обязательно)
+  TELEGRAM_CHAT_WHITELIST              — username чатов через запятую
+                                         (если пусто — дефолтный набор RU-чатов)
   TELEGRAM_CHAT_SESSION                — опционально, второй аккаунт
   TELEGRAM_SESSION                     — fallback, если CHAT_SESSION пустой
 
@@ -30,7 +31,13 @@ TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "")
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "").strip()
 TELEGRAM_CHAT_SESSION = os.getenv("TELEGRAM_CHAT_SESSION", "").strip()
-TELEGRAM_CHAT_WHITELIST = os.getenv("TELEGRAM_CHAT_WHITELIST", "").strip()
+
+# Отобранные чаты для engage (override через TELEGRAM_CHAT_WHITELIST на Railway).
+_DEFAULT_CHAT_WHITELIST = (
+    "kriptovaluta_01,bybitrussian,BinanceRussianSpeaking,"
+    "cryptoinside_chat,minter_traders_chat,CryptoFLUD,cscalp_crypto"
+)
+TELEGRAM_CHAT_WHITELIST = (os.getenv("TELEGRAM_CHAT_WHITELIST") or _DEFAULT_CHAT_WHITELIST).strip()
 
 CHANNEL_URL = os.getenv("TELEGRAM_PUBLIC_CHANNEL_URL", "").strip() or "https://t.me/papayaqq"
 SITE_URL = "https://nowicki.trade"
