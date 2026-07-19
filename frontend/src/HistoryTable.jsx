@@ -1,17 +1,16 @@
 import { useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import WinrateRing from './WinrateRing'
-import { RESULT_LABEL, polishHistory, polishStats } from './shared'
+import { resultLabel, polishHistory, polishStats } from './shared'
+import { useI18n } from './i18n'
 
-const RESULT_LABELS = RESULT_LABEL
-
-function PnLChart({ history }) {
+function PnLChart({ history, t }) {
   const data = useMemo(() => {
     const byDay = {}
-    history.forEach(t => {
-      const day = t.date || '—'
+    history.forEach(tr => {
+      const day = tr.date || '—'
       if (!byDay[day]) byDay[day] = { date: day, pnl: 0, count: 0 }
-      byDay[day].pnl += parseFloat(t.pnl || 0)
+      byDay[day].pnl += parseFloat(tr.pnl || 0)
       byDay[day].count += 1
     })
     return Object.values(byDay).slice(-14)
@@ -26,12 +25,12 @@ function PnLChart({ history }) {
     <div className="pnl-chart-card">
       <div className="pnl-chart-header">
         <div>
-          <span className="pnl-chart-title">PnL по дням</span>
-          <span className="pnl-chart-sub">Последние {data.length} дней</span>
+          <span className="pnl-chart-title">{t('hist.chart.title')}</span>
+          <span className="pnl-chart-sub">{t('hist.chart.sub', { n: data.length })}</span>
         </div>
         <div className="pnl-total" style={{ color: positive ? 'var(--long)' : 'var(--short)' }}>
           {positive ? '+' : ''}{totalPnl.toFixed(1)}%
-          <span className="pnl-total-label">Итого</span>
+          <span className="pnl-total-label">{t('hist.chart.total')}</span>
         </div>
       </div>
       <div style={{ height: 120 }}>
@@ -46,7 +45,7 @@ function PnLChart({ history }) {
             <YAxis hide />
             <Tooltip
               contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, fontFamily: 'var(--font-mono)', fontSize: 12 }}
-              formatter={(v) => [`${v > 0 ? '+' : ''}${v.toFixed(2)}%`, 'PnL']}
+              formatter={(v) => [`${v > 0 ? '+' : ''}${v.toFixed(2)}%`, t('hist.chart.tooltipPnl')]}
               labelFormatter={v => `📅 ${v}`}
             />
             <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
@@ -79,10 +78,10 @@ function PnLChart({ history }) {
 // Публичный (free) вид: только винрейт — остальное за Premium.
 // Обещание «трек-рекорд публичен» остаётся правдой (винрейт открыт всем),
 // но глубина — PnL по дням и каждая сделка — это ценность подписки.
-function HistoryLocked({ history, onUpgrade }) {
+function HistoryLocked({ history, onUpgrade, t }) {
   const polished = useMemo(() => polishHistory(history), [history])
   const rawWr = polished.length
-    ? Math.round(100 * polished.filter(t => t.pnl > 0).length / polished.length)
+    ? Math.round(100 * polished.filter(tr => tr.pnl > 0).length / polished.length)
     : 0
   const display = useMemo(
     () => polishStats({ all_time: { winrate: rawWr, total: polished.length }, week: {} }, polished),
@@ -91,29 +90,29 @@ function HistoryLocked({ history, onUpgrade }) {
   const total = display.total || polished.length
   const winrate = display.winrate
   const mod10 = total % 10, mod100 = total % 100
-  const tradeWord = (mod10 === 1 && mod100 !== 11) ? 'закрытая сделка'
-    : (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) ? 'закрытые сделки'
-    : 'закрытых сделок'
+  const tradeWord = (mod10 === 1 && mod100 !== 11) ? t('hist.trade.one')
+    : (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) ? t('hist.trade.few')
+    : t('hist.trade.many')
 
   return (
     <div className="history-wrap">
       <div className="hist-public-card">
-        <WinrateRing winrate={winrate} total={total} />
+        <WinrateRing winrate={winrate} total={total} label={t('land.hero.statWinrate')} />
         <div className="hist-public-info">
           <div className="hpi-total">{total} <span>{tradeWord}</span></div>
-          <div className="hpi-note">Винрейт за всё время открыт всем. Полная история — на Premium.</div>
+          <div className="hpi-note">{t('hist.locked.note')}</div>
         </div>
       </div>
 
       <div className="hist-lock-card">
         <div className="hist-lock-icon">🔒</div>
-        <div className="hist-lock-title">Полная история сделок — на Premium</div>
+        <div className="hist-lock-title">{t('hist.locked.title')}</div>
         <div className="hist-lock-feats">
-          {['PnL по дням — график доходности', 'Каждая сделка: вход, результат, PnL', 'Разбивка по TP1 / TP2 / TP3 / стопам'].map((f, i) => (
+          {[t('hist.locked.f1'), t('hist.locked.f2'), t('hist.locked.f3')].map((f, i) => (
             <span key={i} className="hist-lock-feat">✓ {f}</span>
           ))}
         </div>
-        <button className="hist-lock-btn" onClick={onUpgrade}>Открыть за Premium →</button>
+        <button className="hist-lock-btn" onClick={onUpgrade}>{t('hist.locked.btn')}</button>
       </div>
 
       <style>{`
@@ -155,12 +154,13 @@ function HistoryLocked({ history, onUpgrade }) {
 }
 
 export default function HistoryTable({ history, isPremium = true, onUpgrade }) {
+  const { t } = useI18n()
   const rows = useMemo(() => polishHistory(history), [history])
 
   if (!rows?.length) {
     return (
       <div className="history-empty">
-        Сделок пока не было. Как только сканер найдёт и закроет сигнал — он появится здесь.
+        {t('hist.empty')}
         <style>{`
           .history-empty {
             padding: 36px 20px; text-align: center;
@@ -175,39 +175,39 @@ export default function HistoryTable({ history, isPremium = true, onUpgrade }) {
   }
 
   if (!isPremium) {
-    return <HistoryLocked history={history} onUpgrade={onUpgrade} />
+    return <HistoryLocked history={history} onUpgrade={onUpgrade} t={t} />
   }
 
   return (
     <div className="history-wrap">
-      <PnLChart history={rows} />
+      <PnLChart history={rows} t={t} />
 
       <div className="history-table-wrap">
         <table className="history-table">
           <thead>
             <tr>
-              <th>Дата</th>
-              <th>Время</th>
-              <th>Монета</th>
-              <th>Сигнал</th>
-              <th>Вход</th>
-              <th>Результат</th>
-              <th>PnL</th>
+              <th>{t('hist.col.date')}</th>
+              <th>{t('hist.col.time')}</th>
+              <th>{t('hist.col.coin')}</th>
+              <th>{t('hist.col.signal')}</th>
+              <th>{t('hist.col.entry')}</th>
+              <th>{t('hist.col.result')}</th>
+              <th>{t('hist.col.pnl')}</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((t) => (
-              <tr key={t.id}>
-                <td className="dim">{t.date}</td>
-                <td className="mono dim">{t.time}</td>
-                <td className="mono symbol-cell">{t.symbol.replace('/USDT', '')}</td>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td className="dim">{row.date}</td>
+                <td className="mono dim">{row.time}</td>
+                <td className="mono symbol-cell">{row.symbol.replace('/USDT', '')}</td>
                 <td>
-                  <span className={`dir-badge ${t.signal === 'LONG' ? 'long' : 'short'}`}>{t.signal}</span>
+                  <span className={`dir-badge ${row.signal === 'LONG' ? 'long' : 'short'}`}>{row.signal}</span>
                 </td>
-                <td className="mono dim">{t.entry?.toFixed(4)}</td>
-                <td>{RESULT_LABELS[t.result] || t.result}</td>
-                <td className={`mono pnl ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}`}>
-                  {t.pnl > 0 ? '+' : ''}{t.pnl}%
+                <td className="mono dim">{row.entry?.toFixed(4)}</td>
+                <td>{resultLabel(t, row.result)}</td>
+                <td className={`mono pnl ${row.pnl > 0 ? 'pos' : row.pnl < 0 ? 'neg' : ''}`}>
+                  {row.pnl > 0 ? '+' : ''}{row.pnl}%
                 </td>
               </tr>
             ))}
@@ -215,20 +215,20 @@ export default function HistoryTable({ history, isPremium = true, onUpgrade }) {
         </table>
 
         <div className="history-cards">
-          {rows.map((t) => (
-            <div className="history-row-card" key={t.id}>
+          {rows.map((row) => (
+            <div className="history-row-card" key={row.id}>
               <div className="hrc-top">
                 <div className="hrc-symbol-group">
-                  <span className="mono symbol-cell">{t.symbol.replace('/USDT', '')}</span>
-                  <span className={`dir-badge ${t.signal === 'LONG' ? 'long' : 'short'}`}>{t.signal}</span>
+                  <span className="mono symbol-cell">{row.symbol.replace('/USDT', '')}</span>
+                  <span className={`dir-badge ${row.signal === 'LONG' ? 'long' : 'short'}`}>{row.signal}</span>
                 </div>
-                <span className={`mono pnl ${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}`}>
-                  {t.pnl > 0 ? '+' : ''}{t.pnl}%
+                <span className={`mono pnl ${row.pnl > 0 ? 'pos' : row.pnl < 0 ? 'neg' : ''}`}>
+                  {row.pnl > 0 ? '+' : ''}{row.pnl}%
                 </span>
               </div>
               <div className="hrc-bottom">
-                <span className="dim">{RESULT_LABELS[t.result] || t.result}</span>
-                <span className="dim">{t.date} · {t.time}</span>
+                <span className="dim">{resultLabel(t, row.result)}</span>
+                <span className="dim">{row.date} · {row.time}</span>
               </div>
             </div>
           ))}

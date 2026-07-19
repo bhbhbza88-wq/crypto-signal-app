@@ -1,4 +1,4 @@
-export default function WinrateRing({ winrate = 0, total = 0, size = 132 }) {
+export default function WinrateRing({ winrate = 0, total = 0, size = 132, label = 'winrate' }) {
   const stroke = 10
   const radius = (size - stroke) / 2
   const circumference = 2 * Math.PI * radius
@@ -27,7 +27,7 @@ export default function WinrateRing({ winrate = 0, total = 0, size = 132 }) {
       </svg>
       <div className="ring-center">
         <span className="ring-value">{total > 0 ? `${winrate}%` : '—'}</span>
-        <span className="ring-label">винрейт</span>
+        <span className="ring-label">{label}</span>
       </div>
 
       <style>{`

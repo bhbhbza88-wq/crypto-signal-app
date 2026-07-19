@@ -9,10 +9,14 @@ export const TG_RESULTS_CHANNEL =
 export const TG_CHANNEL = TG_RESULTS_CHANNEL
 export const TG_PREMIUM = `${TG_BOT}?start=premium`
 
-export const RESULT_LABEL = {
-  tp1: 'TP1', tp2: 'TP2', tp3: 'TP3', sl: 'Стоп', be: 'Б/У',
-  potential: 'Закрыт', timeout: 'Закрыт', timeout_closed: 'Закрыт',
-  channel_closed: 'Закрыто',
+/** Ключи результатов сделки — переводы лежат в i18n под result.* */
+export const RESULT_KEYS = [
+  'tp1', 'tp2', 'tp3', 'sl', 'be',
+  'potential', 'timeout', 'timeout_closed', 'channel_closed',
+]
+
+export function resultLabel(t, key) {
+  return RESULT_KEYS.includes(key) ? t(`result.${key}`) : key
 }
 
 export const APP_SECTIONS = [

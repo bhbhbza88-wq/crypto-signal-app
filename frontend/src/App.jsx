@@ -5,7 +5,7 @@ import AuthModal from './AuthModal'
 import SignalCard from './SignalCard'
 import AccountMenu from './AccountMenu'
 import { useI18n } from './i18n'
-import { useLivePrices, CountUp, RESULT_LABEL, TG_BOT, APP_SECTIONS, polishHistory, polishStats } from './shared'
+import { useLivePrices, CountUp, resultLabel, TG_BOT, APP_SECTIONS, polishHistory, polishStats } from './shared'
 import './App.css'
 
 const Pricing = lazy(() => import('./Pricing'))
@@ -90,7 +90,7 @@ function RecentSignals({ history, isPremium, onUpgrade, onSeeAll, t }) {
             <div className="rs-row" key={row.id}>
               <span className="rs-sym mono">{row.symbol.replace('/USDT', '')}</span>
               <span className={`rs-dir ${row.signal === 'LONG' ? 'long' : 'short'}`}>{row.signal}</span>
-              <span className="rs-res">{RESULT_LABEL[row.result] || row.result}</span>
+              <span className="rs-res">{resultLabel(t, row.result)}</span>
               <span className={`rs-pnl mono ${row.pnl > 0 ? 'pos' : row.pnl < 0 ? 'neg' : ''}`}>
                 {row.pnl > 0 ? '+' : ''}{row.pnl}%
               </span>

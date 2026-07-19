@@ -1,29 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
 import { createChart, ColorType, LineStyle, CrosshairMode } from 'lightweight-charts'
+import { useI18n } from './i18n'
 
 /** Где торгуется монета — для мелкой подписи на карточке. */
-function formatListingsNote(listedOn) {
+function formatListingsNote(listedOn, t) {
   const parts = String(listedOn || 'bybit')
     .split(',')
     .map(s => s.trim().toLowerCase())
     .filter(Boolean)
   const bybit = parts.includes('bybit')
   const binance = parts.includes('binance')
-  if (bybit && binance) return 'Bybit и Binance Futures'
-  if (binance && !bybit) return 'только Binance Futures'
-  if (bybit && !binance) return 'только Bybit Futures'
-  return 'Bybit Futures'
+  if (bybit && binance) return t('signal.venuesBoth')
+  if (binance && !bybit) return t('signal.venuesBinanceOnly')
+  if (bybit && !binance) return t('signal.venuesBybitOnly')
+  return t('signal.venuesDefault')
 }
 
-function ConfidenceBar({ score, maxScore = 20 }) {
+function ConfidenceBar({ score, maxScore = 20, t }) {
   const pct = Math.round((score / maxScore) * 100)
   const color = pct >= 80 ? 'var(--long)' : pct >= 60 ? 'var(--amber)' : 'var(--short)'
-  const label = pct >= 80 ? 'Высокая' : pct >= 60 ? 'Средняя' : 'Низкая'
+  const label = pct >= 80 ? t('signal.confHigh') : pct >= 60 ? t('signal.confMed') : t('signal.confLow')
 
   return (
     <div className="confidence-wrap">
       <div className="confidence-header">
-        <span className="confidence-label">Уверенность</span>
+        <span className="confidence-label">{t('signal.confidence')}</span>
         <span className="confidence-pct" style={{ color }}>{pct}%</span>
       </div>
       <div className="confidence-track">
@@ -33,8 +34,8 @@ function ConfidenceBar({ score, maxScore = 20 }) {
         />
       </div>
       <div className="confidence-footer">
-        <span className="confidence-score">Score {score}/{maxScore}</span>
-        <span className="confidence-grade" style={{ color }}>{label} уверенность</span>
+        <span className="confidence-score">{t('signal.score', { score, max: maxScore })}</span>
+        <span className="confidence-grade" style={{ color }}>{label} {t('signal.confSuffix')}</span>
       </div>
       <style>{`
         .confidence-wrap { display: flex; flex-direction: column; gap: 6px; }
@@ -74,7 +75,7 @@ function useThemeTick() {
 }
 
 // свечной график в стиле TradingView с разметкой Вход/SL/TP1-3
-function CandleChart({ signal }) {
+function CandleChart({ signal, t }) {
   const containerRef = useRef(null)
   const chartRef = useRef(null)
   const seriesRef = useRef(null)
@@ -163,7 +164,7 @@ function CandleChart({ signal }) {
         axisLabelVisible: true,
       }))
     }
-    addLine(signal.entry, cssVar('--accent', '#3b7cf4'), 'ВХОД')
+    addLine(signal.entry, cssVar('--accent', '#3b7cf4'), t('signal.entryLine'))
     addLine(signal.stop, cssVar('--short', '#f04a59'), 'SL')
     addLine(signal.tp1, cssVar('--long', '#00c896'), 'TP1')
     addLine(signal.tp2, cssVar('--long', '#00c896'), 'TP2', true)
@@ -172,19 +173,20 @@ function CandleChart({ signal }) {
     chartRef.current?.timeScale().fitContent()
     return () => { lines.forEach(l => series.removePriceLine(l)) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(candles), signal.entry, signal.stop, signal.tp1, signal.tp2, signal.tp3])
+  }, [JSON.stringify(candles), signal.entry, signal.stop, signal.tp1, signal.tp2, signal.tp3, t])
 
   return <div ref={containerRef} className="tv-chart-canvas" />
 }
 
 export default function SignalCard({ signal }) {
+  const { t } = useI18n()
   const isLong = signal.signal === 'LONG'
   const tone = isLong ? 'var(--long)' : 'var(--short)'
   const toneSoft = isLong ? 'var(--long-soft)' : 'var(--short-soft)'
   const sym = signal.symbol.replace('/USDT', '')
   // Premium Aggregator: confidence от техсканера нет; свечи с биржи трекинга
   const isAggregated = signal.trader?.source_type === 'telegram_aggregate'
-  const venuesNote = formatListingsNote(signal.listed_on || signal.exchange)
+  const venuesNote = formatListingsNote(signal.listed_on || signal.exchange, t)
 
   const candles = signal.candles || []
   const lastClose = candles.length ? candles[candles.length - 1].close : null
@@ -192,7 +194,7 @@ export default function SignalCard({ signal }) {
     ? (isLong ? (lastClose - signal.entry) / signal.entry * 100 : (signal.entry - lastClose) / signal.entry * 100)
     : null
 
-  const stage = signal.tp2_hit ? 'TP2 достигнут' : signal.tp1_hit ? 'TP1 достигнут' : 'Открыта'
+  const stage = signal.tp2_hit ? t('signal.stageTp2') : signal.tp1_hit ? t('signal.stageTp1') : t('signal.stageOpen')
   const pct = Math.round((signal.score / 20) * 100)
   const confColor = pct >= 80 ? 'var(--long)' : pct >= 60 ? 'var(--amber)' : 'var(--short)'
 
@@ -220,8 +222,8 @@ export default function SignalCard({ signal }) {
           </div>
         </div>
         <div className="signal-meta">
-          <MetaTag label="Режим" value={isAggregated ? 'AI Scan' : signal.regime} />
-          <MetaTag label="Стадия" value={stage} highlight={stage !== 'Открыта'} />
+          <MetaTag label={t('signal.mode')} value={isAggregated ? 'AI Scan' : signal.regime} />
+          <MetaTag label={t('signal.stage')} value={stage} highlight={stage !== t('signal.stageOpen')} />
         </div>
       </div>
 
@@ -229,7 +231,7 @@ export default function SignalCard({ signal }) {
           Feed score принципиально нет (не наш алгоритм это оценивал). */}
       {!isAggregated && (
         <div className="confidence-section">
-          <ConfidenceBar score={signal.score} maxScore={20} />
+          <ConfidenceBar score={signal.score} maxScore={20} t={t} />
         </div>
       )}
 
@@ -251,33 +253,33 @@ export default function SignalCard({ signal }) {
           )}
         </div>
         {candles.length > 0 ? (
-          <CandleChart signal={signal} />
+          <CandleChart signal={signal} t={t} />
         ) : (
-          <div className="tv-empty">Загрузка графика...</div>
+          <div className="tv-empty">{t('signal.chartLoading')}</div>
         )}
         <div className="tv-legend">
-          <LegendChip color="var(--accent)" label="Вход" value={signal.entry} />
-          <LegendChip color="var(--short)" label="SL" value={signal.stop} />
-          <LegendChip color="var(--long)" label="TP1" value={signal.tp1} />
-          <LegendChip color="var(--long)" label="TP2" value={signal.tp2} dashed />
-          <LegendChip color="var(--long)" label="TP3" value={signal.tp3} dashed />
+          <LegendChip color="var(--accent)" label={t('signal.legend.entry')} value={signal.entry} />
+          <LegendChip color="var(--short)" label={t('signal.legend.sl')} value={signal.stop} />
+          <LegendChip color="var(--long)" label={t('signal.legend.tp1')} value={signal.tp1} />
+          <LegendChip color="var(--long)" label={t('signal.legend.tp2')} value={signal.tp2} dashed />
+          <LegendChip color="var(--long)" label={t('signal.legend.tp3')} value={signal.tp3} dashed />
         </div>
       </div>
 
       {signal.position_size != null && (
         <div className="position-row">
-          <span className="position-label">Рекомендованный размер позиции</span>
+          <span className="position-label">{t('signal.positionSize')}</span>
           <span className="position-value">{signal.position_size.toFixed(0)} USDT</span>
         </div>
       )}
 
       <div className="reasons-block">
-        <span className="reasons-title">Почему сканер вошёл в сделку</span>
+        <span className="reasons-title">{t('signal.reasonsTitle')}</span>
         {isAggregated ? (
           <ul className="reasons-list">
-            <li>Мультифакторный сетап: тренд + сила движения</li>
-            <li>Риск/награда по уровням entry → TP согласованы</li>
-            <li>Фильтр волатильности пройден · {venuesNote}</li>
+            <li>{t('signal.aggReason1')}</li>
+            <li>{t('signal.aggReason2')}</li>
+            <li>{t('signal.aggReason3')} · {venuesNote}</li>
           </ul>
         ) : signal.entry_reasons?.length > 0 ? (
           <ul className="reasons-list">
@@ -287,7 +289,7 @@ export default function SignalCard({ signal }) {
           </ul>
         ) : (
           <ul className="reasons-list">
-            <li>AI-сканер подтвердил точку входа</li>
+            <li>{t('signal.defaultReason')}</li>
           </ul>
         )}
       </div>

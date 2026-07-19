@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { api, setToken } from './api'
+import { useI18n } from './i18n'
 
 const GIS_SRC = 'https://accounts.google.com/gsi/client'
 
@@ -22,6 +23,7 @@ function loadGisScript() {
 }
 
 export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
+  const { t, lang } = useI18n()
   const [mode, setMode] = useState(initialMode) // login | register | forgot | check_email
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -76,11 +78,11 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
         width: 312,
         text: 'continue_with',
         shape: 'rectangular',
-        locale: 'ru',
+        locale: lang === 'pl' ? 'pl' : lang === 'en' ? 'en' : 'ru',
       })
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [googleClientId, onGoogleCredential, mode])
+  }, [googleClientId, onGoogleCredential, mode, lang])
 
   useEffect(() => {
     firstFieldRef.current?.focus()
@@ -114,7 +116,7 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
     try {
       if (mode === 'forgot') {
         const res = await api.forgotPassword(email)
-        setInfo(res.message || 'Если аккаунт существует — проверь почту.')
+        setInfo(res.message || t('auth.infoAccountExists'))
         return
       }
       if (mode === 'login') {
@@ -151,17 +153,17 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
   }
 
   const title = {
-    login: 'Вход',
-    register: 'Регистрация',
-    forgot: 'Сброс пароля',
-    check_email: 'Проверь почту',
+    login: t('auth.title.login'),
+    register: t('auth.title.register'),
+    forgot: t('auth.title.forgot'),
+    check_email: t('auth.title.check_email'),
   }[mode]
 
   const sub = {
-    login: 'Войдите в аккаунт NOWICKI',
-    register: 'Первые 3 дня Premium бесплатно',
-    forgot: emailEnabled ? 'Пришлём ссылку на email' : 'Сброс пароля недоступен — SMTP не настроен',
-    check_email: `Мы отправили письмо на ${email}`,
+    login: t('auth.sub.login'),
+    register: t('auth.sub.register'),
+    forgot: emailEnabled ? t('auth.sub.forgotEnabled') : t('auth.sub.forgotDisabled'),
+    check_email: t('auth.sub.checkEmail', { email }),
   }[mode]
 
   return (
@@ -174,14 +176,14 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
         aria-labelledby="am-title"
         onClick={e => e.stopPropagation()}
       >
-        <button type="button" className="am-close" onClick={onClose} aria-label="Закрыть">✕</button>
+        <button type="button" className="am-close" onClick={onClose} aria-label={t('auth.close')}>✕</button>
         <h2 id="am-title" className="am-title">{title}</h2>
         <p className="am-sub">{sub}</p>
 
         {mode !== 'check_email' && googleClientId && (
           <>
             <div ref={googleBtnRef} className="am-google" />
-            <div className="am-or"><span>или</span></div>
+            <div className="am-or"><span>{t('auth.or')}</span></div>
           </>
         )}
 
@@ -190,15 +192,15 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
             {info && <div className="am-info" role="status">{info}</div>}
             {error && <div className="am-error" role="alert">{error}</div>}
             <button type="button" className="am-submit" onClick={resend} disabled={busy}>
-              {busy ? '...' : 'Отправить письмо ещё раз'}
+              {busy ? '...' : t('auth.resend')}
             </button>
             <button type="button" className="am-linkish" onClick={() => { setMode('login'); setError(null) }}>
-              Ко входу
+              {t('auth.backToLogin')}
             </button>
           </div>
         ) : (
           <form onSubmit={submit} className="am-form">
-            <label className="am-label" htmlFor="am-email">Email</label>
+            <label className="am-label" htmlFor="am-email">{t('auth.email')}</label>
             <input
               id="am-email"
               ref={firstFieldRef}
@@ -212,13 +214,13 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
             />
             {mode !== 'forgot' && (
               <>
-                <label className="am-label" htmlFor="am-password">Пароль</label>
+                <label className="am-label" htmlFor="am-password">{t('auth.password')}</label>
                 <input
                   id="am-password"
                   className="am-input"
                   type="password"
                   autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                  placeholder="Пароль (мин. 8 символов)"
+                  placeholder={t('auth.passwordPlaceholder')}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   required
@@ -230,9 +232,9 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
             {info && <div className="am-info" role="status">{info}</div>}
             <button className="am-submit" type="submit" disabled={busy || (mode === 'forgot' && !emailEnabled)}>
               {busy ? '...' : (
-                mode === 'login' ? 'Войти'
-                  : mode === 'register' ? 'Зарегистрироваться'
-                    : 'Отправить ссылку'
+                mode === 'login' ? t('auth.submit.login')
+                  : mode === 'register' ? t('auth.submit.register')
+                    : t('auth.submit.forgot')
               )}
             </button>
           </form>
@@ -241,16 +243,16 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
         <div className="am-switch">
           {mode === 'login' && (
             <>
-              <button type="button" onClick={() => { setMode('forgot'); setError(null); setInfo(null) }}>Забыли пароль?</button>
+              <button type="button" onClick={() => { setMode('forgot'); setError(null); setInfo(null) }}>{t('auth.forgotLink')}</button>
               <span className="am-dot">·</span>
-              Нет аккаунта? <button type="button" onClick={() => { setMode('register'); setError(null); setInfo(null) }}>Регистрация</button>
+              {t('auth.noAccount')} <button type="button" onClick={() => { setMode('register'); setError(null); setInfo(null) }}>{t('auth.registerLink')}</button>
             </>
           )}
           {mode === 'register' && (
-            <>Уже есть аккаунт? <button type="button" onClick={() => { setMode('login'); setError(null); setInfo(null) }}>Войти</button></>
+            <>{t('auth.haveAccount')} <button type="button" onClick={() => { setMode('login'); setError(null); setInfo(null) }}>{t('auth.loginLink')}</button></>
           )}
           {mode === 'forgot' && (
-            <>Вспомнили? <button type="button" onClick={() => { setMode('login'); setError(null); setInfo(null) }}>Войти</button></>
+            <>{t('auth.rememberedLink')} <button type="button" onClick={() => { setMode('login'); setError(null); setInfo(null) }}>{t('auth.loginLink')}</button></>
           )}
         </div>
 

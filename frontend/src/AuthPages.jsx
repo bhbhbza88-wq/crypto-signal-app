@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, setToken } from './api'
+import { useI18n } from './i18n'
 
 export function VerifyEmailPage() {
+  const { t } = useI18n()
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const [status, setStatus] = useState('loading') // loading | ok | err
@@ -12,30 +14,31 @@ export function VerifyEmailPage() {
     const token = params.get('token')
     if (!token) {
       setStatus('err')
-      setMessage('Нет токена в ссылке')
+      setMessage(t('auth.verify.noToken'))
       return
     }
     api.verifyEmail(token)
       .then((res) => {
         setToken(res.token)
         setStatus('ok')
-        setMessage('Email подтверждён. Переходим в кабинет…')
+        setMessage(t('auth.verify.success'))
         setTimeout(() => navigate('/app/overview', { replace: true }), 1200)
       })
       .catch((err) => {
         setStatus('err')
-        setMessage(err.message || 'Не удалось подтвердить')
+        setMessage(err.message || t('auth.verify.failed'))
       })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, navigate])
 
   return (
-    <AuthShell title="Подтверждение email">
-      {status === 'loading' && <p className="as-muted">Проверяем ссылку…</p>}
+    <AuthShell title={t('auth.verify.title')}>
+      {status === 'loading' && <p className="as-muted">{t('auth.verify.checking')}</p>}
       {status === 'ok' && <p className="as-ok">{message}</p>}
       {status === 'err' && (
         <>
           <p className="as-err">{message}</p>
-          <Link to="/" className="as-link">На главную</Link>
+          <Link to="/" className="as-link">{t('auth.verify.home')}</Link>
         </>
       )}
     </AuthShell>
@@ -43,6 +46,7 @@ export function VerifyEmailPage() {
 }
 
 export function ResetPasswordPage() {
+  const { t } = useI18n()
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const token = params.get('token') || ''
@@ -55,15 +59,15 @@ export function ResetPasswordPage() {
     e.preventDefault()
     setError(null)
     if (password.length < 8) {
-      setError('Пароль минимум 8 символов')
+      setError(t('auth.reset.minLength'))
       return
     }
     if (password !== password2) {
-      setError('Пароли не совпадают')
+      setError(t('auth.reset.mismatch'))
       return
     }
     if (!token) {
-      setError('Нет токена в ссылке')
+      setError(t('auth.reset.noToken'))
       return
     }
     setBusy(true)
@@ -79,15 +83,15 @@ export function ResetPasswordPage() {
   }
 
   return (
-    <AuthShell title="Новый пароль">
+    <AuthShell title={t('auth.reset.title')}>
       {!token ? (
         <>
-          <p className="as-err">Ссылка неполная — запроси сброс пароля ещё раз.</p>
-          <Link to="/" className="as-link">На главную</Link>
+          <p className="as-err">{t('auth.reset.incompleteLink')}</p>
+          <Link to="/" className="as-link">{t('auth.verify.home')}</Link>
         </>
       ) : (
         <form onSubmit={submit} className="as-form">
-          <label className="as-label">Новый пароль</label>
+          <label className="as-label">{t('auth.reset.newPassword')}</label>
           <input
             className="as-input"
             type="password"
@@ -97,7 +101,7 @@ export function ResetPasswordPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
           />
-          <label className="as-label">Ещё раз</label>
+          <label className="as-label">{t('auth.reset.repeat')}</label>
           <input
             className="as-input"
             type="password"
@@ -109,7 +113,7 @@ export function ResetPasswordPage() {
           />
           {error && <p className="as-err">{error}</p>}
           <button className="as-btn" type="submit" disabled={busy}>
-            {busy ? '...' : 'Сохранить и войти'}
+            {busy ? '...' : t('auth.reset.save')}
           </button>
         </form>
       )}

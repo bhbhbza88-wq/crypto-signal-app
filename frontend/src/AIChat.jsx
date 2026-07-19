@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { api } from './api'
+import { useI18n } from './i18n'
 
 // Инлайновый markdown: **жирный** и `код`. Возвращает массив React-узлов.
 function renderInline(text, keyPrefix) {
@@ -57,21 +58,15 @@ function MarkdownMessage({ content }) {
   )
 }
 
-const SUGGESTIONS = [
-  'Разбери текущий открытый сетап: bias, invalidation, R:R',
-  'Где слабость в активном сигнале относительно BTC?',
-  'Что должно случиться, чтобы сетап считать сорванным?',
-  'Сравни риск до стопа и потенциал до TP1/TP2',
-  'Как читать ADX и режим рынка на наших монетах сейчас?',
-  'Когда лучше пропустить вход даже при «красивом» сигнале?',
-]
-
 export default function AIChat() {
+  const { t, lang } = useI18n()
+  const SUGGESTIONS = useMemo(() => [
+    t('ai.chip1'), t('ai.chip2'), t('ai.chip3'), t('ai.chip4'), t('ai.chip5'), t('ai.chip6'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [lang])
+
   const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      content: 'Nick · desk analyst NOWICKI. Могу разобрать открытый сетап по уровням (bias → invalidation → R:R), режим рынка и риски относительно BTC. Без школьных лекций — спрашивай по делу.'
-    }
+    { role: 'assistant', content: t('ai.greeting') }
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -111,15 +106,15 @@ export default function AIChat() {
         <div className="chat-header-left">
           <div className="ai-avatar">AI</div>
           <div>
-            <span className="chat-title">NOWICKI Desk</span>
-            <span className="chat-sub">Разбор сетапов, риск и контекст рынка</span>
+            <span className="chat-title">{t('ai.deskTitle')}</span>
+            <span className="chat-sub">{t('ai.deskSub')}</span>
           </div>
         </div>
         <div className="chat-header-right">
-          {quota && <span className="quota-text">{quota.used}/{quota.limit} сегодня</span>}
+          {quota && <span className="quota-text">{t('ai.quotaToday', { used: quota.used, limit: quota.limit })}</span>}
           <div className="ai-status">
             <span className="status-dot" />
-            <span className="status-text">Online</span>
+            <span className="status-text">{t('ai.online')}</span>
           </div>
         </div>
       </div>
@@ -164,7 +159,7 @@ export default function AIChat() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage(input)}
-          placeholder="Спроси про invalidation, R:R, BTC-контекст…"
+          placeholder={t('ai.placeholder')}
           disabled={loading}
         />
         <button className="send-btn" onClick={() => sendMessage(input)} disabled={loading || !input.trim()}>

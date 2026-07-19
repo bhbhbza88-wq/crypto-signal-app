@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts'
 import { api } from './api'
 import {
-  useLivePrices, CountUp, useReveal, RESULT_LABEL,
+  useLivePrices, CountUp, useReveal, resultLabel,
   TG_BOT, TG_RESULTS_CHANNEL, TG_PREMIUM,
   polishHistory, polishStats, buildShowcaseCurve,
 } from './shared'
@@ -36,19 +36,7 @@ function useLiveStats() {
   return { stats, recent, curve, display }
 }
 
-const FAQ = [
-  { q: 'Как NOWICKI находит сигналы?', a: 'AI-сканер круглосуточно анализирует рынок на Bybit: тренд, волатильность, объём и уровни. Когда условия сходятся — появляется сигнал с entry, stop и целями.' },
-  { q: 'Откуда берётся статистика?', a: 'Каждая сделка сверяется с реальными ценами Bybit. На платформе видно открытие, цели и итог — решение входить всегда за тобой.' },
-  { q: 'Может ли NOWICKI торговать за меня?', a: 'Нет. Мы даём сигналы и аналитику — вход и риск-менеджмент остаются у тебя.' },
-  { q: 'Сколько стоит?', a: 'Базовый доступ бесплатный. Premium — $29/мес, оплата криптой через Telegram-бота.' },
-]
-
-const TIERS = [
-  { key: 'free', name: 'Free', price: '0', unit: 'навсегда', features: ['Живая лента сигналов', 'Винрейт открыт всем', 'AI-ассистент (5/день)'] },
-  { key: 'premium', name: 'Premium', price: '29', unit: '/мес', features: ['Полная история сделок', 'PnL по дням и TP/SL', 'AI-ассистент (50/день)'], popular: true },
-]
-
-function LiveScanner({ prices }) {
+function LiveScanner({ prices, t }) {
   const [idx, setIdx] = useState(0)
   const [log, setLog] = useState([])
   useEffect(() => {
@@ -56,14 +44,15 @@ function LiveScanner({ prices }) {
       setIdx(i => {
         const next = (i + 1) % SCAN_COINS.length
         const coin = SCAN_COINS[next]
-        const actions = ['скан объёма', 'проверка ADX', 'EMA crossover', 'ATR-фильтр', 'score ≥ 14']
+        const actions = [t('land.scan.a1'), t('land.scan.a2'), t('land.scan.a3'), t('land.scan.a4'), t('land.scan.a5')]
         const action = actions[next % actions.length]
         setLog(prev => [`${coin}/USDT · ${action}`, ...prev].slice(0, 5))
         return next
       })
     }, 900)
     return () => clearInterval(id)
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t])
 
   const active = SCAN_COINS[idx]
   return (
@@ -95,7 +84,7 @@ function LiveScanner({ prices }) {
           })}
         </div>
         <div className="scan-feed">
-          <div className="scan-now">Сканирую <b>{active}/USDT</b></div>
+          <div className="scan-now">{t('land.scan.now')} <b>{active}/USDT</b></div>
           <ul>
             {log.map((line, i) => <li key={`${line}-${i}`}>{line}</li>)}
           </ul>
@@ -107,10 +96,28 @@ function LiveScanner({ prices }) {
 
 export default function Landing() {
   const navigate = useNavigate()
-  const { lang, setLang, locales } = useI18n()
+  const { t, lang, setLang, locales } = useI18n()
   const prices = useLivePrices()
   const { recent, curve, display } = useLiveStats()
   const [openFaq, setOpenFaq] = useState(null)
+
+  const FAQ = useMemo(() => [
+    { q: t('land.faq.q1'), a: t('land.faq.a1') },
+    { q: t('land.faq.q2'), a: t('land.faq.a2') },
+    { q: t('land.faq.q3'), a: t('land.faq.a3') },
+    { q: t('land.faq.q4'), a: t('land.faq.a4') },
+  ], [t])
+
+  const TIERS = useMemo(() => [
+    {
+      key: 'free', name: t('land.tier.free.name'), price: '0', unit: t('land.tier.free.unit'),
+      features: [t('land.tier.free.f1'), t('land.tier.free.f2'), t('land.tier.free.f3')],
+    },
+    {
+      key: 'premium', name: t('land.tier.premium.name'), price: '29', unit: t('land.tier.premium.unit'),
+      features: [t('land.tier.premium.f1'), t('land.tier.premium.f2'), t('land.tier.premium.f3')], popular: true,
+    },
+  ], [t])
   const [menuOpen, setMenuOpen] = useState(false)
   const [dark, setDark] = useState(() => {
     const s = localStorage.getItem('theme')
@@ -136,17 +143,17 @@ export default function Landing() {
 
   return (
     <div className="lp">
-      <nav className="navbar glass" aria-label="Главная навигация">
+      <nav className="navbar glass" aria-label={t('land.nav.aria')}>
         <div className="nav-inner">
           <button type="button" className="nav-logo" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
             <span className="nav-mark">N</span>
             <span className="nav-word">NOWICKI</span>
           </button>
           <div className={`nav-links ${menuOpen ? 'open' : ''}`}>
-            <a href="#signals" onClick={e => { e.preventDefault(); go('#signals') }}>Сигналы</a>
-            <a href="#pricing" onClick={e => { e.preventDefault(); go('#pricing') }}>Тарифы</a>
-            <a href="#about" onClick={e => { e.preventDefault(); go('#about') }}>О сканере</a>
-            <a href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">Результаты</a>
+            <a href="#signals" onClick={e => { e.preventDefault(); go('#signals') }}>{t('land.nav.signals')}</a>
+            <a href="#pricing" onClick={e => { e.preventDefault(); go('#pricing') }}>{t('land.nav.pricing')}</a>
+            <a href="#about" onClick={e => { e.preventDefault(); go('#about') }}>{t('land.nav.about')}</a>
+            <a href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">{t('land.nav.results')}</a>
           </div>
           <div className="nav-right">
             <div className="lang-switch" role="group" aria-label="Language">
@@ -161,12 +168,12 @@ export default function Landing() {
                 </button>
               ))}
             </div>
-            <button type="button" className="theme-btn" aria-label="Сменить тему" onClick={() => setDark(d => !d)}>
+            <button type="button" className="theme-btn" aria-label={t('land.theme.aria')} onClick={() => setDark(d => !d)}>
               {dark ? '☀' : '☾'}
             </button>
-            <button type="button" className="btn-ghost" onClick={() => navigate('/app/overview?auth=login')}>Войти</button>
-            <button type="button" className="btn-solid" onClick={() => navigate('/app/overview?auth=register')}>Начать</button>
-            <button type="button" className="burger" aria-label="Меню" aria-expanded={menuOpen} onClick={() => setMenuOpen(o => !o)}>
+            <button type="button" className="btn-ghost" onClick={() => navigate('/app/overview?auth=login')}>{t('top.login')}</button>
+            <button type="button" className="btn-solid" onClick={() => navigate('/app/overview?auth=register')}>{t('land.start')}</button>
+            <button type="button" className="burger" aria-label={t('land.menu.aria')} aria-expanded={menuOpen} onClick={() => setMenuOpen(o => !o)}>
               <span /><span /><span />
             </button>
           </div>
@@ -177,31 +184,28 @@ export default function Landing() {
         <div className="hero-plane" aria-hidden="true" />
         <div className="hero-grid">
           <div className="hero-copy animate-in">
-            <span className="eyebrow"><span className="live-dot" /> AI-сканер онлайн</span>
-            <h1>Находим точки входа,<br />пока рынок шумит</h1>
-            <p>
-              NOWICKI сканирует крипторынок 24/7 и выдаёт сигналы с entry, stop и целями.
-              Решение всегда за тобой — мы даём ясный сетап.
-            </p>
+            <span className="eyebrow"><span className="live-dot" /> {t('land.hero.eyebrow')}</span>
+            <h1>{t('land.hero.titleLine1')}<br />{t('land.hero.titleLine2')}</h1>
+            <p>{t('land.hero.desc')}</p>
             <div className="hero-cta">
               <button type="button" className="btn-solid lg" onClick={() => navigate('/app/overview?auth=register')}>
-                Смотреть сигналы
+                {t('land.hero.ctaSignals')}
               </button>
               <button type="button" className="btn-ghost lg" onClick={() => go('#signals')}>
-                Трек-рекорд
+                {t('land.hero.ctaTrack')}
               </button>
             </div>
             <div className="hero-stats">
-              <div><CountUp className="hs-num" value={display.winrate} suffix="%" /><span>винрейт</span></div>
-              <div><CountUp className="hs-num" value={display.total} /><span>сделок</span></div>
-              <div><span className="hs-num pos">+{display.avgPnl}%</span><span>ср. PnL</span></div>
+              <div><CountUp className="hs-num" value={display.winrate} suffix="%" /><span>{t('land.hero.statWinrate')}</span></div>
+              <div><CountUp className="hs-num" value={display.total} /><span>{t('land.hero.statTrades')}</span></div>
+              <div><span className="hs-num pos">+{display.avgPnl}%</span><span>{t('land.hero.statAvgPnl')}</span></div>
             </div>
           </div>
           <div className="hero-stage animate-in">
-            <LiveScanner prices={prices} />
+            <LiveScanner prices={prices} t={t} />
             <div className="equity-mini">
               <div className="eq-meta">
-                <span>Equity · сканер</span>
+                <span>{t('land.equity.label')}</span>
                 <strong className={up ? 'pos' : 'neg'}>
                   {totalRoi != null ? `${up ? '+' : ''}${totalRoi.toFixed(1)}%` : '—'}
                 </strong>
@@ -223,36 +227,36 @@ export default function Landing() {
 
       <section id="signals" className="section">
         <div className="inner">
-          <h2 className="sec-title reveal">Последние сигналы сканера</h2>
-          <p className="sec-sub reveal">Живые сетапы с уровнями и результатом на Bybit. Полная лента — на Premium.</p>
+          <h2 className="sec-title reveal">{t('land.signals.title')}</h2>
+          <p className="sec-sub reveal">{t('land.signals.sub')}</p>
           <div className="signal-lock-wrap reveal">
             <div className="signal-rows signal-blur">
-              {recent.map((t) => {
-                const pos = (t.pnl ?? 0) >= 0
+              {recent.map((row) => {
+                const pos = (row.pnl ?? 0) >= 0
                 return (
-                  <div key={t.id} className="sig-row" aria-hidden="true">
-                    <span className="mono">{t.symbol.replace('/USDT', '')}</span>
-                    <span className={`dir ${t.signal === 'LONG' ? 'long' : 'short'}`}>{t.signal}</span>
-                    <span className="muted">{RESULT_LABEL[t.result] || t.result}</span>
-                    <span className={`mono ${pos ? 'pos' : 'neg'}`}>{pos ? '+' : ''}{t.pnl}%</span>
+                  <div key={row.id} className="sig-row" aria-hidden="true">
+                    <span className="mono">{row.symbol.replace('/USDT', '')}</span>
+                    <span className={`dir ${row.signal === 'LONG' ? 'long' : 'short'}`}>{row.signal}</span>
+                    <span className="muted">{resultLabel(t, row.result)}</span>
+                    <span className={`mono ${pos ? 'pos' : 'neg'}`}>{pos ? '+' : ''}{row.pnl}%</span>
                   </div>
                 )
               })}
-              {!recent.length && <div className="muted pad">Сканер готовит ленту…</div>}
+              {!recent.length && <div className="muted pad">{t('land.signals.empty')}</div>}
             </div>
             {!!recent.length && (
               <div className="signal-lock">
                 <span className="signal-lock-icon">🔒</span>
-                <span className="signal-lock-text">Полная история сделок и PnL — на Premium</span>
+                <span className="signal-lock-text">{t('land.signals.lockText')}</span>
                 <button
                   type="button"
                   className="btn-solid"
                   onClick={() => window.open(`${TG_BOT}?start=premium`, '_blank', 'noopener,noreferrer')}
                 >
-                  Открыть за Premium →
+                  {t('land.signals.unlock')}
                 </button>
-                <button type="button" className="btn-ghost" onClick={() => navigate('/app/pricing?auth=register')}>
-                  3 дня триала на сайте
+                <button type="button" className="btn-ghost" onClick={() => navigate('/app/overview?auth=register')}>
+                  {t('land.signals.registerCta')}
                 </button>
               </div>
             )}
@@ -263,41 +267,41 @@ export default function Landing() {
       <section id="about" className="section alt">
         <div className="inner about">
           <div className="reveal">
-            <h2 className="sec-title">Собственный AI-сканер</h2>
+            <h2 className="sec-title">{t('land.about.title')}</h2>
             <ul className="honest-list">
-              <li>Мультифакторный анализ: тренд, сила движения, риск и объём</li>
-              <li>Сигнал всегда с entry / stop / TP — без размытых «покупай»</li>
-              <li>Сверка с реальными ценами Bybit после закрытия</li>
-              <li>Уведомления в Telegram, когда появляется новый вход</li>
+              <li>{t('land.about.b1')}</li>
+              <li>{t('land.about.b2')}</li>
+              <li>{t('land.about.b3')}</li>
+              <li>{t('land.about.b4')}</li>
             </ul>
           </div>
           <div className="honest-cta reveal">
-            <a className="btn-solid" href={TG_BOT} target="_blank" rel="noopener noreferrer">Открыть бота</a>
-            <a className="btn-ghost" href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">Смотреть результаты</a>
+            <a className="btn-solid" href={TG_BOT} target="_blank" rel="noopener noreferrer">{t('land.about.openBot')}</a>
+            <a className="btn-ghost" href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">{t('land.about.viewResults')}</a>
           </div>
         </div>
       </section>
 
       <section id="pricing" className="section">
         <div className="inner">
-          <h2 className="sec-title reveal">Тарифы</h2>
-          <p className="sec-sub reveal">3 дня Premium при регистрации. Дальше — оплата криптой в боте.</p>
+          <h2 className="sec-title reveal">{t('land.pricing.title')}</h2>
+          <p className="sec-sub reveal">{t('land.pricing.sub')}</p>
           <div className="price-grid reveal">
-            {TIERS.map(t => (
-              <div key={t.key} className={`price-card ${t.popular ? 'popular' : ''}`}>
-                {t.popular && <span className="pop">Популярный</span>}
-                <div className="price-name">{t.name}</div>
-                <div className="price-amt">${t.price}<small>{t.unit}</small></div>
-                <ul>{t.features.map(f => <li key={f}>{f}</li>)}</ul>
+            {TIERS.map(tier => (
+              <div key={tier.key} className={`price-card ${tier.popular ? 'popular' : ''}`}>
+                {tier.popular && <span className="pop">{t('land.pricing.popular')}</span>}
+                <div className="price-name">{tier.name}</div>
+                <div className="price-amt">${tier.price}<small>{tier.unit}</small></div>
+                <ul>{tier.features.map(f => <li key={f}>{f}</li>)}</ul>
                 <button
                   type="button"
                   className="btn-solid"
                   onClick={() => {
-                    if (t.key === 'free') navigate('/app/overview')
+                    if (tier.key === 'free') navigate('/app/overview')
                     else window.open(`${TG_BOT}?start=premium`, '_blank', 'noopener,noreferrer')
                   }}
                 >
-                  {t.key === 'free' ? 'Открыть Free' : 'Оформить в Telegram'}
+                  {tier.key === 'free' ? t('land.tier.free.cta') : t('land.tier.premium.cta')}
                 </button>
               </div>
             ))}
@@ -307,7 +311,7 @@ export default function Landing() {
 
       <section className="section alt">
         <div className="inner">
-          <h2 className="sec-title reveal">Частые вопросы</h2>
+          <h2 className="sec-title reveal">{t('land.faq.title')}</h2>
           <div className="faq reveal">
             {FAQ.map((f, i) => (
               <div key={f.q} className={`faq-item ${openFaq === i ? 'open' : ''}`}>
@@ -326,15 +330,15 @@ export default function Landing() {
         <div className="inner foot">
           <div>
             <div className="nav-word">NOWICKI</div>
-            <p className="muted">AI-сканер крипторынка. Сигналы с уровнями и трек-рекордом на Bybit.</p>
+            <p className="muted">{t('land.footer.desc')}</p>
           </div>
           <div className="foot-links">
-            <a href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">Результаты</a>
-            <a href={TG_PREMIUM} target="_blank" rel="noopener noreferrer">Premium</a>
-            <a href={TG_BOT} target="_blank" rel="noopener noreferrer">Бот</a>
-            <button type="button" onClick={() => navigate('/app/overview')}>Платформа</button>
+            <a href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">{t('land.footer.results')}</a>
+            <a href={TG_PREMIUM} target="_blank" rel="noopener noreferrer">{t('land.footer.premium')}</a>
+            <a href={TG_BOT} target="_blank" rel="noopener noreferrer">{t('land.footer.bot')}</a>
+            <button type="button" onClick={() => navigate('/app/overview')}>{t('land.footer.platform')}</button>
           </div>
-          <div className="muted small">© 2026 NOWICKI. Не является финансовой рекомендацией.</div>
+          <div className="muted small">{t('land.footer.disclaimer', { year: new Date().getFullYear() })}</div>
         </div>
       </footer>
 
