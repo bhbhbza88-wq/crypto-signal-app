@@ -177,34 +177,39 @@ def fire_close(symbol: str, side: str, result: str, pnl: float,
     })
 
 
-# Пул монет для практики: (символ, типичная цена входа) — чтобы карточка
-# выглядела правдоподобно (правильный порядок цены/дробность для каждой монеты).
-_PRACTICE_COINS = [
-    ("BTC/USDT", (58000.0, 72000.0)),
-    ("ETH/USDT", (2400.0, 3600.0)),
-    ("SOL/USDT", (120.0, 200.0)),
-    ("BNB/USDT", (520.0, 680.0)),
-    ("XRP/USDT", (0.42, 0.75)),
-    ("ADA/USDT", (0.32, 0.55)),
-    ("DOGE/USDT", (0.10, 0.22)),
-    ("TON/USDT", (5.5, 8.5)),
-    ("AVAX/USDT", (22.0, 42.0)),
-    ("LINK/USDT", (11.0, 19.0)),
-    ("MATIC/USDT", (0.45, 0.85)),
-    ("LTC/USDT", (65.0, 95.0)),
-    ("TRX/USDT", (0.09, 0.16)),
-    ("NEAR/USDT", (4.0, 8.0)),
-    ("DOT/USDT", (5.0, 9.0)),
+# Пул монет для практики. Цена входа/выхода теперь берётся с реальной биржи
+# (data_layer.fetch_ticker) — диапазоны ниже используются только как fallback,
+# если тикер недоступен (нет сети/монета делистнута).
+_PRACTICE_SYMBOLS = [
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT",
+    "ADA/USDT", "DOGE/USDT", "TON/USDT", "AVAX/USDT", "LINK/USDT",
+    "MATIC/USDT", "LTC/USDT", "TRX/USDT", "NEAR/USDT", "DOT/USDT",
 ]
+_PRACTICE_FALLBACK_RANGE = {
+    "BTC/USDT": (58000.0, 72000.0), "ETH/USDT": (2400.0, 3600.0),
+    "SOL/USDT": (120.0, 200.0), "BNB/USDT": (520.0, 680.0),
+    "XRP/USDT": (0.42, 0.75), "ADA/USDT": (0.32, 0.55),
+    "DOGE/USDT": (0.10, 0.22), "TON/USDT": (5.5, 8.5),
+    "AVAX/USDT": (22.0, 42.0), "LINK/USDT": (11.0, 19.0),
+    "MATIC/USDT": (0.45, 0.85), "LTC/USDT": (65.0, 95.0),
+    "TRX/USDT": (0.09, 0.16), "NEAR/USDT": (4.0, 8.0), "DOT/USDT": (5.0, 9.0),
+}
 
 
-def _random_practice_params() -> tuple[str, str, float, float]:
-    """Случайные symbol/side/entry/pnl для практики — каждый раз другая монета и %."""
-    symbol, (lo, hi) = random.choice(_PRACTICE_COINS)
-    entry = round(random.uniform(lo, hi), 6 if hi < 1 else 2)
+def _random_practice_params() -> tuple[str, str, float]:
+    """Случайные symbol/side/pnl для практики — конкретную цену входа/выхода
+    берём позже с реального рынка (нужен свежий тикер, а не рандом по времени)."""
+    symbol = random.choice(_PRACTICE_SYMBOLS)
     side = "LONG" if random.random() < 0.8 else "SHORT"
     pnl = round(random.uniform(1.5, 6.5), 2)  # сырой % движения, ROI = pnl × leverage
-    return symbol, side, entry, pnl
+    return symbol, side, pnl
+
+
+def _entry_from_real_price(exit_price: float, side: str, pnl_pct: float) -> float:
+    """По актуальной цене и заданному % считаем, откуда должен был быть вход."""
+    if side.upper() == "LONG":
+        return exit_price / (1 + pnl_pct / 100.0)
+    return exit_price / (1 - pnl_pct / 100.0)
 
 
 def fire_practice_profit(
@@ -217,8 +222,9 @@ def fire_practice_profit(
 ) -> tuple[bool, str]:
     """Практика: карточка профита + текст одному контакту/чату (по умолчанию Kupyansk_2).
 
-    Если symbol/side/entry/pnl не переданы — берутся случайно из пула монет,
-    чтобы карточки не были всегда «BTC +39%», а выглядели живыми и разными.
+    Если symbol/side/pnl не переданы — берутся случайно, чтобы карточки не были
+    всегда «BTC +39%». Цена входа/выхода тянется с реальной биржи в момент
+    отправки (см. _do_practice_profit) — не рандомная, а актуальная рыночная.
     """
     if not is_configured():
         return False, "chat_engage не сконфигурирован"
@@ -228,10 +234,9 @@ def fire_practice_profit(
     if not target:
         return False, "не указан target"
 
-    r_symbol, r_side, r_entry, r_pnl = _random_practice_params()
+    r_symbol, r_side, r_pnl = _random_practice_params()
     symbol = symbol or r_symbol
-    side = side or r_side
-    entry = entry if entry is not None else r_entry
+    side = (side or r_side).upper()
     pnl = pnl if pnl is not None else r_pnl
 
     _enqueue({
@@ -239,9 +244,9 @@ def fire_practice_profit(
         "target": target,
         "symbol": symbol,
         "side": side,
-        "entry": entry,
+        "entry": entry,        # None → взять реальную цену и посчитать вход
         "pnl": pnl,
-        "exit_price": exit_price,
+        "exit_price": exit_price,  # None → взять реальную текущую цену
     })
     return True, f"практика профита → @{target}: {symbol} {side} +{pnl:.2f}%"
 
@@ -294,8 +299,38 @@ async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
     db.clear_chat_engage_posts(symbol)
 
 
+async def _resolve_practice_prices(symbol: str, side: str, pnl: float,
+                                    entry: float | None, exit_price: float | None) -> tuple[float, float]:
+    """Тянем реальную рыночную цену и считаем вход/выход так, чтобы движение
+    точно совпадало с pnl% и было привязано к текущей цене монеты (не к рандому)."""
+    if entry is not None and exit_price is not None:
+        return float(entry), float(exit_price)
+
+    real_last = None
+    try:
+        import data_layer
+        ticker = await asyncio.to_thread(data_layer.fetch_ticker, symbol)
+        if ticker and ticker.get("last"):
+            real_last = float(ticker["last"])
+    except Exception as e:
+        print(f"[chat_engage] fetch_ticker {symbol}: {e}")
+
+    if real_last is None:
+        lo, hi = _PRACTICE_FALLBACK_RANGE.get(symbol, (1.0, 100.0))
+        real_last = random.uniform(lo, hi)
+        print(f"[chat_engage] тикер {symbol} недоступен — fallback-цена {real_last}")
+
+    if exit_price is None:
+        exit_price = real_last
+    if entry is None:
+        entry = _entry_from_real_price(exit_price, side, pnl)
+    return float(entry), float(exit_price)
+
+
 async def _do_practice_profit(client, target: str, symbol: str, side: str,
-                              entry: float, pnl: float, exit_price=None) -> None:
+                              pnl: float, entry: float | None = None,
+                              exit_price: float | None = None) -> None:
+    entry, exit_price = await _resolve_practice_prices(symbol, side, pnl, entry, exit_price)
     text = await _line_close(symbol, float(pnl))
     photo = None
     try:
@@ -304,7 +339,7 @@ async def _do_practice_profit(client, target: str, symbol: str, side: str,
         print(f"[chat_engage] practice card: {e}")
     try:
         await _send_profit(client, target, text, photo)
-        print(f"[chat_engage] practice → {target}: {text!r}")
+        print(f"[chat_engage] practice → {target}: {symbol} {side} вход {entry} → {exit_price} ({text!r})")
     except Exception as e:
         print(f"[chat_engage] practice fail {target}: {e}")
 
@@ -327,8 +362,8 @@ async def _worker_loop(client):
                     job["target"],
                     job["symbol"],
                     job["side"],
-                    job["entry"],
                     job["pnl"],
+                    entry=job.get("entry"),
                     exit_price=job.get("exit_price"),
                 )
         except Exception as e:
