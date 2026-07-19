@@ -393,6 +393,39 @@ def admin_chat_engage_test(req: ChatEngageTestRequest, admin=Depends(require_adm
     return {"ok": True, "detail": msg, "chat": req.chat.lstrip("@"), "fast": req.fast}
 
 
+class ChatStyleIngestRequest(BaseModel):
+    chats: list[str] | None = None
+
+
+@app.post("/api/admin/chat-style-ingest")
+def admin_chat_style_ingest(req: ChatStyleIngestRequest = ChatStyleIngestRequest(),
+                            admin=Depends(require_admin)):
+    """Скачать историю из чатов-учителей (по умолчанию Binance RU + cryptoinside)."""
+    import chat_engage
+    import chat_style
+    chats = req.chats or chat_style.STYLE_SOURCE_CHATS
+    ok, msg = chat_engage.fire_style_ingest(chats)
+    if not ok:
+        raise HTTPException(status_code=503, detail=msg)
+    return {
+        "ok": True,
+        "detail": msg,
+        "chats": chats,
+        "samples_now": db.count_chat_style_samples(),
+    }
+
+
+@app.get("/api/admin/chat-style-stats")
+def admin_chat_style_stats(admin=Depends(require_admin)):
+    import chat_style
+    samples = db.list_chat_style_samples(limit=12)
+    return {
+        "total": db.count_chat_style_samples(),
+        "source_chats": chat_style.STYLE_SOURCE_CHATS,
+        "preview": [s["text"] for s in samples],
+    }
+
+
 @app.get("/api/admin/premium-requests")
 def admin_premium_requests(admin=Depends(require_admin)):
     """Последние заявки «Я оплатил» из Telegram-бота."""

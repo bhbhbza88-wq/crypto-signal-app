@@ -124,28 +124,23 @@ def _pick_unique(candidates: list[str], recent: list[str], remember: int = 8) ->
 
 
 def _greet_text() -> str:
-    """Лёгкий small-talk без монет и ссылок — до ТВХ."""
+    """Fallback, если AI/стиль недоступны — короче и живее."""
     templates = [
-        "Всем привет, как дела?",
-        "Здарова народ, как рынок сегодня?",
-        "Привет, кто на месте?",
-        "Ку, как настроение по рынку?",
-        "Всем здарова, живы?",
-        "Приветик, как у всех дела?",
-        "Йо, что по рынку думаете?",
-        "Здарова, тихо сегодня или кто-то в сделках?",
-        "Всем ку, как настроение?",
-        "Привет всем, как день проходит?",
-        "Здарова, кто на графиках?",
-        "Всем привет, как оно?",
-        "Ку люди, что смотрите?",
-        "Привет, есть кто живой?",
-        "Здарова чат, как настрой?",
-        "Всем хай, спокойный день?",
-        "Привет, как у вас по позициям?",
-        "Йо народ, что интересного?",
-        "Всем ку, кто на месте напишите)",
-        "Здарова, просто чекнул чат",
+        "ку",
+        "здарова",
+        "всем ку",
+        "привет",
+        "как дела",
+        "как рынок",
+        "есть кто",
+        "че по рынку",
+        "здарова народ",
+        "ку, как оно",
+        "тихо сегодня?",
+        "всем привет",
+        "йо",
+        "ну че",
+        "как настроение",
     ]
     return _pick_unique(templates, _recent_greet, remember=10)
 
@@ -155,30 +150,20 @@ def _open_text(symbol: str, side: str, entry) -> str:
     side_ru = "лонг" if side == "LONG" else "шорт"
     e = _fmt_entry(entry)
     templates = [
-        f"Взял {side_ru} по {coin} от {e}, че думаете?",
-        f"Зашёл в {side_ru} по {coin} около {e}. Как вам сетап?",
-        f"Пробую {side_ru} {coin} от {e}, стоп короткий",
-        f"По {coin} взял {side_ru} с {e}, посмотрим",
-        f"Зашёл {coin} {side_ru} от {e}. Кто тоже смотрит?",
-        f"Взял такой {side_ru} по {coin}, вход {e}",
-        f"По {coin} открыл {side_ru} от {e}",
-        f"Залетел в {side_ru} по {coin}, {e}. Мнения?",
-        f"{coin} — взял {side_ru} около {e}",
-        f"Сегодня по {coin} зашёл в {side_ru} с {e}",
-        f"Глянул {coin}, открыл {side_ru} от {e}",
-        f"На копейку пробую {side_ru} {coin} от {e}",
-        f"Чувство что {coin} в {side_ru} пойдёт — уже зашёл от {e}",
-        f"По {coin} сетап норм, взял {side_ru} {e}",
-        f"Зашёл так по {coin}: {side_ru} от {e}",
-        f"Взял {side_ru} {coin}, вход {e}. Держу",
-        f"{coin} интересный, я в {side_ru} с {e}",
-        f"Короче {coin}, {side_ru} от {e}",
-        f"Поймал вход по {coin}, {side_ru} {e}",
-        f"Маленьким плечом взял {side_ru} {coin} от {e}",
-        f"Есть идея по {coin} — {side_ru} от {e}",
-        f"Зашёл по {coin} в {side_ru}, цена {e}. Кто с нами?",
-        f"Пробую такой {side_ru} по {coin} от {e}",
-        f"По {coin} уже в {side_ru} с {e}, поглядим",
+        f"взял {side_ru} {coin} от {e}",
+        f"зашёл {coin} {side_ru} ~{e}",
+        f"{coin} {side_ru} с {e}, посмотрим",
+        f"ну короче {coin} в {side_ru} от {e}",
+        f"пробую {coin} {side_ru} {e}",
+        f"залетела идея по {coin}, {side_ru} от {e}",
+        f"{coin} взял в {side_ru}",
+        f"я в {side_ru} по {coin} уже",
+        f"имхо {coin} норм в {side_ru} от {e}",
+        f"чекните {coin}, я {side_ru} от {e}",
+        f"маленько взял {coin} {side_ru}",
+        f"{coin} шортну" if side == "SHORT" else f"{coin} лонганул",
+        f"по {coin} зашёл, {e}",
+        f"есть вход по {coin} ({side_ru})",
     ]
     return _pick_unique(templates, _recent_open)
 
@@ -189,30 +174,46 @@ def _close_win_text(symbol: str, pnl: float) -> str:
     if show < 0:
         show = abs(show)
     templates = [
-        f"По {coin} закрыл, примерно +{show}%",
-        f"{coin} закрыл в плюс, около +{show}%",
-        f"По {coin} зафиксировал, вышло ~+{show}%",
-        f"Закрыл {coin}, +{show}% примерно. Норм зашло",
-        f"По той сделке {coin} вышли около +{show}%",
-        f"{coin} отработала, где-то +{show}%",
-        f"Вышел по {coin}, плюс около +{show}%",
-        f"По {coin} забрал +{show}% примерно",
-        f"Фиксанул {coin}, вышло +{show}%",
-        f"{coin} закрыл — плюс ~+{show}%. Приятно",
-        f"По {coin} всё, +{show}% в кармане",
-        f"Сделку по {coin} закрыл в плюс (+{show}%)",
-        f"Ок, {coin} дала около +{show}%",
-        f"По {coin} вышли чисто, примерно +{show}%",
-        f"Закрыл ту по {coin}, +{show}%",
-        f"{coin} зашла нормально, +{show}% примерно",
-        f"Зафиксировал {coin} около +{show}%",
-        f"По {coin} профит ~+{show}%",
-        f"Готово по {coin}: примерно +{show}%",
-        f"Та {coin} отработала на +{show}%",
-        f"Плюсанул по {coin}, где-то +{show}%",
-        f"По {coin} закрылись, +{show}%. Не космос, но ок",
+        f"{coin} закрыл +{show}%",
+        f"вышел с {coin}, плюс ~{show}%",
+        f"по {coin} забрал +{show}%",
+        f"{coin} отработала +{show}%",
+        f"фиксанул {coin} около +{show}%",
+        f"норм, {coin} +{show}%",
+        f"закрыл ту {coin}, +{show}%",
+        f"{coin} в плюс вышла",
     ]
     return _pick_unique(templates, _recent_close)
+
+
+async def _line_greet() -> str:
+    import chat_style
+    ai = await chat_style.compose_natural("greet")
+    return ai or _greet_text()
+
+
+async def _line_open(symbol: str, side: str, entry) -> str:
+    import chat_style
+    ai = await chat_style.compose_natural(
+        "open",
+        coin=_coin(symbol),
+        side_ru="лонг" if side == "LONG" else "шорт",
+        entry=_fmt_entry(entry),
+    )
+    return ai or _open_text(symbol, side, entry)
+
+
+async def _line_close(symbol: str, pnl: float) -> str:
+    import chat_style
+    show = polish_pnl(pnl, decimals=1)
+    if show < 0:
+        show = abs(show)
+    ai = await chat_style.compose_natural(
+        "close_win",
+        coin=_coin(symbol),
+        pnl_show=str(show),
+    )
+    return ai or _close_win_text(symbol, pnl)
 
 
 def _soft_promo_reply() -> str:
@@ -267,9 +268,9 @@ async def _do_open_one_chat(client, chat: str, symbol: str, side: str, entry,
         if stagger_sec > 0:
             await asyncio.sleep(stagger_sec)
         entity = await client.get_entity(chat)
-        greet = _greet_text()
+        greet = await _line_greet()
         await client.send_message(entity, greet)
-        print(f"[chat_engage] greet → {chat}")
+        print(f"[chat_engage] greet → {chat}: {greet!r}")
 
         lo = _GREET_MIN if greet_min is None else float(greet_min)
         hi = _GREET_MAX if greet_max is None else float(greet_max)
@@ -279,10 +280,10 @@ async def _do_open_one_chat(client, chat: str, symbol: str, side: str, entry,
         print(f"[chat_engage] {chat}: ТВХ через {delay / 60:.1f} мин")
         await asyncio.sleep(delay)
 
-        text = _open_text(symbol, side, entry)
+        text = await _line_open(symbol, side, entry)
         msg = await client.send_message(entity, text)
         db.save_chat_engage_post(symbol, int(entity.id), int(msg.id), str(chat))
-        print(f"[chat_engage] open → {chat}: {symbol} {side}")
+        print(f"[chat_engage] open → {chat}: {text!r}")
     except Exception as e:
         print(f"[chat_engage] не смог написать в {chat}: {e}")
 
@@ -340,7 +341,7 @@ async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
     posts = db.list_chat_engage_posts(symbol)
     if not posts:
         return
-    text = _close_win_text(symbol, float(pnl))
+    text = await _line_close(symbol, float(pnl))
     photo = None
     if entry is not None:
         try:
@@ -395,6 +396,11 @@ async def _worker_loop(client):
                     greet_min=25 if fast else None,
                     greet_max=45 if fast else None,
                 )
+            elif job["kind"] == "style_ingest":
+                import chat_style
+                chats = job.get("chats")
+                stats = await chat_style.ingest_style_chats(client, chats)
+                print(f"[chat_engage] style ingest: {stats}")
             elif job["kind"] == "close":
                 await _do_close(
                     client, job["symbol"], job["side"],
@@ -433,6 +439,16 @@ def _register_ask_handler(client, me):
         await event.respond(_soft_promo_reply())
 
 
+def fire_style_ingest(chats: list[str] | None = None) -> tuple[bool, str]:
+    """Поставить в очередь загрузку истории для обучения стиля."""
+    if not is_configured():
+        return False, "chat_engage не сконфигурирован"
+    if _queue is None or _main_loop is None:
+        return False, "воркер ещё не готов"
+    _enqueue({"kind": "style_ingest", "chats": chats})
+    return True, "загрузка истории в очереди"
+
+
 async def attach_to_client(client) -> asyncio.Task | None:
     """Подцепить очередь к уже запущенному ingest-клиенту (один аккаунт)."""
     global _queue, _main_loop, _attached
@@ -450,6 +466,13 @@ async def attach_to_client(client) -> asyncio.Task | None:
         f"[chat_engage] shared с ingest: @{me.username or me.id}, "
         f"чаты: {', '.join(_whitelist())}"
     )
+    # Подтянуть стиль из учительских чатов в фоне (если корпуса мало)
+    try:
+        if db.count_chat_style_samples() < 40:
+            _enqueue({"kind": "style_ingest", "chats": None})
+            print("[chat_engage] авто-загрузка истории для стиля")
+    except Exception as e:
+        print(f"[chat_engage] style auto: {e}")
     return task
 
 
@@ -494,6 +517,11 @@ async def run():
             print(f"[chat_engage] online as {me.first_name} (@{me.username or me.id})")
             _register_ask_handler(client, me)
             worker_task = asyncio.create_task(_worker_loop(client))
+            try:
+                if db.count_chat_style_samples() < 40:
+                    _enqueue({"kind": "style_ingest", "chats": None})
+            except Exception as e:
+                print(f"[chat_engage] style auto: {e}")
             await client.run_until_disconnected()
         except asyncio.CancelledError:
             if client:

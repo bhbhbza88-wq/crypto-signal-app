@@ -64,6 +64,9 @@ export const api = {
       fast: true,
       ...data,
     }),
+  adminChatStyleIngest: (chats = null) =>
+    post('/admin/chat-style-ingest', chats ? { chats } : {}),
+  adminChatStyleStats: () => get('/admin/chat-style-stats'),
   adminPremiumRequests: () => get('/admin/premium-requests'),
   adminChannelDaily: (days = 14) => get(`/admin/channel-daily?days=${days}`),
   analyzeChannel: (channelUrl, days = 30, entryTimeoutHours = 6, maxHoldHours = 168, riskPerTradeUsd = 100) =>

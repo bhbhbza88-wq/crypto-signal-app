@@ -279,6 +279,77 @@ def init_db():
                 PRIMARY KEY (symbol, chat_id)
             )
         """)
+        # Живые фразы из чатов — стиль для engage
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_style_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_ref TEXT NOT NULL,
+                text TEXT NOT NULL,
+                created_at TEXT
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_style_chat ON chat_style_samples(chat_ref)"
+        )
+
+
+def replace_chat_style_samples(chat_ref: str, texts: list) -> int:
+    """Заменить сэмплы одного чата новым набором. Возвращает сколько записали."""
+    chat_ref = (chat_ref or "").lstrip("@").strip()
+    cleaned = []
+    seen = set()
+    for t in texts or []:
+        s = " ".join(str(t).split()).strip()
+        if len(s) < 4 or s in seen:
+            continue
+        seen.add(s)
+        cleaned.append(s)
+    with _lock, get_conn() as conn:
+        conn.execute("DELETE FROM chat_style_samples WHERE chat_ref=?", (chat_ref,))
+        now = datetime.now().isoformat()
+        for s in cleaned:
+            conn.execute(
+                "INSERT INTO chat_style_samples (chat_ref, text, created_at) VALUES (?,?,?)",
+                (chat_ref, s, now),
+            )
+    return len(cleaned)
+
+
+def list_chat_style_samples(limit: int = 80, chat_ref: str | None = None) -> list:
+    with get_conn() as conn:
+        if chat_ref:
+            rows = conn.execute(
+                "SELECT * FROM chat_style_samples WHERE chat_ref=? ORDER BY id DESC LIMIT ?",
+                (chat_ref.lstrip("@"), limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM chat_style_samples ORDER BY RANDOM() LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def count_chat_style_samples() -> int:
+    with get_conn() as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM chat_style_samples").fetchone()
+        return int(row["n"] if row else 0)
+
+
+def trim_chat_style_samples(max_total: int = 250) -> None:
+    with _lock, get_conn() as conn:
+        n = conn.execute("SELECT COUNT(*) AS n FROM chat_style_samples").fetchone()["n"]
+        if n <= max_total:
+            return
+        drop = n - max_total
+        conn.execute(
+            """
+            DELETE FROM chat_style_samples WHERE id IN (
+                SELECT id FROM chat_style_samples ORDER BY id ASC LIMIT ?
+            )
+            """,
+            (drop,),
+        )
 
 
 def save_chat_engage_post(symbol: str, chat_id: int, msg_id: int, chat_ref: str = ""):
