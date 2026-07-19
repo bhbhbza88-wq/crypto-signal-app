@@ -1,7 +1,7 @@
 """
 Chat Engage — пишет в whitelist-чаты «как человек» по реальным сделкам NOWICKI.
 
-  открыли сигнал  → «здарова, вот монету нашёл, зашёл…»
+  открыли сигнал  → сначала «привет / как дела», через 1.5–10 мин — ТВХ (вход)
   закрыли в плюс  → в тех же чатах «отработала, +X%»
   в минус         → молчим
   спросили «где берёшь» → мягко сайт + канал
@@ -12,6 +12,8 @@ Env:
                                          (если пусто — дефолтный набор RU-чатов)
   TELEGRAM_CHAT_SESSION                — опционально, второй аккаунт
   TELEGRAM_SESSION                     — fallback, если CHAT_SESSION пустой
+  CHAT_ENGAGE_GREET_MIN_SEC            — мин. пауза привет→ТВХ (default 90)
+  CHAT_ENGAGE_GREET_MAX_SEC            — макс. пауза привет→ТВХ (default 600 = 10м)
 
 Режим shared (один аккаунт с ingest): не поднимаем второй Telethon-клиент —
 ingest вызывает attach_to_client(client). Иначе AuthKeyDuplicatedError.
@@ -41,6 +43,12 @@ TELEGRAM_CHAT_WHITELIST = (os.getenv("TELEGRAM_CHAT_WHITELIST") or _DEFAULT_CHAT
 
 CHANNEL_URL = os.getenv("TELEGRAM_PUBLIC_CHANNEL_URL", "").strip() or "https://t.me/papayaqq"
 SITE_URL = "https://nowicki.trade"
+
+# Пауза между «привет» и ТВХ (секунды), по умолчанию до 10 минут.
+_GREET_MIN = float(os.getenv("CHAT_ENGAGE_GREET_MIN_SEC", "90") or "90")
+_GREET_MAX = float(os.getenv("CHAT_ENGAGE_GREET_MAX_SEC", "600") or "600")
+if _GREET_MAX < _GREET_MIN:
+    _GREET_MAX = _GREET_MIN
 
 from display_polish import polish_pnl  # noqa: E402
 
@@ -104,6 +112,7 @@ def _fmt_entry(v) -> str:
 # не повторяем одни и те же фразы подряд
 _recent_open: list[str] = []
 _recent_close: list[str] = []
+_recent_greet: list[str] = []
 
 
 def _pick_unique(candidates: list[str], recent: list[str], remember: int = 8) -> str:
@@ -112,6 +121,33 @@ def _pick_unique(candidates: list[str], recent: list[str], remember: int = 8) ->
     recent.append(choice)
     del recent[:-remember]
     return choice
+
+
+def _greet_text() -> str:
+    """Лёгкий small-talk без монет и ссылок — до ТВХ."""
+    templates = [
+        "Всем привет, как дела?",
+        "Здарова народ, как рынок сегодня?",
+        "Привет, кто на месте?",
+        "Ку, как настроение по рынку?",
+        "Всем здарова, живы?",
+        "Приветик, как у всех дела?",
+        "Йо, что по рынку думаете?",
+        "Здарова, тихо сегодня или кто-то в сделках?",
+        "Всем ку, как настроение?",
+        "Привет всем, как день проходит?",
+        "Здарова, кто на графиках?",
+        "Всем привет, как оно?",
+        "Ку люди, что смотрите?",
+        "Привет, есть кто живой?",
+        "Здарова чат, как настрой?",
+        "Всем хай, спокойный день?",
+        "Привет, как у вас по позициям?",
+        "Йо народ, что интересного?",
+        "Всем ку, кто на месте напишите)",
+        "Здарова, просто чекнул чат",
+    ]
+    return _pick_unique(templates, _recent_greet, remember=10)
 
 
 def _open_text(symbol: str, side: str, entry) -> str:
@@ -222,18 +258,48 @@ def fire_close(symbol: str, side: str, result: str, pnl: float,
     })
 
 
+async def _do_open_one_chat(client, chat: str, symbol: str, side: str, entry,
+                            stagger_sec: float = 0) -> None:
+    """Привет → пауза 1.5–10 мин → ТВХ в одном чате."""
+    try:
+        if stagger_sec > 0:
+            await asyncio.sleep(stagger_sec)
+        entity = await client.get_entity(chat)
+        greet = _greet_text()
+        await client.send_message(entity, greet)
+        print(f"[chat_engage] greet → {chat}")
+
+        delay = random.uniform(_GREET_MIN, _GREET_MAX)
+        print(f"[chat_engage] {chat}: ТВХ через {delay / 60:.1f} мин")
+        await asyncio.sleep(delay)
+
+        text = _open_text(symbol, side, entry)
+        msg = await client.send_message(entity, text)
+        db.save_chat_engage_post(symbol, int(entity.id), int(msg.id), str(chat))
+        print(f"[chat_engage] open → {chat}: {symbol} {side}")
+    except Exception as e:
+        print(f"[chat_engage] не смог написать в {chat}: {e}")
+
+
 async def _do_open(client, symbol: str, side: str, entry) -> None:
-    text = _open_text(symbol, side, entry)
-    for i, chat in enumerate(_whitelist()):
-        try:
-            if i:
-                await asyncio.sleep(random.uniform(4, 12))
-            entity = await client.get_entity(chat)
-            msg = await client.send_message(entity, text)
-            db.save_chat_engage_post(symbol, int(entity.id), int(msg.id), str(chat))
-            print(f"[chat_engage] open → {chat}: {symbol} {side}")
-        except Exception as e:
-            print(f"[chat_engage] не смог написать в {chat}: {e}")
+    chats = _whitelist()
+    if not chats:
+        return
+    # Параллельно по чатам, старт приветов разнесён на ~0–2 мин,
+    # чтобы не слать во все сразу одним пакетом.
+    tasks = [
+        asyncio.create_task(
+            _do_open_one_chat(
+                client, chat, symbol, side, entry,
+                stagger_sec=i * random.uniform(8, 25),
+            )
+        )
+        for i, chat in enumerate(chats)
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for chat, res in zip(chats, results):
+        if isinstance(res, Exception):
+            print(f"[chat_engage] open task fail {chat}: {res}")
 
 
 async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
