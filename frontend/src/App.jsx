@@ -247,6 +247,22 @@ export default function App() {
   }, [fetchSignals, fetchStatsHistory, tab])
 
   const isPremium = !!user && (user.tier === 'premium' || user.tier === 'vip')
+  const [tgBusy, setTgBusy] = useState(false)
+
+  async function openTelegramBot(e) {
+    if (!isPremium) return
+    e.preventDefault()
+    if (tgBusy) return
+    setTgBusy(true)
+    try {
+      const r = await api.telegramLinkToken()
+      window.open(r.bot_url, '_blank', 'noopener,noreferrer')
+    } catch {
+      window.open(TG_BOT, '_blank', 'noopener,noreferrer')
+    } finally {
+      setTgBusy(false)
+    }
+  }
 
   const navSections = useMemo(() => {
     const base = NAV_SECTIONS.map((sec) => ({
@@ -368,7 +384,15 @@ export default function App() {
             )}
           </div>
           <div className="topbar-right">
-            <a className="btn-tg-bot" href={TG_BOT} target="_blank" rel="noopener noreferrer" aria-label={`${t('top.telegram')} ${t('top.bot')}`}>
+            <a
+              className="btn-tg-bot"
+              href={TG_BOT}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={openTelegramBot}
+              aria-busy={tgBusy || undefined}
+              aria-label={`${t('top.telegram')} ${t('top.bot')}`}
+            >
               {t('top.telegram')} <span className="btn-tg-label">{t('top.bot')}</span>
             </a>
             <button className="btn-trial" onClick={() => setTab('ai_assistant')}>{t('top.ai')}</button>
