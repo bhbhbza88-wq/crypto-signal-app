@@ -367,62 +367,39 @@ def admin_grant_premium(req: GrantPremiumRequest, admin=Depends(require_admin)):
 
 
 class ChatEngageTestRequest(BaseModel):
-    chat: str = "kriptovaluta_01"
+    target: str = "jambo"
     symbol: str = "BTC/USDT"
     signal: str = "LONG"
     entry: float = 65000.0
-    fast: bool = True
+    pnl: float = 3.2
+    exit_price: float | None = None
 
 
 @app.post("/api/admin/chat-engage-test")
 def admin_chat_engage_test(req: ChatEngageTestRequest, admin=Depends(require_admin)):
-    """Тест: привет → через ~30с ТВХ в один чат (по умолчанию kriptovaluta_01)."""
+    """Практика: карточка профита + текст контакту/чату (по умолчанию jambo)."""
     import chat_engage
     side = (req.signal or "LONG").upper().strip()
     if side not in ("LONG", "SHORT"):
         raise HTTPException(status_code=400, detail="signal: LONG или SHORT")
-    ok, msg = chat_engage.fire_test(
-        chat=req.chat,
+    ok, msg = chat_engage.fire_practice_profit(
+        target=req.target or "jambo",
         symbol=req.symbol,
         side=side,
         entry=float(req.entry),
-        fast=bool(req.fast),
+        pnl=float(req.pnl),
+        exit_price=req.exit_price,
     )
     if not ok:
         raise HTTPException(status_code=503, detail=msg)
-    return {"ok": True, "detail": msg, "chat": req.chat.lstrip("@"), "fast": req.fast}
-
-
-class ChatStyleIngestRequest(BaseModel):
-    chats: list[str] | None = None
-
-
-@app.post("/api/admin/chat-style-ingest")
-def admin_chat_style_ingest(req: ChatStyleIngestRequest = ChatStyleIngestRequest(),
-                            admin=Depends(require_admin)):
-    """Скачать историю из чатов-учителей (по умолчанию Binance RU + cryptoinside)."""
-    import chat_engage
-    import chat_style
-    chats = req.chats or chat_style.STYLE_SOURCE_CHATS
-    ok, msg = chat_engage.fire_style_ingest(chats)
-    if not ok:
-        raise HTTPException(status_code=503, detail=msg)
-    return {
-        "ok": True,
-        "detail": msg,
-        "chats": chats,
-        "samples_now": db.count_chat_style_samples(),
-    }
+    return {"ok": True, "detail": msg, "target": (req.target or "jambo").lstrip("@")}
 
 
 @app.get("/api/admin/chat-style-stats")
 def admin_chat_style_stats(admin=Depends(require_admin)):
-    import chat_style
-    samples = db.list_chat_style_samples(limit=12)
     return {
         "total": db.count_chat_style_samples(),
-        "source_chats": chat_style.STYLE_SOURCE_CHATS,
-        "preview": [s["text"] for s in samples],
+        "note": "Историю больше не качаем постоянно — стиль уже в текстах/AI.",
     }
 
 

@@ -25,9 +25,6 @@ export default function Admin() {
   const [premiumRequests, setPremiumRequests] = useState([])
   const [engageBusy, setEngageBusy] = useState(false)
   const [engageMsg, setEngageMsg] = useState(null)
-  const [styleBusy, setStyleBusy] = useState(false)
-  const [styleMsg, setStyleMsg] = useState(null)
-  const [styleStats, setStyleStats] = useState(null)
 
   const [channelDays, setChannelDays] = useState(14)
   const [channelStats, setChannelStats] = useState({ rows: [], since: null, days: 14 })
@@ -81,35 +78,15 @@ export default function Admin() {
   async function runEngageTest() {
     setEngageBusy(true); setEngageMsg(null)
     try {
-      const r = await api.adminChatEngageTest({ chat: 'kriptovaluta_01', fast: true })
+      const r = await api.adminChatEngageTest({ target: 'jambo', pnl: 3.2 })
       setEngageMsg({
         ok: true,
-        text: `${r.detail}. Смотри @kriptovaluta_01: сначала привет, через ~30–45с ТВХ.`,
+        text: `${r.detail}. Жди у @jambo карточку профита + короткий текст.`,
       })
     } catch (err) {
       setEngageMsg({ ok: false, text: err.message })
     } finally {
       setEngageBusy(false)
-    }
-  }
-
-  async function runStyleIngest() {
-    setStyleBusy(true); setStyleMsg(null)
-    try {
-      const r = await api.adminChatStyleIngest([
-        'BinanceRussianSpeaking',
-        'cryptoinside_chat',
-      ])
-      setStyleMsg({
-        ok: true,
-        text: `${r.detail}. Источники: ${(r.chats || []).join(', ')}. Сэмплов сейчас: ${r.samples_now}`,
-      })
-      const st = await api.adminChatStyleStats().catch(() => null)
-      if (st) setStyleStats(st)
-    } catch (err) {
-      setStyleMsg({ ok: false, text: err.message })
-    } finally {
-      setStyleBusy(false)
     }
   }
 
@@ -253,26 +230,13 @@ export default function Admin() {
         )}
       </section>
 
-      {/* Тест chat engage */}
+      {/* Практика chat engage */}
       <section className="adm-card" style={{ marginTop: 16 }}>
-        <h2 className="section-title">Тест чатов (engage)</h2>
+        <h2 className="section-title">Практика engage (профит)</h2>
         <p className="adm-hint" style={{ marginTop: -6 }}>
-          1) Загрузи историю из Binance RU + cryptoinside — бот учится писать как люди.
-          2) Тест в @kriptovaluta_01: привет → через ~30–45с ТВХ.
+          В чаты больше не пишем входы. Только хороший плюс + карточка PnL.
+          Практика сейчас: контакт <b>jambo</b> — картинка профита и короткий текст.
         </p>
-        {styleMsg && <div className={styleMsg.ok ? 'adm-msg-ok' : 'adm-msg-err'}>{styleMsg.text}</div>}
-        {styleStats && (
-          <p className="adm-hint">В корпусе: {styleStats.total} фраз. Пример: {(styleStats.preview || []).slice(0, 3).join(' · ') || '—'}</p>
-        )}
-        <button
-          className="adm-submit"
-          type="button"
-          disabled={styleBusy}
-          onClick={runStyleIngest}
-          style={{ marginTop: 8, marginRight: 8 }}
-        >
-          {styleBusy ? 'Грузим историю…' : 'Загрузить стиль из 2 чатов'}
-        </button>
         {engageMsg && <div className={engageMsg.ok ? 'adm-msg-ok' : 'adm-msg-err'}>{engageMsg.text}</div>}
         <button
           className="adm-submit"
@@ -281,7 +245,7 @@ export default function Admin() {
           onClick={runEngageTest}
           style={{ marginTop: 8 }}
         >
-          {engageBusy ? 'Отправка…' : 'Тест → kriptovaluta_01'}
+          {engageBusy ? 'Отправка…' : 'Практика → jambo'}
         </button>
       </section>
 

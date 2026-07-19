@@ -57,16 +57,13 @@ export const api = {
     post('/admin/grant-premium', { email, days, tier }),
   adminChatEngageTest: (data = {}) =>
     post('/admin/chat-engage-test', {
-      chat: 'kriptovaluta_01',
+      target: 'jambo',
       symbol: 'BTC/USDT',
       signal: 'LONG',
       entry: 65000,
-      fast: true,
+      pnl: 3.2,
       ...data,
     }),
-  adminChatStyleIngest: (chats = null) =>
-    post('/admin/chat-style-ingest', chats ? { chats } : {}),
-  adminChatStyleStats: () => get('/admin/chat-style-stats'),
   adminPremiumRequests: () => get('/admin/premium-requests'),
   adminChannelDaily: (days = 14) => get(`/admin/channel-daily?days=${days}`),
   analyzeChannel: (channelUrl, days = 30, entryTimeoutHours = 6, maxHoldHours = 168, riskPerTradeUsd = 100) =>
