@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line } from 'recharts'
 import WinrateRing from './WinrateRing'
-import { resultLabel, polishHistory, polishStats, buildShowcaseCurve } from './shared'
+import { resultLabel, polishHistory, polishStats, buildShowcaseCurve, TG_RESULTS_CHANNEL } from './shared'
 import { useI18n } from './i18n'
 
 function PnLChart({ history, t }) {
@@ -77,6 +77,9 @@ function MonthOverview({ history, stats, t }) {
           <div className="hist-month-badge">{t('hist.period.badge')}</div>
           <h2 className="hist-month-title">{t('hist.period.title')}</h2>
           <p className="hist-month-sub">{t('hist.period.sub')}</p>
+          <a className="hist-channel-link" href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">
+            {t('hist.channel.link')}
+          </a>
         </div>
         <WinrateRing winrate={display.winrate} total={display.total} label={t('land.hero.statWinrate')} />
       </div>
@@ -269,6 +272,11 @@ function HistoryStyles() {
         }
         .hist-month-title { font-family: var(--font-display); font-size: 22px; font-weight: 800; color: var(--text); margin: 0; }
         .hist-month-sub { font-size: 13px; color: var(--text-secondary); margin: 6px 0 0; max-width: 420px; line-height: 1.45; }
+        .hist-channel-link {
+          display: inline-block; margin-top: 10px; font-size: 13px; font-weight: 700;
+          color: var(--accent); text-decoration: none;
+        }
+        .hist-channel-link:hover { text-decoration: underline; }
         .hist-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
         .hist-kpi {
           border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
