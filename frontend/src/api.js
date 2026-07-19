@@ -72,6 +72,7 @@ export const api = {
   adminChatEngageTest: (data = {}) =>
     post('/admin/chat-engage-test', { target: 'Kupyansk_2', ...data }),
   adminPremiumRequests: () => get('/admin/premium-requests'),
+  telegramLinkToken: () => post('/telegram/link-token', {}),
   adminBackfillChannelHistory: (opts = {}) => {
     const params = new URLSearchParams()
     if (opts.limit) params.set('limit', opts.limit)

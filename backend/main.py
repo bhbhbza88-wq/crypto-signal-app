@@ -7,6 +7,7 @@ import os
 import json
 import hmac
 import asyncio
+import secrets
 import urllib.request
 import urllib.error
 import pandas as pd
@@ -336,8 +337,12 @@ class GrantPremiumRequest(BaseModel):
 
 
 @app.post("/api/admin/grant-premium")
-def admin_grant_premium(req: GrantPremiumRequest, admin=Depends(require_admin)):
-    """Выдать Premium по email (админка сайта)."""
+def admin_grant_premium(req: GrantPremiumRequest, background_tasks: BackgroundTasks, admin=Depends(require_admin)):
+    """Выдать Premium по email (админка сайта).
+
+    Если у юзера уже привязан Telegram (через кнопку «Подключить Telegram»
+    в личном кабинете или прошлый /paid), invite-ссылки на закрытые каналы
+    уходят ему в бота сразу — без отдельного /grant в самом боте."""
     email = (req.email or "").lower().strip()
     if not email or "@" not in email:
         raise HTTPException(status_code=400, detail="Укажи корректный email")
@@ -365,6 +370,9 @@ def admin_grant_premium(req: GrantPremiumRequest, admin=Depends(require_admin)):
     pending = db.get_pending_premium_request(email=email)
     if pending:
         db.resolve_premium_request(pending["id"], "granted")
+    if user.get("telegram_id"):
+        background_tasks.add_task(
+            telegram_bot.notify_telegram_id_premium_ready, user["telegram_id"], email, until)
     return {
         "ok": True,
         "email": email,
@@ -372,6 +380,17 @@ def admin_grant_premium(req: GrantPremiumRequest, admin=Depends(require_admin)):
         "premium_until": until,
         "user_id": user["id"],
     }
+
+
+@app.post("/api/telegram/link-token")
+def telegram_link_token(user=Depends(require_user)):
+    """Токен для кнопки «Подключить Telegram» в личном кабинете: открывает
+    бота, привязывает Telegram-аккаунт к сайту и, если Premium уже активен,
+    сразу выдаёт invite-ссылки в закрытые каналы с ТВХ."""
+    token = secrets.token_urlsafe(24)
+    expires_at = (datetime.now() + timedelta(minutes=30)).isoformat()
+    db.create_auth_token(token, user["id"], "tg_link", expires_at)
+    return {"token": token, "bot_url": telegram_bot.build_telegram_link_deeplink(token)}
 
 
 class ChatEngageTestRequest(BaseModel):

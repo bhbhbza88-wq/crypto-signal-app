@@ -240,8 +240,65 @@ def _channel_cta():
     ]}
 
 
+def _bot_username() -> str:
+    m = re.search(r"(?:telegram\.me|t\.me)/([\w]+)", BOT_URL)
+    return m.group(1) if m else ""
+
+
+def build_telegram_link_deeplink(token: str) -> str:
+    username = _bot_username()
+    return f"https://t.me/{username}?start=tglink_{token}" if username else BOT_URL
+
+
+async def start_telegram_link(chat_id: int, token: str):
+    """Пользователь пришёл по deep-link «Подключить Telegram» с сайта.
+    Если Premium уже активен на сайте — сразу шлём invite-ссылки в закрытые
+    ТВХ-каналы, без ручного /grant. Если премиума нет — просто привязываем
+    аккаунт и предлагаем оформить Premium (когда оформит — каналы откроются
+    сами при следующей выдаче, см. notify_telegram_id_premium_ready)."""
+    import database as db
+    import auth
+
+    user_id = db.consume_auth_token(token, kind="tg_link")
+    if not user_id:
+        await send_message(
+            chat_id,
+            "Ссылка для привязки Telegram устарела или уже использована.\n"
+            "Вернись на сайт (личный кабинет) и получи новую ссылку.",
+        )
+        await send_welcome(chat_id)
+        return
+
+    user = db.get_user_by_id(user_id)
+    if not user:
+        await send_welcome(chat_id)
+        return
+
+    db.set_user_telegram_id(user_id, chat_id)
+    eff_tier = auth.effective_tier(user)
+    if auth.tier_allows(eff_tier, "premium"):
+        await send_message(
+            chat_id,
+            f"<b>✅ Telegram привязан к {user['email']}</b>\n{HR}\n"
+            "У тебя уже есть Premium на сайте — вот доступ к каналам с ТВХ:",
+        )
+        await send_premium_invites_message(chat_id, user["email"], user.get("premium_until"))
+    else:
+        await send_message(
+            chat_id,
+            f"<b>Telegram привязан к {user['email']}</b>\n{HR}\n"
+            "Premium на сайте пока не активен — как только оформишь, каналы с ТВХ "
+            "откроются автоматически, без лишних действий.",
+        )
+        await send_premium(chat_id)
+
+
 async def send_welcome(chat_id: int, start_payload: str = "", with_dock: bool = False):
-    payload = start_payload.strip().lower()
+    raw_payload = (start_payload or "").strip()
+    if raw_payload.startswith("tglink_"):
+        await start_telegram_link(chat_id, raw_payload[len("tglink_"):])
+        return
+    payload = raw_payload.lower()
     if payload in ("premium", "pay"):
         await send_premium(chat_id)
         return
@@ -355,6 +412,32 @@ async def create_premium_invites() -> list[tuple[str, str]]:
     return links
 
 
+async def send_premium_invites_message(telegram_id: int, email: str, until: str | None) -> int:
+    """Шлёт человеку в личку invite-ссылки в Premium-каналы (ТВХ).
+    Возвращает число созданных ссылок (0 — не удалось создать invite,
+    сообщение с просьбой написать поддержку уйдёт всё равно)."""
+    links = await create_premium_invites()
+    until_str = until[:10] if until else "—"
+    if links:
+        lines = "\n".join(f"· <a href=\"{url}\">Открыть доступ {i+1}</a>" for i, (_, url) in enumerate(links))
+        await send_message(
+            telegram_id,
+            f"<b>✅ Premium активирован</b>\n{HR}\n"
+            f"Email: <code>{email}</code>\n"
+            f"До: <code>{until_str}</code>\n"
+            f"{HR}\n"
+            f"Одноразовые ссылки (по 1 входу):\n{lines}\n\n"
+            f"Сайт: {SITE_URL}/app/overview",
+        )
+    else:
+        await send_message(
+            telegram_id,
+            f"<b>✅ Premium на сайте включён</b> ({email}), но invite-ссылки не создались.\n"
+            f"Напиши @{SUPPORT_USER} — выдадим доступ вручную.",
+        )
+    return len(links)
+
+
 async def grant_premium_access(email: str, notify_telegram_id: int | None = None, days: int = 30) -> str:
     """Ставит premium на сайте + шлёт invite-ссылки в TG."""
     import database as db
@@ -374,29 +457,25 @@ async def grant_premium_access(email: str, notify_telegram_id: int | None = None
         if not notify_telegram_id:
             notify_telegram_id = req.get("telegram_id")
 
-    links = await create_premium_invites()
+    n_links = 0
     if notify_telegram_id:
-        if links:
-            lines = "\n".join(f"· <a href=\"{url}\">Открыть доступ {i+1}</a>" for i, (_, url) in enumerate(links))
-            await send_message(
-                notify_telegram_id,
-                f"<b>✅ Premium активирован</b>\n{HR}\n"
-                f"Email: <code>{email}</code>\n"
-                f"До: <code>{until[:10]}</code>\n"
-                f"{HR}\n"
-                f"Одноразовые ссылки (по 1 входу):\n{lines}\n\n"
-                f"Сайт: {SITE_URL}/app/overview",
-            )
-        else:
-            await send_message(
-                notify_telegram_id,
-                f"<b>✅ Premium на сайте включён</b> ({email}), но invite-ссылки не создались.\n"
-                f"Напиши @{SUPPORT_USER} — выдадим доступ вручную.",
-            )
+        n_links = await send_premium_invites_message(notify_telegram_id, email, until)
     return (
         f"OK: Premium → <code>{email}</code> до {until[:10]}. "
-        f"Invites: {len(links)}. TG notify: {notify_telegram_id or '—'}"
+        f"Invites: {n_links}. TG notify: {notify_telegram_id or '—'}"
     )
+
+
+async def notify_telegram_id_premium_ready(telegram_id: int, email: str, until: str | None) -> None:
+    """Вызывается, когда Premium выдан НЕ через бота (напр. с сайта/админки),
+    а у пользователя telegram_id уже привязан — шлём invite-ссылки сразу,
+    без ручного /grant."""
+    if not telegram_id:
+        return
+    try:
+        await send_premium_invites_message(telegram_id, email, until)
+    except Exception as e:
+        print(f"[telegram_bot] notify_telegram_id_premium_ready: {e}")
 
 
 _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")

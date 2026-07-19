@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { TG_RESULTS_CHANNEL, TG_PREMIUM } from './shared'
+import { api } from './api'
 
 const PREMIUM_BOT = TG_PREMIUM
 
@@ -40,6 +41,22 @@ const FAQ = [
 export default function Pricing({ user }) {
   const [period, setPeriod] = useState('month')
   const [openFaq, setOpenFaq] = useState(null)
+  const [tgBusy, setTgBusy] = useState(false)
+  const [tgError, setTgError] = useState(null)
+
+  const hasPremium = user && (user.tier === 'premium' || user.tier === 'vip')
+
+  async function connectTelegram() {
+    setTgBusy(true); setTgError(null)
+    try {
+      const r = await api.telegramLinkToken()
+      window.open(r.bot_url, '_blank', 'noopener,noreferrer')
+    } catch (err) {
+      setTgError(err.message)
+    } finally {
+      setTgBusy(false)
+    }
+  }
 
   function priceFor(t) {
     if (t.key === 'free') return { amount: 0, suffix: '/навсегда' }
@@ -70,6 +87,25 @@ export default function Pricing({ user }) {
           Публичные результаты →
         </a>
       </div>
+
+      {user && (
+        <div className="pr-tg-connect">
+          <div>
+            <div className="pr-tg-title">
+              {hasPremium ? '🔓 Premium активен — открой каналы с ТВХ' : '📎 Подключить Telegram'}
+            </div>
+            <div className="pr-tg-hint">
+              {hasPremium
+                ? 'Привяжи Telegram-аккаунт — invite-ссылки в закрытые каналы придут прямо в бота, без переписки с поддержкой.'
+                : 'Привяжи Telegram сейчас — как только появится Premium, каналы с ТВХ откроются в боте сами, без ручной выдачи.'}
+            </div>
+            {tgError && <div className="adm-msg-err" style={{ marginTop: 6 }}>{tgError}</div>}
+          </div>
+          <button className="pr-tg-btn" onClick={connectTelegram} disabled={tgBusy}>
+            {tgBusy ? '...' : 'Подключить Telegram'}
+          </button>
+        </div>
+      )}
 
       <div className="pr-period-switch">
         {PERIODS.map(p => (
@@ -130,6 +166,11 @@ export default function Pricing({ user }) {
 
       <style>{`
         .pr-banner { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: 10px 14px; font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; }
+        .pr-tg-connect { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 18px; }
+        .pr-tg-title { font-size: 14px; font-weight: 700; color: var(--text); }
+        .pr-tg-hint { font-size: 12px; color: var(--text-secondary); margin-top: 4px; max-width: 480px; }
+        .pr-tg-btn { flex-shrink: 0; border: none; border-radius: var(--radius-sm); padding: 10px 18px; font-size: 13px; font-weight: 700; cursor: pointer; background: var(--accent); color: #fff; }
+        .pr-tg-btn:disabled { opacity: 0.6; cursor: default; }
         .pr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; max-width: 640px; }
         .pr-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; box-shadow: var(--shadow-card); display: flex; flex-direction: column; transition: border-color 0.2s, transform 0.2s; }
         .pr-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
