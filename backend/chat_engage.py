@@ -97,9 +97,19 @@ def _pick_unique(candidates: list[str], recent: list[str], remember: int = 8) ->
     return choice
 
 
+def _display_pct(pnl_pct: float) -> float:
+    """% для текста в чате — леверажный ROE (как реально считает P&L биржа),
+    а не сырое движение цены. Иначе подпись типа '+2.1%' выглядит нелепо
+    рядом с карточкой, где P&L показан крупной суммой в USDT (+37.24) —
+    вроде бы разные цифры, хотя по факту одна и та же сделка."""
+    from profit_card import SHARE_LEVERAGE
+    show = polish_pnl(pnl_pct, decimals=2)
+    return round(show * SHARE_LEVERAGE, 1)
+
+
 def _close_win_text(symbol: str, pnl: float) -> str:
     coin = _coin(symbol)
-    show = polish_pnl(pnl, decimals=1)
+    show = _display_pct(pnl)
     if show < 0:
         show = abs(show)
     templates = [
@@ -120,7 +130,7 @@ def _close_win_text(symbol: str, pnl: float) -> str:
 async def _line_close(symbol: str, pnl: float) -> str:
     try:
         import chat_style
-        show = polish_pnl(pnl, decimals=1)
+        show = _display_pct(pnl)
         if show < 0:
             show = abs(show)
         ai = await chat_style.compose_natural(

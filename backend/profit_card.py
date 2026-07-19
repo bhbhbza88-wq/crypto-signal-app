@@ -185,7 +185,7 @@ _BYBIT_ROW_DURATION_Y = (669, 718)
 # Минимальный правый край очистки — правый край оригинального текста на
 # скрине (замерено по пикселям). Гарантирует, что старые цифры не будут
 # «торчать» из-под нового текста, даже если у нашего шрифта другая метрика.
-_BYBIT_MIN_CLEAR_X = {"symbol": 393, "pnl": 268, "entry": 139, "exit": 151, "duration": 249}
+_BYBIT_MIN_CLEAR_X = {"symbol": 409, "pnl": 268, "entry": 139, "exit": 151, "duration": 249}
 
 _BYBIT_X0 = 30
 _BYBIT_SYMBOL_XY = (50, 183)
@@ -195,6 +195,9 @@ _BYBIT_PNL_XY = (53, 316)
 _BYBIT_ENTRY_XY = (48, 477)
 _BYBIT_EXIT_XY = (48, 577)
 _BYBIT_DURATION_XY = (49, 675)
+# Белый блок "Присоединяйтесь..." + QR — реф-реклама самого Bybit, не наша.
+# Обрезаем карточку по верхнему краю этого блока, чтобы его не показывать.
+_BYBIT_CROP_H = 838
 
 
 @lru_cache(maxsize=1)
@@ -289,12 +292,17 @@ def render_bybit_card(
     pill_l, pill_t, pill_r, pill_b = draw.textbbox((0, 0), side_ru, font=font_pill)
     pill_text_w, pill_text_h = pill_r - pill_l, pill_b - pill_t
     pill_pad_x, pill_h = 18, _BYBIT_PILL_Y[1] - _BYBIT_PILL_Y[0]
-    pill_total_w = pill_text_w + pill_pad_x * 2
-    row1_end_x = _BYBIT_SYMBOL_XY[0] + sym_measure_w + _BYBIT_PILL_GAP + pill_total_w
+    pill_x0 = _BYBIT_SYMBOL_XY[0] + sym_measure_w + _BYBIT_PILL_GAP
+    # Растягиваем плашку вправо (если нужно) так, чтобы она сама доходила
+    # до границы очистки — иначе между плашкой и очищенной зоной остаётся
+    # видимый чёрный "шов" без узора сетки.
+    natural_w = pill_text_w + pill_pad_x * 2
+    stretch_w = (_BYBIT_MIN_CLEAR_X["symbol"] - 4) - pill_x0
+    pill_total_w = max(natural_w, stretch_w)
+    row1_end_x = pill_x0 + pill_total_w
     clear_row(*_BYBIT_ROW_SYMBOL_Y, row1_end_x, "symbol")
 
     sym_w, _ = _draw_topleft(draw, _BYBIT_SYMBOL_XY, pair_line, font_symbol, WHITE)
-    pill_x0 = _BYBIT_SYMBOL_XY[0] + sym_w + _BYBIT_PILL_GAP
     pill_x1 = pill_x0 + pill_total_w
     pill_y0, pill_y1 = _BYBIT_PILL_Y
     draw.rounded_rectangle(
@@ -302,7 +310,8 @@ def render_bybit_card(
         outline=side_color, width=2,
     )
     text_y = pill_y0 + (pill_h - pill_text_h) // 2
-    draw.text((pill_x0 + pill_pad_x - pill_l, text_y - pill_t), side_ru, font=font_pill, fill=side_color)
+    text_x = pill_x0 + (pill_total_w - pill_text_w) // 2
+    draw.text((text_x - pill_l, text_y - pill_t), side_ru, font=font_pill, fill=side_color)
 
     # ── P&L (USDT) ──
     pnl_w = draw.textlength(pnl_str, font=font_pnl)
@@ -321,6 +330,8 @@ def render_bybit_card(
     dur_w = draw.textlength(duration_line, font=font_duration)
     clear_row(*_BYBIT_ROW_DURATION_Y, _BYBIT_DURATION_XY[0] + dur_w, "duration")
     _draw_topleft(draw, _BYBIT_DURATION_XY, duration_line, font_duration, GREY)
+
+    img = img.crop((0, 0, img.width, _BYBIT_CROP_H))
 
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
