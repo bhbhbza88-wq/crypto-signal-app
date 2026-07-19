@@ -4,7 +4,18 @@ import { api } from './api'
 const emptyTraderForm = { name: '', avatar_url: '', bio: '' }
 const emptySignalForm = { trader_id: '', symbol: '', signal: 'LONG', entry: '', stop: '', tp1: '', tp2: '', tp3: '', note: '' }
 
+const ADMIN_TABS = [
+  { key: 'traders',   label: 'Трейдеры' },
+  { key: 'signal',    label: 'Новый сигнал' },
+  { key: 'open',      label: 'Открытые позиции' },
+  { key: 'premium',   label: 'Premium' },
+  { key: 'channels',  label: 'История по каналам' },
+  { key: 'engage',    label: 'Telegram практика' },
+  { key: 'backfill',  label: 'Публикация истории' },
+]
+
 export default function Admin() {
+  const [tab, setTab] = useState('traders')
   const [traders, setTraders] = useState([])
   const [openSignals, setOpenSignals] = useState([])
   const [loading, setLoading] = useState(true)
@@ -185,8 +196,21 @@ export default function Admin() {
 
       {error && <div className="adm-error animate-in">❌ {error}</div>}
 
+      <div className="adm-tabs">
+        {ADMIN_TABS.map(t => (
+          <button
+            key={t.key}
+            type="button"
+            className={`adm-tab-btn ${tab === t.key ? 'active' : ''}`}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       {/* История по каналам */}
-      <section className="adm-card" style={{ marginTop: 16 }}>
+      {tab === 'channels' && <section className="adm-card" style={{ marginTop: 16 }}>
         <div className="adm-ch-head">
           <h2 className="section-title" style={{ margin: 0, flex: 1 }}>История по каналам</h2>
           <select
@@ -246,10 +270,10 @@ export default function Admin() {
             })}
           </div>
         )}
-      </section>
+      </section>}
 
       {/* Практика chat engage */}
-      <section className="adm-card" style={{ marginTop: 16 }}>
+      {tab === 'engage' && <section className="adm-card" style={{ marginTop: 16 }}>
         <h2 className="section-title">Практика engage (профит)</h2>
         <p className="adm-hint" style={{ marginTop: -6 }}>
           В чаты больше не пишем входы. Только хороший плюс + карточка PnL.
@@ -265,10 +289,10 @@ export default function Admin() {
         >
           {engageBusy ? 'Отправка…' : 'Практика → Kupyansk_2'}
         </button>
-      </section>
+      </section>}
 
       {/* Бэкфилл истории в публичный канал */}
-      <section className="adm-card" style={{ marginTop: 16 }}>
+      {tab === 'backfill' && <section className="adm-card" style={{ marginTop: 16 }}>
         <h2 className="section-title">История → канал результатов</h2>
         <p className="adm-hint" style={{ marginTop: -6 }}>
           Публикует уже закрытые сделки из истории в <b>@papayaqq</b>, которые туда
@@ -285,10 +309,10 @@ export default function Admin() {
         >
           {backfillBusy ? 'Запуск…' : 'Опубликовать историю → @papayaqq'}
         </button>
-      </section>
+      </section>}
 
       {/* Дать Premium */}
-      <section className="adm-card adm-premium" style={{ marginTop: 16 }}>
+      {tab === 'premium' && <section className="adm-card adm-premium" style={{ marginTop: 16 }}>
         <h2 className="section-title">Дать Premium</h2>
         <p className="adm-hint" style={{ marginTop: -6 }}>
           Впиши email с nowicki.trade — тариф станет Premium. Потом вручную добавь человека в платный канал/чат.
@@ -346,11 +370,11 @@ export default function Admin() {
             ))}
           </div>
         )}
-      </section>
+      </section>}
 
-      <div className="adm-grid">
-        {/* Трейдеры */}
-        <section className="adm-card">
+      {/* Трейдеры */}
+      {tab === 'traders' && (
+        <section className="adm-card" style={{ marginTop: 16 }}>
           <h2 className="section-title">Трейдеры</h2>
           <div className="adm-traders-list">
             {traders.length === 0 && <div className="adm-empty">Пока нет ни одного трейдера</div>}
@@ -383,9 +407,11 @@ export default function Admin() {
             </button>
           </form>
         </section>
+      )}
 
-        {/* Новый сигнал */}
-        <section className="adm-card">
+      {/* Новый сигнал */}
+      {tab === 'signal' && (
+        <section className="adm-card" style={{ marginTop: 16 }}>
           <h2 className="section-title">Новый сигнал (ТВХ)</h2>
           <form onSubmit={submitSignal} className="adm-form">
             <select className="adm-input" value={signalForm.trader_id}
@@ -423,33 +449,38 @@ export default function Admin() {
             <button className="adm-submit" type="submit" disabled={signalBusy || traders.length === 0}>
               {signalBusy ? '...' : 'Опубликовать сигнал'}
             </button>
-            {traders.length === 0 && <div className="adm-hint">Сначала добавь трейдера слева</div>}
+            {traders.length === 0 && <div className="adm-hint">Сначала добавь трейдера во вкладке «Трейдеры»</div>}
           </form>
         </section>
-      </div>
+      )}
 
       {/* Открытые позиции */}
-      <section className="adm-card" style={{ marginTop: 16 }}>
-        <h2 className="section-title">Открытые позиции ({openSignals.length})</h2>
-        <div className="adm-open-list">
-          {openSignals.length === 0 && <div className="adm-empty">Открытых позиций нет</div>}
-          {openSignals.map(s => (
-            <div key={s.id ?? s.symbol} className="adm-open-row">
-              <span className={`adm-open-side ${s.signal === 'LONG' ? 'pos' : 'neg'}`}>{s.signal}</span>
-              <span className="adm-open-sym">{s.symbol}</span>
-              <span className="adm-open-trader">{s.trader ? s.trader.name : '— (авто/старое)'}</span>
-              <span className="adm-open-entry">вход {s.entry}</span>
-            </div>
-          ))}
-        </div>
-      </section>
+      {tab === 'open' && (
+        <section className="adm-card" style={{ marginTop: 16 }}>
+          <h2 className="section-title">Открытые позиции ({openSignals.length})</h2>
+          <div className="adm-open-list">
+            {openSignals.length === 0 && <div className="adm-empty">Открытых позиций нет</div>}
+            {openSignals.map(s => (
+              <div key={s.id ?? s.symbol} className="adm-open-row">
+                <span className={`adm-open-side ${s.signal === 'LONG' ? 'pos' : 'neg'}`}>{s.signal}</span>
+                <span className="adm-open-sym">{s.symbol}</span>
+                <span className="adm-open-trader">{s.trader ? s.trader.name : '— (авто/старое)'}</span>
+                <span className="adm-open-entry">вход {s.entry}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <style>{`
         .adm-loading { display: flex; align-items: center; gap: 16px; padding: 40px; color: var(--text-secondary); font-size: 14px; }
         .adm-spinner { width: 30px; height: 30px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: adm-spin 0.8s linear infinite; flex-shrink: 0; }
         @keyframes adm-spin { to { transform: rotate(360deg); } }
         .adm-error { background: var(--short-soft); border: 1px solid var(--short); border-radius: var(--radius-md); padding: 12px 16px; color: var(--short); font-size: 13px; margin-bottom: 16px; }
-        .adm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+        .adm-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+        .adm-tab-btn { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 12px; font-weight: 700; padding: 8px 14px; border-radius: 20px; cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+        .adm-tab-btn:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+        .adm-tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
         .adm-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-card); display: flex; flex-direction: column; gap: 14px; }
         .adm-empty { font-size: 13px; color: var(--text-tertiary); padding: 8px 0; }
         .adm-traders-list { display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto; }
@@ -498,7 +529,6 @@ export default function Admin() {
         .adm-open-trader { color: var(--text-secondary); }
         .adm-open-entry { margin-left: auto; color: var(--text-tertiary); font-family: var(--font-mono); }
         @media (max-width: 768px) {
-          .adm-grid { grid-template-columns: 1fr; }
           .adm-row3 { grid-template-columns: 1fr; }
         }
       `}</style>
