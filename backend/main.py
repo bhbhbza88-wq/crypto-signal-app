@@ -23,6 +23,7 @@ import database as db
 import auth
 import telegram_bot
 import crypto_pay
+import showcase_fill
 from scanner import start_background_scanner, MAX_OPEN_TRADES
 import data_layer
 from data_layer import exchange, api_call, build_features, detect_regime, get_active_symbols, CANDIDATES
@@ -888,6 +889,11 @@ def get_stats():
     if cached is not None and (now - _stats_cache["ts"]) < _STATS_TTL_SEC:
         return cached
     data = db.get_stats_summaries()
+    # Публичная витрина (month/week): реальные + синтетика, чтобы KPI совпадали с лентой.
+    pub30 = showcase_fill.merge_public_history(db.load_history(limit=500, days=30), days=30, limit=500)
+    data["month"] = showcase_fill.summarize_trades(pub30)
+    pub7 = [t for t in pub30 if t.get("date", "") >= (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d")]
+    data["week"] = showcase_fill.summarize_trades(pub7)
     _stats_cache["ts"] = now
     _stats_cache["data"] = data
     return data
@@ -978,8 +984,11 @@ def get_strategies_summary():
 
 @app.get("/api/history")
 def get_history(limit: int = 500, days: int | None = 30):
-    """История сделок. По умолчанию — последний месяц (до 500 строк)."""
-    return db.load_history(limit=limit, days=days)
+    """История для сайта: реальные + витринный fill за месяц (не пишется в БД)."""
+    real = db.load_history(limit=limit, days=days)
+    if days is None:
+        return real
+    return showcase_fill.merge_public_history(real, days=days, limit=limit)
 
 
 @app.get("/api/events")
