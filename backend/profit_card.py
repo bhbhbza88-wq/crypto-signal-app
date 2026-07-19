@@ -84,21 +84,18 @@ def _load_bg() -> Image.Image:
     return Image.open(BG_PATH).convert("RGB")
 
 
-@lru_cache(maxsize=1)
-def _load_bg() -> Image.Image:
-    if not BG_PATH.exists():
-        raise FileNotFoundError(f"Нет фона карточки: {BG_PATH}")
-    return Image.open(BG_PATH).convert("RGB")
-
-
 def _bg_for_text() -> Image.Image:
-    """Фон как на эталоне: слева чистое чёрное поле под текст, эмблема только справа."""
-    img = _load_bg().copy()
-    W, H = img.size
-    draw = ImageDraw.Draw(img)
-    # Жёстко заливаем левую/среднюю зону — иначе ромбы Binance лезут под «Бессрочный» и ROI.
-    draw.rectangle([0, 0, int(W * 0.68), int(H * 0.62)], fill=(0, 0, 0))
-    return img
+    """Как на эталоне Binance: целая эмблема справа, слева чистое поле под текст."""
+    src = _load_bg()
+    W, H = src.size
+    # Сдвигаем вотермарк вправо — на исходнике ромбы начинаются ~0.34 и лезут под текст.
+    shift = int(W * 0.22)
+    out = Image.new("RGB", (W, H), (0, 0, 0))
+    out.paste(src, (shift, 0))
+    # Подстраховочная чёрная полоса слева (текст + зазор до эмблемы).
+    draw = ImageDraw.Draw(out)
+    draw.rectangle([0, 0, int(W * 0.52), H], fill=(0, 0, 0))
+    return out
 
 
 def render_profit_card(
@@ -134,11 +131,10 @@ def render_profit_card(
     W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # Текст целиком внутри очищенной зоны (эмблема только справа).
-    pad = int(W * 0.078)
-    clear_w = int(W * 0.55)
-    text_max_w = max(120, clear_w - pad - int(W * 0.02))
-    col2_x = int(W * 0.50)
+    # Текст как на эталоне: заканчивается ~0.46–0.52 ширины, эмблема правее.
+    pad = int(W * 0.070)
+    text_max_w = max(120, int(W * 0.46) - pad)
+    col2_x = int(W * 0.48)
 
     def fit_font(text: str, start: int, bold: bool, min_size: int = 14) -> ImageFont.FreeTypeFont:
         size = start
