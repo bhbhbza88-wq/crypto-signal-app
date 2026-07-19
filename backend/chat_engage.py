@@ -259,8 +259,10 @@ def fire_close(symbol: str, side: str, result: str, pnl: float,
 
 
 async def _do_open_one_chat(client, chat: str, symbol: str, side: str, entry,
-                            stagger_sec: float = 0) -> None:
-    """Привет → пауза 1.5–10 мин → ТВХ в одном чате."""
+                            stagger_sec: float = 0,
+                            greet_min: float | None = None,
+                            greet_max: float | None = None) -> None:
+    """Привет → пауза → ТВХ в одном чате."""
     try:
         if stagger_sec > 0:
             await asyncio.sleep(stagger_sec)
@@ -269,7 +271,11 @@ async def _do_open_one_chat(client, chat: str, symbol: str, side: str, entry,
         await client.send_message(entity, greet)
         print(f"[chat_engage] greet → {chat}")
 
-        delay = random.uniform(_GREET_MIN, _GREET_MAX)
+        lo = _GREET_MIN if greet_min is None else float(greet_min)
+        hi = _GREET_MAX if greet_max is None else float(greet_max)
+        if hi < lo:
+            hi = lo
+        delay = random.uniform(lo, hi)
         print(f"[chat_engage] {chat}: ТВХ через {delay / 60:.1f} мин")
         await asyncio.sleep(delay)
 
@@ -300,6 +306,30 @@ async def _do_open(client, symbol: str, side: str, entry) -> None:
     for chat, res in zip(chats, results):
         if isinstance(res, Exception):
             print(f"[chat_engage] open task fail {chat}: {res}")
+
+
+def fire_test(chat: str = "kriptovaluta_01",
+              symbol: str = "BTC/USDT",
+              side: str = "LONG",
+              entry: float = 65000.0,
+              fast: bool = True) -> tuple[bool, str]:
+    """Очередь тестового привет→ТВХ в один чат. fast=True → пауза ~25–45с."""
+    if not is_configured():
+        return False, "chat_engage не сконфигурирован"
+    if _queue is None or _main_loop is None:
+        return False, "воркер ещё не готов (нужен живой telegram_ingest / chat session)"
+    chat = (chat or "").strip().lstrip("@")
+    if not chat:
+        return False, "не указан chat"
+    _enqueue({
+        "kind": "test_open",
+        "chat": chat,
+        "symbol": symbol,
+        "side": side,
+        "entry": entry,
+        "fast": bool(fast),
+    })
+    return True, f"тест в очередь → @{chat} (привет, потом ТВХ)"
 
 
 async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
@@ -353,6 +383,18 @@ async def _worker_loop(client):
         try:
             if job["kind"] == "open":
                 await _do_open(client, job["symbol"], job["side"], job["entry"])
+            elif job["kind"] == "test_open":
+                fast = job.get("fast", True)
+                await _do_open_one_chat(
+                    client,
+                    job["chat"],
+                    job["symbol"],
+                    job["side"],
+                    job["entry"],
+                    stagger_sec=0,
+                    greet_min=25 if fast else None,
+                    greet_max=45 if fast else None,
+                )
             elif job["kind"] == "close":
                 await _do_close(
                     client, job["symbol"], job["side"],

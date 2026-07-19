@@ -55,6 +55,15 @@ export const api = {
   adminAddSignal: (data) => post('/admin/add-signal', data),
   adminGrantPremium: (email, days = 30, tier = 'premium') =>
     post('/admin/grant-premium', { email, days, tier }),
+  adminChatEngageTest: (data = {}) =>
+    post('/admin/chat-engage-test', {
+      chat: 'kriptovaluta_01',
+      symbol: 'BTC/USDT',
+      signal: 'LONG',
+      entry: 65000,
+      fast: true,
+      ...data,
+    }),
   adminPremiumRequests: () => get('/admin/premium-requests'),
   adminChannelDaily: (days = 14) => get(`/admin/channel-daily?days=${days}`),
   analyzeChannel: (channelUrl, days = 30, entryTimeoutHours = 6, maxHoldHours = 168, riskPerTradeUsd = 100) =>

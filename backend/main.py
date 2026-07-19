@@ -366,6 +366,33 @@ def admin_grant_premium(req: GrantPremiumRequest, admin=Depends(require_admin)):
     }
 
 
+class ChatEngageTestRequest(BaseModel):
+    chat: str = "kriptovaluta_01"
+    symbol: str = "BTC/USDT"
+    signal: str = "LONG"
+    entry: float = 65000.0
+    fast: bool = True
+
+
+@app.post("/api/admin/chat-engage-test")
+def admin_chat_engage_test(req: ChatEngageTestRequest, admin=Depends(require_admin)):
+    """Тест: привет → через ~30с ТВХ в один чат (по умолчанию kriptovaluta_01)."""
+    import chat_engage
+    side = (req.signal or "LONG").upper().strip()
+    if side not in ("LONG", "SHORT"):
+        raise HTTPException(status_code=400, detail="signal: LONG или SHORT")
+    ok, msg = chat_engage.fire_test(
+        chat=req.chat,
+        symbol=req.symbol,
+        side=side,
+        entry=float(req.entry),
+        fast=bool(req.fast),
+    )
+    if not ok:
+        raise HTTPException(status_code=503, detail=msg)
+    return {"ok": True, "detail": msg, "chat": req.chat.lstrip("@"), "fast": req.fast}
+
+
 @app.get("/api/admin/premium-requests")
 def admin_premium_requests(admin=Depends(require_admin)):
     """Последние заявки «Я оплатил» из Telegram-бота."""

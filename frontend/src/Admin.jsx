@@ -73,6 +73,21 @@ export default function Admin() {
     }
   }
 
+  async function runEngageTest() {
+    setEngageBusy(true); setEngageMsg(null)
+    try {
+      const r = await api.adminChatEngageTest({ chat: 'kriptovaluta_01', fast: true })
+      setEngageMsg({
+        ok: true,
+        text: `${r.detail}. Смотри @kriptovaluta_01: сначала привет, через ~30–45с ТВХ.`,
+      })
+    } catch (err) {
+      setEngageMsg({ ok: false, text: err.message })
+    } finally {
+      setEngageBusy(false)
+    }
+  }
+
   async function revokePremium(email) {
     if (!confirm(`Снять Premium с ${email}?`)) return
     setPremiumBusy(true); setPremiumMsg(null)
@@ -211,6 +226,24 @@ export default function Admin() {
             })}
           </div>
         )}
+      </section>
+
+      {/* Тест chat engage */}
+      <section className="adm-card" style={{ marginTop: 16 }}>
+        <h2 className="section-title">Тест чатов (engage)</h2>
+        <p className="adm-hint" style={{ marginTop: -6 }}>
+          Отправит в @kriptovaluta_01: привет, потом через ~30–45 сек фейковый ТВХ (BTC LONG). Нужен живой telegram ingest.
+        </p>
+        {engageMsg && <div className={engageMsg.ok ? 'adm-msg-ok' : 'adm-msg-err'}>{engageMsg.text}</div>}
+        <button
+          className="adm-submit"
+          type="button"
+          disabled={engageBusy}
+          onClick={runEngageTest}
+          style={{ marginTop: 8 }}
+        >
+          {engageBusy ? 'Отправка…' : 'Тест → kriptovaluta_01'}
+        </button>
       </section>
 
       {/* Дать Premium */}
