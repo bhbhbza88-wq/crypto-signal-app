@@ -15,7 +15,9 @@ Env:
   TELEGRAM_PUBLIC_CHANNEL_URL   — https://t.me/... для кнопок/бота
   TELEGRAM_ADMIN_IDS            — CSV telegram user id админов (/grant)
   PUBLIC_CHANNEL_MAX_LOSS_PCT   — макс. |PnL%| минуса для публикации в публичный канал (default 3.0)
-  CRYPTO_PAY_*
+  CRYPTO_PAY_ADDRESS / NETWORK / AMOUNT — ручной USDT (fallback)
+  CRYPTO_PAY_API_TOKEN                  — токен Crypto Pay (@CryptoBot) для автооплаты
+  CRYPTO_PAY_ASSET / CRYPTO_PAY_DAYS    — монета (USDT) и срок Premium после оплаты
 """
 from __future__ import annotations
 
@@ -210,15 +212,17 @@ def _menu_kb():
     ]}
 
 
-def _premium_kb():
-    return {"inline_keyboard": [
-        [{"text": "✅ Я оплатил", "callback_data": "paid"}],
-        [{"text": f"✍️ Написать @{SUPPORT_USER}", "url": SUPPORT_URL}],
-        [
-            {"text": "🌐 Тарифы", "url": f"{SITE_URL}/app/pricing"},
-            {"text": "‹ Меню", "callback_data": "menu"},
-        ],
-    ]}
+def _premium_kb(pay_url: str | None = None):
+    rows = []
+    if pay_url:
+        rows.append([{"text": "💳 Оплатить в Crypto Bot", "url": pay_url}])
+    rows.append([{"text": "✅ Я оплатил вручную", "callback_data": "paid"}])
+    rows.append([{"text": f"✍️ Написать @{SUPPORT_USER}", "url": SUPPORT_URL}])
+    rows.append([
+        {"text": "🌐 Тарифы", "url": f"{SITE_URL}/app/pricing"},
+        {"text": "‹ Меню", "callback_data": "menu"},
+    ])
+    return {"inline_keyboard": rows}
 
 
 def _results_cta():
@@ -323,16 +327,46 @@ async def send_welcome(chat_id: int, start_payload: str = "", with_dock: bool = 
 
 
 async def send_premium(chat_id: int):
+    import crypto_pay
+
+    pay_url = None
+    auto_block = ""
+
+    if crypto_pay.is_configured():
+        import database as db
+        user = db.get_user_by_telegram_id(chat_id)
+        email = user["email"] if user else None
+        invoice = await crypto_pay.create_invoice(telegram_id=chat_id, email=email)
+        if invoice:
+            pay_url = (
+                invoice.get("bot_invoice_url")
+                or invoice.get("pay_url")
+                or invoice.get("mini_app_invoice_url")
+            )
+            auto_block = (
+                f"<b>1.</b> Нажми <b>«Оплатить в Crypto Bot»</b> ниже\n"
+                f"Сумма: <b>{crypto_pay.CRYPTO_PAY_AMOUNT} {crypto_pay.CRYPTO_PAY_ASSET}</b>\n"
+                f"После оплаты Premium и invite в каналы придут сами.\n"
+            )
+            if not user:
+                auto_block += (
+                    "\n⚠️ Лучше сначала привяжи Telegram на сайте "
+                    "(Pricing → Подключить Telegram), чтобы Premium сел на нужный аккаунт.\n"
+                )
+
     if CRYPTO_PAY_ADDRESS:
-        pay = (
-            f"<b>1.</b> Переведи <b>${CRYPTO_PAY_AMOUNT}</b> USDT\n"
+        manual = (
+            f"<b>{'2' if pay_url else '1'}.</b> Или перевод вручную <b>${CRYPTO_PAY_AMOUNT}</b> USDT\n"
             f"Сеть: <b>{CRYPTO_PAY_NETWORK}</b>\n"
-            f"<code>{CRYPTO_PAY_ADDRESS}</code>\n\n"
-            f"<b>2.</b> Нажми <b>«Я оплатил»</b> в боте и укажи email с nowicki.trade\n"
-            f"или напиши <a href=\"{SUPPORT_URL}\">@{SUPPORT_USER}</a> (email + скрин / tx)"
+            f"<code>{CRYPTO_PAY_ADDRESS}</code>\n"
+            f"Потом «Я оплатил вручную» + email с nowicki.trade"
         )
+    elif not pay_url:
+        manual = f"Для оплаты напиши <a href=\"{SUPPORT_URL}\">@{SUPPORT_USER}</a>"
     else:
-        pay = f"Для оплаты напиши <a href=\"{SUPPORT_URL}\">@{SUPPORT_USER}</a>"
+        manual = f"Проблемы с оплатой? Напиши <a href=\"{SUPPORT_URL}\">@{SUPPORT_USER}</a>"
+
+    pay = "\n".join(p for p in (auto_block, manual) if p)
     text = (
         f"<b>💎 Premium · ${CRYPTO_PAY_AMOUNT}/мес</b>\n"
         f"{HR}\n"
@@ -343,7 +377,7 @@ async def send_premium(chat_id: int):
         f"{HR}\n"
         f"{pay}"
     )
-    await send_message(chat_id, text, _premium_kb())
+    await send_message(chat_id, text, _premium_kb(pay_url))
 
 
 async def ask_paid_email(chat_id: int):

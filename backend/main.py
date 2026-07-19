@@ -22,6 +22,7 @@ from pydantic import BaseModel
 import database as db
 import auth
 import telegram_bot
+import crypto_pay
 from scanner import start_background_scanner, MAX_OPEN_TRADES
 import data_layer
 from data_layer import exchange, api_call, build_features, detect_regime, get_active_symbols, CANDIDATES
@@ -47,6 +48,12 @@ async def lifespan(app: FastAPI):
     if chat_engage.needs_own_client():
         asyncio.create_task(chat_engage.run())
     asyncio.create_task(telegram_bot.set_webhook())
+    if crypto_pay.is_configured():
+        domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
+        if domain:
+            asyncio.create_task(
+                crypto_pay.set_webhook(f"https://{domain}/api/crypto-pay-webhook")
+            )
     yield
 
 
@@ -109,6 +116,23 @@ async def telegram_webhook(request: Request,
     update = await request.json()
     await telegram_bot.handle_update(update)
     return {"ok": True}
+
+
+@app.post("/api/crypto-pay-webhook")
+async def crypto_pay_webhook(request: Request):
+    """Webhook Crypto Pay (@CryptoBot): invoice_paid → автовыдача Premium."""
+    if not crypto_pay.is_configured():
+        raise HTTPException(status_code=503, detail="Crypto Pay not configured")
+    body = await request.body()
+    signature = request.headers.get("crypto-pay-api-signature")
+    if not crypto_pay.verify_webhook_signature(body, signature):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    try:
+        update = json.loads(body.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    result = await crypto_pay.handle_webhook_update(update)
+    return result
 
 
 # ── Аутентификация / монетизация ──────────────────────────────────
