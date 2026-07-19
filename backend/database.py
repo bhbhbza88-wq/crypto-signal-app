@@ -515,11 +515,22 @@ def add_to_history(symbol, signal, entry, result, pnl, trader_id=None):
     print(f"📝 {symbol} {result} {pnl:+.1f}%")
 
 
-def load_history(limit=200):
+def load_history(limit=200, days: int | None = None):
+    """Последние сделки. Если days задан — только за последние N календарных дней."""
+    limit = max(1, min(int(limit or 200), 5000))
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM history ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
+        if days is not None:
+            from datetime import timedelta
+            days = max(1, min(int(days), 365))
+            since = (datetime.now() - timedelta(days=days - 1)).strftime('%Y-%m-%d')
+            rows = conn.execute(
+                "SELECT * FROM history WHERE date >= ? ORDER BY id DESC LIMIT ?",
+                (since, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM history ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
         return [dict(r) for r in rows]
 
 
@@ -985,15 +996,17 @@ def _stats_bucket(conn, where_sql="", params=()):
 
 
 def get_stats_summaries():
-    """today / week / all_time без загрузки тысяч строк в Python."""
+    """today / week / month / all_time без загрузки тысяч строк в Python."""
     from datetime import timedelta
     now = datetime.now()
     today_str = now.strftime('%Y-%m-%d')
-    week_ago = (now - timedelta(days=7)).strftime('%Y-%m-%d')
+    week_ago = (now - timedelta(days=6)).strftime('%Y-%m-%d')
+    month_ago = (now - timedelta(days=29)).strftime('%Y-%m-%d')
     with get_conn() as conn:
         return {
             "today": _stats_bucket(conn, "WHERE date=?", (today_str,)),
             "week": _stats_bucket(conn, "WHERE date>=?", (week_ago,)),
+            "month": _stats_bucket(conn, "WHERE date>=?", (month_ago,)),
             "all_time": _stats_bucket(conn),
         }
 

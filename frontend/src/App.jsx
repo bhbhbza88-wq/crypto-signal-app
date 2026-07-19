@@ -208,7 +208,7 @@ export default function App() {
 
   const fetchStatsHistory = useCallback(async () => {
     try {
-      const [h, st] = await Promise.all([api.getHistory(50), api.getStats()])
+      const [h, st] = await Promise.all([api.getHistory(500, 30), api.getStats()])
       setHistory(h)
       setStats(st)
       setError(null)
@@ -425,7 +425,7 @@ export default function App() {
           <ErrorBoundary resetKey={tab} t={t}>
           <Suspense fallback={<div className="section animate-in" style={{ padding: 40, color: 'var(--text-tertiary)' }}>{t('load.section')}</div>}>
           {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">{t('ai.title')} <span className="beta-tag">BETA</span></h1></div><AIChat /></section>}
-          {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">{t('hist.title')}</h1></div><HistoryTable history={history} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
+          {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">{t('hist.title')}</h1><p className="page-subtitle">{t('hist.subtitle')}</p></div><HistoryTable history={history} stats={stats} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
           {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} /></section>}
           {tab === 'admin' && user?.is_admin && <Admin />}
           {tab === 'channel_analyzer' && user?.is_admin && <section className="section animate-in"><ChannelAnalyzer /></section>}

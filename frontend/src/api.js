@@ -59,7 +59,12 @@ export const api = {
   logout: () => post('/auth/logout'),
   me: () => get('/auth/me'),
   getSignals: () => get('/signals'),
-  getHistory: (limit = 100) => get(`/history?limit=${limit}`),
+  getHistory: (limit = 500, days = 30) => {
+    const params = new URLSearchParams()
+    params.set('limit', String(limit))
+    if (days != null) params.set('days', String(days))
+    return get(`/history?${params}`)
+  },
   getStats: () => get('/stats'),
   aiChat: (messages) => post('/ai/chat', { messages }),
   adminGetTraders: () => get('/admin/traders'),

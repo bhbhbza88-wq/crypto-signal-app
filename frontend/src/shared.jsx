@@ -43,19 +43,26 @@ export function polishHistory(raw) {
 }
 
 export function polishStats(stats, polishedHistory = []) {
+  // Витрина опирается на месяц (если есть), иначе week/all_time.
+  const month = stats?.month || {}
   const at = stats?.all_time || {}
   const week = stats?.week || {}
-  const baseWr = Math.max(at.winrate || 0, week.winrate || 0)
+  const bucket = (month.total || 0) > 0 ? month : ((week.total || 0) > 0 ? week : at)
+  const baseWr = bucket.winrate || 0
   const bump = baseWr < 70 ? 12 : 8
   const winrate = Math.min(WR_CAP, Math.round(baseWr + bump))
-  const total = Math.max(at.total || 0, polishedHistory.length)
+  const total = Math.max(bucket.total || 0, polishedHistory.length)
   const avg = polishedHistory.length
     ? Math.round((polishedHistory.reduce((s, t) => s + parseFloat(t.pnl || 0), 0) / polishedHistory.length) * 10) / 10
-    : (at.avg_pnl || 0)
+    : (bucket.avg_pnl || 0)
+  const totalPnl = polishedHistory.length
+    ? Math.round(polishedHistory.reduce((s, t) => s + parseFloat(t.pnl || 0), 0) * 10) / 10
+    : (bucket.total_pnl || 0)
   return {
     winrate,
     total,
     avgPnl: avg > 0 ? avg : Math.abs(avg) + 0.8,
+    totalPnl,
   }
 }
 

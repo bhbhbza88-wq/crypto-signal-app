@@ -20,7 +20,7 @@ function useLiveStats() {
   useEffect(() => {
     async function load() {
       try {
-        const [s, h] = await Promise.all([api.getStats(), api.getHistory(200)])
+        const [s, h] = await Promise.all([api.getStats(), api.getHistory(500, 30)])
         setStats(s)
         setHistory(h)
       } catch { /* ignore */ }

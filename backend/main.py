@@ -977,8 +977,9 @@ def get_strategies_summary():
 
 
 @app.get("/api/history")
-def get_history(limit: int = 100):
-    return db.load_history(limit=limit)
+def get_history(limit: int = 500, days: int | None = 30):
+    """История сделок. По умолчанию — последний месяц (до 500 строк)."""
+    return db.load_history(limit=limit, days=days)
 
 
 @app.get("/api/events")
