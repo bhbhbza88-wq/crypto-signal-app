@@ -37,8 +37,8 @@ TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "")
 # "username1:Display Name 1,username2:Display Name 2"
 TELEGRAM_SOURCE_CHANNELS = os.getenv("TELEGRAM_SOURCE_CHANNELS", "")
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-AI_MODEL = "gpt-4o-mini"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+AI_MODEL = "llama-3.3-70b-versatile"
 
 SOURCE_TYPE = "telegram_aggregate"
 AGG_MAX_OPEN = 8  # с 7 источниками лимит 5 слишком рано режет поток
@@ -107,7 +107,7 @@ def _parse_channel_config(raw: str) -> dict:
 
 
 async def _extract_signal(text: str) -> dict | None:
-    if not OPENAI_API_KEY or not text.strip():
+    if not GROQ_API_KEY or not text.strip():
         return None
     payload = {
         "model": AI_MODEL,
@@ -121,9 +121,9 @@ async def _extract_signal(text: str) -> dict | None:
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
+                "https://api.groq.com/openai/v1/chat/completions",
                 json=payload,
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
             )
             resp.raise_for_status()
             data = resp.json()
@@ -144,8 +144,8 @@ async def _extract_signal_from_image(image_bytes: bytes, caption: str = "") -> d
     на картинке) без подписи или с почти пустой подписью — такие посты раньше
     вообще не попадали в анализ, потому что _extract_signal читает только
     текст. Тот же промпт и та же схема ответа, просто по картинке вместо
-    текста (gpt-4o-mini умеет читать изображения)."""
-    if not OPENAI_API_KEY or not image_bytes:
+    текста (llama-3.2-90b-vision-preview умеет читать изображения)."""
+    if not GROQ_API_KEY or not image_bytes:
         return None
     b64 = base64.b64encode(image_bytes).decode()
     user_content = [
@@ -153,7 +153,7 @@ async def _extract_signal_from_image(image_bytes: bytes, caption: str = "") -> d
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
     ]
     payload = {
-        "model": AI_MODEL,
+        "model": "llama-3.2-90b-vision-preview",
         "max_tokens": 200,
         "messages": [
             {"role": "system", "content": EXTRACTOR_SYSTEM_PROMPT},
@@ -164,9 +164,9 @@ async def _extract_signal_from_image(image_bytes: bytes, caption: str = "") -> d
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
+                "https://api.groq.com/openai/v1/chat/completions",
                 json=payload,
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
             )
             resp.raise_for_status()
             data = resp.json()
@@ -295,7 +295,7 @@ CLOSE_SYSTEM_PROMPT = (
 
 
 async def _extract_close_signal(text: str, symbol_base: str) -> dict | None:
-    if not OPENAI_API_KEY or not text.strip():
+    if not GROQ_API_KEY or not text.strip():
         return None
     payload = {
         "model": AI_MODEL,
@@ -309,9 +309,9 @@ async def _extract_close_signal(text: str, symbol_base: str) -> dict | None:
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
+                "https://api.groq.com/openai/v1/chat/completions",
                 json=payload,
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
             )
             resp.raise_for_status()
             data = resp.json()

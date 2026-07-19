@@ -603,11 +603,11 @@ def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTas
 
 
 # ── AI Ассистент (серверный ключ) ────────────────────────────────
-# Ключ живёт в env OPENAI_API_KEY (как и телеграм-токен — никогда в коде).
+# Ключ живёт в env GROQ_API_KEY (как и телеграм-токен — никогда в коде).
 # Лимиты в памяти процесса: при рестарте сбрасываются — для Этапа 1 достаточно.
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-AI_MODEL = os.getenv("AI_MODEL", "gpt-4o").strip() or "gpt-4o"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+AI_MODEL = os.getenv("AI_MODEL", "llama-3.3-70b-versatile").strip() or "llama-3.3-70b-versatile"
 AI_DAILY_LIMITS = {'free': 5, 'premium': 50, 'vip': 200}
 _ai_usage: dict[int, dict] = {}   # user_id -> {'date': 'YYYY-MM-DD', 'count': int}
 
@@ -776,7 +776,7 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
     user = auth.user_from_token(_token_from_header(authorization))
     if not user:
         raise HTTPException(status_code=401, detail="Войди в аккаунт, чтобы пользоваться AI-ассистентом")
-    if not OPENAI_API_KEY:
+    if not GROQ_API_KEY:
         raise HTTPException(status_code=503, detail="AI-ассистент временно недоступен")
 
     tier = auth.effective_tier(user)
@@ -808,9 +808,9 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
         'messages': msgs,
     }).encode()
     request = urllib.request.Request(
-        'https://api.openai.com/v1/chat/completions',
+        'https://api.groq.com/openai/v1/chat/completions',
         data=payload,
-        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {OPENAI_API_KEY}'},
+        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {GROQ_API_KEY}'},
     )
     try:
         with urllib.request.urlopen(request, timeout=90) as resp:
