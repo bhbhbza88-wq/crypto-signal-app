@@ -84,6 +84,30 @@ def _load_bg() -> Image.Image:
     return Image.open(BG_PATH).convert("RGB")
 
 
+@lru_cache(maxsize=1)
+def _load_bg() -> Image.Image:
+    if not BG_PATH.exists():
+        raise FileNotFoundError(f"Нет фона карточки: {BG_PATH}")
+    return Image.open(BG_PATH).convert("RGB")
+
+
+def _bg_for_text() -> Image.Image:
+    """Фон с чистой левой зоной: эмблема Binance остаётся справа, под текст не залезает."""
+    img = _load_bg().copy()
+    W, H = img.size
+    clear_w = int(W * 0.48)
+    clear_h = int(H * 0.58)
+    px = img.load()
+    for y in range(clear_h):
+        for x in range(clear_w):
+            r, g, b = px[x, y]
+            # слева гасим эмблему почти в ноль, у правого края зоны — плавный переход
+            t = 1.0 - (x / max(clear_w - 1, 1))  # 1 → 0
+            keep = 1.0 - t * 0.94
+            px[x, y] = (int(r * keep), int(g * keep), int(b * keep))
+    return img
+
+
 def render_profit_card(
     symbol: str,
     side: str,
@@ -113,14 +137,13 @@ def render_profit_card(
     roi_color = GREEN if roi >= 0 else RED
     roi_str = f"+{roi:.2f}%" if roi >= 0 else f"{roi:.2f}%"
 
-    img = _load_bg().copy()
+    img = _bg_for_text()
     W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # Эмблема Binance справа сверху — текст строго в левой зоне (~40% ширины),
-    # как на эталонном share: «Бессрочный» и ROI не пересекают ромбы.
+    # Текст в левой зоне; эмблема только справа (фон уже почищен).
     pad = int(W * 0.078)
-    text_max_w = int(W * 0.40)
+    text_max_w = int(W * 0.48)
     col2_x = int(W * 0.50)
 
     def fit_font(text: str, start: int, bold: bool, min_size: int = 14) -> ImageFont.FreeTypeFont:
@@ -132,18 +155,17 @@ def render_profit_card(
             size -= 1
         return _font(min_size, bold=bold)
 
-    font_pair = fit_font(pair_line, max(22, int(H * 0.034)), bold=True, min_size=16)
-    font_side = _font(max(17, int(H * 0.028)), bold=False)
-    font_roi = fit_font(roi_str, max(40, int(H * 0.088)), bold=True, min_size=26)
-    font_label = _font(max(15, int(H * 0.024)), bold=False)
-    font_val = _font(max(19, int(H * 0.031)), bold=True)
+    font_pair = fit_font(pair_line, max(26, int(H * 0.040)), bold=True, min_size=18)
+    font_side = _font(max(18, int(H * 0.030)), bold=False)
+    font_roi = fit_font(roi_str, max(48, int(H * 0.100)), bold=True, min_size=30)
+    font_label = _font(max(16, int(H * 0.026)), bold=False)
+    font_val = _font(max(20, int(H * 0.033)), bold=True)
 
-    # Вертикаль как на эталоне: пара → лонг → ROI ниже лого → цены
-    y_pair = int(H * 0.228)
-    y_side = int(H * 0.288)
-    y_roi = int(H * 0.420)
-    y_lab = int(H * 0.660)
-    y_val = int(H * 0.715)
+    y_pair = int(H * 0.235)
+    y_side = int(H * 0.300)
+    y_roi = int(H * 0.430)
+    y_lab = int(H * 0.665)
+    y_val = int(H * 0.720)
 
     draw.text((pad, y_pair), pair_line, font=font_pair, fill=WHITE)
 
