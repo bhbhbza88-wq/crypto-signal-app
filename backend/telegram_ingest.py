@@ -379,6 +379,7 @@ async def _try_close_from_channel(display_name: str, text: str):
             chat_engage.fire_close(
                 symbol, trade['signal'], 'channel_closed', pnl,
                 entry=trade['entry'], exit_price=price,
+                exchange=trade.get('exchange'), opened_at=trade.get('opened_at'),
             )
         except Exception as e:
             print(f"[telegram_ingest] chat_engage close: {e}")

@@ -163,7 +163,8 @@ def fire_open(symbol: str, side: str, entry) -> None:
 
 
 def fire_close(symbol: str, side: str, result: str, pnl: float,
-               entry: float | None = None, exit_price: float | None = None) -> None:
+               entry: float | None = None, exit_price: float | None = None,
+               exchange: str | None = None, opened_at: str | None = None) -> None:
     if not is_configured():
         return
     _enqueue({
@@ -174,6 +175,8 @@ def fire_close(symbol: str, side: str, result: str, pnl: float,
         "pnl": pnl,
         "entry": entry,
         "exit_price": exit_price,
+        "exchange": exchange,     # 'bybit'/'binance' — какой шаблон карточки рисовать
+        "opened_at": opened_at,   # для реального «Срок ...» на Bybit-карточке
     })
 
 
@@ -203,6 +206,24 @@ def _random_practice_params() -> tuple[str, str, float]:
     side = "LONG" if random.random() < 0.8 else "SHORT"
     pnl = round(random.uniform(1.5, 6.5), 2)  # сырой % движения, ROI = pnl × leverage
     return symbol, side, pnl
+
+
+def _random_duration_minutes() -> float:
+    """Правдоподобный срок удержания позиции: от пары минут до ~2 суток."""
+    return random.uniform(6, 60 * 46)
+
+
+# Условный размер маржи для перевода % движения в доллары на Bybit-карточке
+# (у нас нет реального счёта юзера — берём разумный диапазон позиции).
+_ASSUMED_MARGIN_RANGE = (35.0, 260.0)
+
+
+def _pnl_to_usdt(pnl_pct: float, leverage: int | None = None) -> float:
+    from profit_card import SHARE_LEVERAGE
+    leverage = leverage or SHARE_LEVERAGE
+    show_pnl = polish_pnl(pnl_pct, decimals=2)
+    margin = random.uniform(*_ASSUMED_MARGIN_RANGE)
+    return round(margin * leverage * show_pnl / 100.0, 2)
 
 
 def _entry_from_real_price(exit_price: float, side: str, pnl_pct: float) -> float:
@@ -251,7 +272,18 @@ def fire_practice_profit(
     return True, f"практика профита → @{target}: {symbol} {side} +{pnl:.2f}%"
 
 
-def _render_card(symbol, side, entry, pnl, exit_price):
+def _render_card(symbol, side, entry, pnl, exit_price, exchange=None, duration_minutes=None):
+    """Шаблон карточки — по бирже, где реально торгуется монета:
+    Bybit → скрин из приложения Bybit (с реф-плашкой), иначе — Binance share.
+    Так карточка совпадает с площадкой, а не выбирается вслепую."""
+    exchange = (exchange or "bybit").lower().strip()
+    if exchange == "bybit":
+        from profit_card import render_bybit_card
+        pnl_usdt = _pnl_to_usdt(float(pnl))
+        return render_bybit_card(
+            symbol=symbol, side=side, entry=float(entry), exit_price=float(exit_price),
+            pnl_usdt=pnl_usdt, duration_minutes=duration_minutes or _random_duration_minutes(),
+        )
     from profit_card import render_profit_card
     return render_profit_card(
         symbol=symbol, side=side, entry=float(entry),
@@ -269,8 +301,22 @@ async def _send_profit(client, target, text: str, photo: bytes | None) -> None:
         await client.send_message(entity, text)
 
 
+def _duration_from_opened_at(opened_at: str | None) -> float | None:
+    """Реальный срок удержания сделки в минутах (для Bybit-карточки), если знаем opened_at."""
+    if not opened_at:
+        return None
+    try:
+        from datetime import datetime
+        delta = datetime.now() - datetime.fromisoformat(opened_at)
+        minutes = delta.total_seconds() / 60.0
+        return minutes if minutes > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
 async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
-                    entry=None, exit_price=None) -> None:
+                    entry=None, exit_price=None, exchange: str | None = None,
+                    opened_at: str | None = None) -> None:
     try:
         pnl_f = float(pnl)
     except (TypeError, ValueError):
@@ -283,7 +329,9 @@ async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
     photo = None
     if entry is not None:
         try:
-            photo = _render_card(symbol, side, entry, pnl_f, exit_price)
+            duration_minutes = _duration_from_opened_at(opened_at)
+            photo = _render_card(symbol, side, entry, pnl_f, exit_price,
+                                  exchange=exchange, duration_minutes=duration_minutes)
         except Exception as e:
             print(f"[chat_engage] profit_card: {e}")
 
@@ -300,46 +348,48 @@ async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
 
 
 async def _resolve_practice_prices(symbol: str, side: str, pnl: float,
-                                    entry: float | None, exit_price: float | None) -> tuple[float, float]:
-    """Тянем реальную рыночную цену и считаем вход/выход так, чтобы движение
-    точно совпадало с pnl% и было привязано к текущей цене монеты (не к рандому)."""
-    if entry is not None and exit_price is not None:
-        return float(entry), float(exit_price)
-
+                                    entry: float | None, exit_price: float | None) -> tuple[float, float, str]:
+    """Тянем реальную рыночную цену (и биржу, где она реально торгуется) и
+    считаем вход/выход так, чтобы движение точно совпадало с pnl% и было
+    привязано к текущей цене монеты (не к рандому)."""
     real_last = None
-    try:
-        import data_layer
-        ticker = await asyncio.to_thread(data_layer.fetch_ticker, symbol)
-        if ticker and ticker.get("last"):
-            real_last = float(ticker["last"])
-    except Exception as e:
-        print(f"[chat_engage] fetch_ticker {symbol}: {e}")
+    exchange = "bybit"
+    if entry is None or exit_price is None:
+        try:
+            import data_layer
+            listed, preferred, ticker = await asyncio.to_thread(data_layer.probe_listings, symbol)
+            if preferred and ticker and ticker.get("last"):
+                real_last = float(ticker["last"])
+                exchange = preferred
+        except Exception as e:
+            print(f"[chat_engage] probe_listings {symbol}: {e}")
 
-    if real_last is None:
-        lo, hi = _PRACTICE_FALLBACK_RANGE.get(symbol, (1.0, 100.0))
-        real_last = random.uniform(lo, hi)
-        print(f"[chat_engage] тикер {symbol} недоступен — fallback-цена {real_last}")
+        if real_last is None:
+            lo, hi = _PRACTICE_FALLBACK_RANGE.get(symbol, (1.0, 100.0))
+            real_last = random.uniform(lo, hi)
+            print(f"[chat_engage] тикер {symbol} недоступен — fallback-цена {real_last}")
 
     if exit_price is None:
-        exit_price = real_last
+        exit_price = real_last if real_last is not None else float(entry)
     if entry is None:
         entry = _entry_from_real_price(exit_price, side, pnl)
-    return float(entry), float(exit_price)
+    return float(entry), float(exit_price), exchange
 
 
 async def _do_practice_profit(client, target: str, symbol: str, side: str,
                               pnl: float, entry: float | None = None,
                               exit_price: float | None = None) -> None:
-    entry, exit_price = await _resolve_practice_prices(symbol, side, pnl, entry, exit_price)
+    entry, exit_price, exchange = await _resolve_practice_prices(symbol, side, pnl, entry, exit_price)
     text = await _line_close(symbol, float(pnl))
     photo = None
     try:
-        photo = _render_card(symbol, side, entry, pnl, exit_price)
+        photo = _render_card(symbol, side, entry, pnl, exit_price, exchange=exchange)
     except Exception as e:
         print(f"[chat_engage] practice card: {e}")
     try:
         await _send_profit(client, target, text, photo)
-        print(f"[chat_engage] practice → {target}: {symbol} {side} вход {entry} → {exit_price} ({text!r})")
+        print(f"[chat_engage] practice → {target}: {symbol} {side} ({exchange}) "
+              f"вход {entry} → {exit_price} ({text!r})")
     except Exception as e:
         print(f"[chat_engage] practice fail {target}: {e}")
 
@@ -355,6 +405,8 @@ async def _worker_loop(client):
                     job.get("result", ""), job.get("pnl", 0),
                     entry=job.get("entry"),
                     exit_price=job.get("exit_price"),
+                    exchange=job.get("exchange"),
+                    opened_at=job.get("opened_at"),
                 )
             elif kind == "practice_profit":
                 await _do_practice_profit(

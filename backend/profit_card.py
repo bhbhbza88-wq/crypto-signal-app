@@ -22,6 +22,7 @@ PNL_SHOW_MULT = float(os.getenv("PNL_WIN_MULT", "1.22") or "1.22")
 
 _ASSETS = Path(__file__).resolve().parent / "assets"
 BG_PATH = _ASSETS / "pnl_card_bg.png"
+BYBIT_BG_PATH = _ASSETS / "bybit_pnl_card_bg.png"
 _FONT_REG = _ASSETS / "fonts" / "card-regular.ttf"
 _FONT_BOLD = _ASSETS / "fonts" / "card-bold.ttf"
 
@@ -162,6 +163,164 @@ def render_profit_card(
     draw.text((col2_x, y_lab), "Последняя цена", font=font_label, fill=GREY)
     draw.text((pad, y_val), _fmt_price(entry), font=font_val, fill=WHITE)
     draw.text((col2_x, y_val), _fmt_price(exit_price), font=font_val, fill=WHITE)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+# ── Bybit-style карточка (скрин из приложения с реф-плашкой) ──────────
+# Фон — реальный скрин юзера (assets/bybit_pnl_card_bg.png), НЕ трогаем:
+# лого, деньги/стрелки, сетку, футер с QR и реф-кодом. Перекрашиваем только
+# 5 динамических зон (замерено по пикселям с оригинала).
+# y-диапазоны зон подобраны по пикселям оригинала; x — считается динамически
+# под фактическую ширину нового текста (см. render_bybit_card), чтобы не
+# оставлять «пустой» чёрный шов там, где сетка фона просто вырезана без текста.
+_BYBIT_ROW_SYMBOL_Y = (180, 226)
+_BYBIT_ROW_PNL_Y = (312, 388)
+_BYBIT_ROW_ENTRY_Y = (474, 513)
+_BYBIT_ROW_EXIT_Y = (574, 613)
+_BYBIT_ROW_DURATION_Y = (669, 718)
+
+# Минимальный правый край очистки — правый край оригинального текста на
+# скрине (замерено по пикселям). Гарантирует, что старые цифры не будут
+# «торчать» из-под нового текста, даже если у нашего шрифта другая метрика.
+_BYBIT_MIN_CLEAR_X = {"symbol": 393, "pnl": 268, "entry": 139, "exit": 151, "duration": 249}
+
+_BYBIT_X0 = 30
+_BYBIT_SYMBOL_XY = (50, 183)
+_BYBIT_PILL_Y = (186, 222)
+_BYBIT_PILL_GAP = 14
+_BYBIT_PNL_XY = (53, 316)
+_BYBIT_ENTRY_XY = (48, 477)
+_BYBIT_EXIT_XY = (48, 577)
+_BYBIT_DURATION_XY = (49, 675)
+
+
+@lru_cache(maxsize=1)
+def _load_bybit_bg() -> Image.Image:
+    if not BYBIT_BG_PATH.exists():
+        raise FileNotFoundError(f"Нет фона Bybit-карточки: {BYBIT_BG_PATH}")
+    return Image.open(BYBIT_BG_PATH).convert("RGB")
+
+
+def _draw_topleft(draw, xy, text, font, fill) -> tuple[int, int]:
+    """Рисует текст так, чтобы видимый верх-лево глифов совпал с xy
+    (компенсирует внутренние отступы шрифта у ascent)."""
+    x, y = xy
+    l, t, r, b = draw.textbbox((0, 0), text, font=font)
+    draw.text((x - l, y - t), text, font=font, fill=fill)
+    return (r - l, b - t)
+
+
+def _fmt_bybit_price(v: float) -> str:
+    """Короче, чем _fmt_price — как реально показывает Bybit (без лишних нулей)."""
+    n = float(v)
+    if n >= 1000:
+        s = f"{n:.2f}"
+    elif n >= 1:
+        s = f"{n:.4f}"
+    elif n >= 0.01:
+        s = f"{n:.6f}"
+    else:
+        s = f"{n:.8f}"
+    if "." in s:
+        s = s.rstrip("0")
+        if s.endswith("."):
+            s += "0"
+    return s
+
+
+def fmt_duration_ru(total_minutes: float) -> str:
+    """'22 ч. 2 мин.' / '48 мин.' / '1 д. 6 ч.' — как подпись 'Срок' на Bybit."""
+    m = max(1, int(round(total_minutes)))
+    if m < 60:
+        return f"{m} мин."
+    hours, mins = divmod(m, 60)
+    if hours < 24:
+        return f"{hours} ч. {mins} мин."
+    days, hours = divmod(hours, 24)
+    return f"{days} д. {hours} ч."
+
+
+def render_bybit_card(
+    symbol: str,
+    side: str,
+    entry: float,
+    exit_price: float,
+    pnl_usdt: float,
+    duration_minutes: float = 60.0,
+) -> bytes:
+    """Карточка в стиле шаринга из приложения Bybit. Фон (лого/мешок денег/
+    сетка/футер с QR и реф-кодом) — оригинальный скрин, не меняется.
+    Меняются только: пара, Лонг/Шорт, P&L в USDT, цены входа/выхода, срок.
+    """
+    side = (side or "LONG").upper()
+    entry = float(entry)
+    exit_price = float(exit_price)
+    pnl_usdt = float(pnl_usdt)
+
+    coin = symbol.replace("/USDT", "").replace("USDT", "").upper()
+    pair_line = f"{coin}USDT"
+    side_ru = "Лонг" if side == "LONG" else "Шорт"
+    side_color = GREEN if side == "LONG" else RED
+    pnl_str = f"+{pnl_usdt:.2f}" if pnl_usdt >= 0 else f"{pnl_usdt:.2f}"
+
+    img = _load_bybit_bg().copy()
+    draw = ImageDraw.Draw(img)
+
+    # Размеры подобраны так, чтобы ширина рендера ≈ ширине оригинального
+    # текста на скрине (другой шрифт даёт другую метрику при том же px).
+    font_symbol = _font(41, bold=True)
+    font_pill = _font(20, bold=False)
+    font_pnl = _font(66, bold=True)
+    font_price = _font(28, bold=True)
+    font_duration = _font(22, bold=False)
+
+    def clear_row(y0, y1, x1, min_key):
+        """Чистим под ширину нового текста, но не уже правого края оригинала
+        (min_key) — иначе из-под нового текста «торчат» старые цифры/буквы
+        (другой шрифт даёт другую метрику ширины)."""
+        x1 = max(x1 + 4, _BYBIT_MIN_CLEAR_X[min_key])
+        draw.rectangle((_BYBIT_X0, y0, x1, y1), fill=(0, 0, 0))
+
+    # ── Пара + плашка Лонг/Шорт ──
+    sym_measure_w = draw.textlength(pair_line, font=font_symbol)
+    pill_l, pill_t, pill_r, pill_b = draw.textbbox((0, 0), side_ru, font=font_pill)
+    pill_text_w, pill_text_h = pill_r - pill_l, pill_b - pill_t
+    pill_pad_x, pill_h = 18, _BYBIT_PILL_Y[1] - _BYBIT_PILL_Y[0]
+    pill_total_w = pill_text_w + pill_pad_x * 2
+    row1_end_x = _BYBIT_SYMBOL_XY[0] + sym_measure_w + _BYBIT_PILL_GAP + pill_total_w
+    clear_row(*_BYBIT_ROW_SYMBOL_Y, row1_end_x, "symbol")
+
+    sym_w, _ = _draw_topleft(draw, _BYBIT_SYMBOL_XY, pair_line, font_symbol, WHITE)
+    pill_x0 = _BYBIT_SYMBOL_XY[0] + sym_w + _BYBIT_PILL_GAP
+    pill_x1 = pill_x0 + pill_total_w
+    pill_y0, pill_y1 = _BYBIT_PILL_Y
+    draw.rounded_rectangle(
+        (pill_x0, pill_y0, pill_x1, pill_y1), radius=pill_h // 2,
+        outline=side_color, width=2,
+    )
+    text_y = pill_y0 + (pill_h - pill_text_h) // 2
+    draw.text((pill_x0 + pill_pad_x - pill_l, text_y - pill_t), side_ru, font=font_pill, fill=side_color)
+
+    # ── P&L (USDT) ──
+    pnl_w = draw.textlength(pnl_str, font=font_pnl)
+    clear_row(*_BYBIT_ROW_PNL_Y, _BYBIT_PNL_XY[0] + pnl_w, "pnl")
+    _draw_topleft(draw, _BYBIT_PNL_XY, pnl_str, font_pnl, GREEN)
+
+    # ── Цена входа / выхода ──
+    entry_str, exit_str = _fmt_bybit_price(entry), _fmt_bybit_price(exit_price)
+    clear_row(*_BYBIT_ROW_ENTRY_Y, _BYBIT_ENTRY_XY[0] + draw.textlength(entry_str, font=font_price), "entry")
+    _draw_topleft(draw, _BYBIT_ENTRY_XY, entry_str, font_price, WHITE)
+    clear_row(*_BYBIT_ROW_EXIT_Y, _BYBIT_EXIT_XY[0] + draw.textlength(exit_str, font=font_price), "exit")
+    _draw_topleft(draw, _BYBIT_EXIT_XY, exit_str, font_price, WHITE)
+
+    # ── Срок ──
+    duration_line = f"Срок {fmt_duration_ru(duration_minutes)}"
+    dur_w = draw.textlength(duration_line, font=font_duration)
+    clear_row(*_BYBIT_ROW_DURATION_Y, _BYBIT_DURATION_XY[0] + dur_w, "duration")
+    _draw_topleft(draw, _BYBIT_DURATION_XY, duration_line, font_duration, GREY)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)

@@ -16,7 +16,8 @@ from nfi_strategy import (
 )
 
 
-def _notify_closed(symbol, signal, result, pnl, entry=None, exit_price=None):
+def _notify_closed(symbol, signal, result, pnl, entry=None, exit_price=None,
+                    exchange=None, opened_at=None):
     """check_trades() — синхронный код в фоновом потоке сканера, а
     notify_signal_closed — async (шлёт HTTP в Telegram) — поднимаем свой
     короткоживущий event loop, как уже делает scanner.py для notify_new_signal.
@@ -31,7 +32,8 @@ def _notify_closed(symbol, signal, result, pnl, entry=None, exit_price=None):
         print(f"⚠️ Telegram (закрытие {symbol}): {e}")
     try:
         import chat_engage
-        chat_engage.fire_close(symbol, signal, result, pnl, entry=entry, exit_price=exit_price)
+        chat_engage.fire_close(symbol, signal, result, pnl, entry=entry, exit_price=exit_price,
+                                exchange=exchange, opened_at=opened_at)
     except Exception as e:
         print(f"⚠️ chat_engage (закрытие {symbol}): {e}")
 
@@ -212,7 +214,8 @@ def check_trades():
                     record_daily_loss(pnl)
                     db.add_to_history(symbol, signal, entry, 'potential', pnl, trader_id)
                     db.remove_trade(symbol)
-                    _notify_closed(symbol, signal, 'potential', pnl, entry=entry, exit_price=price)
+                    _notify_closed(symbol, signal, 'potential', pnl, entry=entry, exit_price=price,
+                                    exchange=ex, opened_at=trade.get('opened_at'))
                     if pnl < -0.5:
                         set_cooldown(symbol)
                     continue
@@ -251,7 +254,8 @@ def check_trades():
                 record_daily_loss(pnl)
                 db.add_to_history(symbol, signal, entry, result, pnl, trader_id)
                 db.remove_trade(symbol)
-                _notify_closed(symbol, signal, result, pnl, entry=entry, exit_price=price)
+                _notify_closed(symbol, signal, result, pnl, entry=entry, exit_price=price,
+                                exchange=ex, opened_at=trade.get('opened_at'))
                 if result == 'sl':
                     set_cooldown(symbol)   # cooldown только после реального стопа
                 continue
@@ -268,7 +272,8 @@ def check_trades():
                     record_daily_loss(pnl)
                     db.add_to_history(symbol, signal, entry, 'timeout', pnl, trader_id)
                     db.remove_trade(symbol)
-                    _notify_closed(symbol, signal, 'timeout', pnl, entry=entry, exit_price=price)
+                    _notify_closed(symbol, signal, 'timeout', pnl, entry=entry, exit_price=price,
+                                    exchange=ex, opened_at=trade.get('opened_at'))
                     continue
 
             # ── TP1 — фиксируем 50%, стоп в б/у ──────────────────
@@ -306,7 +311,8 @@ def check_trades():
                 db.add_event(symbol, 'tp3', f"TP3 достигнут (+{pnl_tp3:.1f}%)")
                 db.add_to_history(symbol, signal, entry, 'tp3', pnl_tp3, trader_id)
                 db.remove_trade(symbol)
-                _notify_closed(symbol, signal, 'tp3', pnl_tp3, entry=entry, exit_price=price)
+                _notify_closed(symbol, signal, 'tp3', pnl_tp3, entry=entry, exit_price=price,
+                                exchange=ex, opened_at=trade.get('opened_at'))
                 continue
 
         except Exception as e:
