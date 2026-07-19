@@ -23,6 +23,8 @@ export default function Admin() {
   const [premiumBusy, setPremiumBusy] = useState(false)
   const [premiumMsg, setPremiumMsg] = useState(null)
   const [premiumRequests, setPremiumRequests] = useState([])
+  const [engageBusy, setEngageBusy] = useState(false)
+  const [engageMsg, setEngageMsg] = useState(null)
 
   const [channelDays, setChannelDays] = useState(14)
   const [channelStats, setChannelStats] = useState({ rows: [], since: null, days: 14 })
