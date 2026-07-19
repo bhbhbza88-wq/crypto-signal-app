@@ -120,6 +120,49 @@ _MONEY_RE = re.compile(
     re.I,
 )
 
+# Тикеры для распознавания в тексте собеседника → подставляем ЖИВУЮ цену
+_COIN_ALIASES = {
+    "BTC": ["btc", "биток", "битк", "бтс", "bitcoin", "биткоин", "биткойн"],
+    "ETH": ["eth", "эфир", "эфирка", "ethereum", "етх"],
+    "SOL": ["sol", "солана", "solana", "сол"],
+    "BNB": ["bnb", "бнб"],
+    "XRP": ["xrp", "рипл", "ripple"],
+    "DOGE": ["doge", "дож", "додж", "догикоин"],
+    "TON": ["ton", "тон", "тонкоин"],
+}
+
+
+def live_price_hint(text: str) -> str:
+    """Вернуть блок с РЕАЛЬНЫМИ ценами упомянутых монет, чтобы Claude не выдумывал."""
+    t = (text or "").lower()
+    coins: list[str] = []
+    for coin, aliases in _COIN_ALIASES.items():
+        if any(re.search(rf"\b{re.escape(a)}", t) for a in aliases):
+            coins.append(coin)
+    if not coins:
+        return ""
+    try:
+        import data_layer
+    except Exception:
+        return ""
+    lines = []
+    for coin in coins[:3]:
+        try:
+            tk = data_layer.fetch_ticker(f"{coin}/USDT")
+            last = tk.get("last") if tk else None
+            if last:
+                pct = tk.get("percentage")
+                pct_s = f" ({pct:+.1f}% за 24ч)" if isinstance(pct, (int, float)) else ""
+                lines.append(f"{coin}: {last:g}$ сейчас{pct_s}")
+        except Exception as e:
+            print(f"[chat_style] price {coin}: {e}")
+    if not lines:
+        return ""
+    return (
+        "\n\n# АКТУАЛЬНЫЕ ЦЕНЫ (реальные, прямо сейчас — используй ИМЕННО их, "
+        "не выдумывай числа из головы):\n" + "\n".join(lines)
+    )
+
 
 def fallback_reply(kind: str, incoming: str = "") -> str:
     """Умный fallback без LLM — чтобы при 429 не отвечать тупым «ага»."""
@@ -342,8 +385,7 @@ async def classify_intent(text: str, *, ask_re) -> str:
     return base
 
 
-_OARS_FALLBACKS = {
-    1: [
+_OARS_FALLBACKS = {    1: [
         "а ты сам откуда обычно смотришь?",
         "ну хз, а тебе что заходит больше?",
         "а ты давно в теме?",
@@ -483,7 +525,16 @@ async def compose_natural(kind: str, **ctx) -> str | None:
         "Если спросили как зовут / тебя Рома зовут — скажи что Рома (или да). "
         "Если спросили как жизнь/дела — ответь про себя коротко, не про сканер. "
         "Не уводи в рекламу сайта/канала, пока прямо не спросили откуда берёшь сделки."
+        "\n\n# ЦИФРЫ И ЦЕНЫ\n"
+        "У тебя НЕТ памяти актуальных котировок. НИКОГДА не называй цену монеты по памяти "
+        "(застрянешь на старых числах и спалишься). Если ниже дан блок «АКТУАЛЬНЫЕ ЦЕНЫ» — "
+        "бери число строго оттуда. Если его нет, а спрашивают точную цену — честно скажи "
+        "по-свойски что не смотришь прямо сейчас ('щас гляну', 'хз, не смотрел ещё'), "
+        "но НЕ выдумывай конкретное число."
     )
+    price_block = live_price_hint(incoming)
+    if price_block:
+        system += price_block
     if kind != "oars" or int(ctx.get("oars_step") or 1) < 4:
         system += "\nНе вставляй ссылки и @юзернеймы, кроме случая когда тебя прямо попросили скинуть."
 
