@@ -45,6 +45,12 @@ def split_bubbles(text: str) -> list[str]:
     t = (text or "").strip()
     if not t:
         return []
+    # Явный разделитель из bt/Roma-промпта: "фраза | фраза"
+    if "|" in t:
+        parts = [p.strip() for p in t.split("|") if p.strip()]
+        out = [_WS.sub(" ", p).strip() for p in parts[:4] if 1 < len(p.strip()) <= 160]
+        if out:
+            return out
     # явные переносы от LLM
     parts = [p.strip() for p in re.split(r"\n+", t) if p.strip()]
     if len(parts) == 1 and random.random() < MULTI_BUBBLE_PROB and len(t) > 35:
