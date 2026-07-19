@@ -171,18 +171,24 @@ def _chat_key_from_event(event) -> str:
     return "unknown"
 
 
-def _rate_allows(chat_key: str) -> bool:
+def _rate_allows(chat_key: str, *, is_private: bool = False) -> tuple[bool, str]:
+    """Возвращает (ok, reason). В ЛС лимиты мягче — это живой диалог, не антиспам групп."""
     global _last_reply_mono
-    if time.monotonic() - _last_reply_mono < MIN_GAP_SEC:
-        return False
+    gap = 8.0 if is_private else MIN_GAP_SEC
+    per_limit = 40 if is_private else MAX_REPLIES_PER_CHAT_HOUR
+    glob_limit = 80 if is_private else MAX_REPLIES_GLOBAL_HOUR
+
+    elapsed = time.monotonic() - _last_reply_mono
+    if _last_reply_mono > 0 and elapsed < gap:
+        return False, f"min_gap {elapsed:.0f}/{gap:.0f}s"
     since = _hour_ago_iso()
     per = db.count_chat_engage_events(chat_key=chat_key, kind="reply", since_iso=since)
-    if per >= MAX_REPLIES_PER_CHAT_HOUR:
-        return False
+    if per >= per_limit:
+        return False, f"per_chat {per}/{per_limit}"
     glob = db.count_chat_engage_events(chat_key=None, kind="reply", since_iso=since)
-    if glob >= MAX_REPLIES_GLOBAL_HOUR:
-        return False
-    return True
+    if glob >= glob_limit:
+        return False, f"global {glob}/{glob_limit}"
+    return True, "ok"
 
 
 def _mark_replied(chat_key: str) -> None:
@@ -778,8 +784,10 @@ def _register_ask_handler(client, me):
             if event.sender_id == me.id:
                 return
             if _in_quiet_hours():
+                print("[chat_engage] skip quiet hours")
                 return
             if chat_humanize.peer_flood_active():
+                print("[chat_engage] skip peer_flood cooldown")
                 return
             if not _event_in_whitelist(event):
                 return
@@ -810,8 +818,13 @@ def _register_ask_handler(client, me):
                 return
 
             chat_key = _chat_key_from_event(event)
-            if not _rate_allows(chat_key):
+            ok_rate, rate_why = _rate_allows(chat_key, is_private=bool(event.is_private))
+            if not ok_rate:
+                print(f"[chat_engage] skip rate ({rate_why}) chat={chat_key}")
                 return
+
+            print(f"[chat_engage] incoming ({'dm' if event.is_private else 'group'}) "
+                  f"chat={chat_key}: {text[:80]!r}")
 
             peer = _peer_key(event)
             memory = db.list_dialog_memory(peer, limit=8)
@@ -826,6 +839,7 @@ def _register_ask_handler(client, me):
                     return
 
             oars_step = None
+            # OARS только при явном ask / уже активной воронке — не на каждый small talk
             oars_active = db.get_oars_step(peer) > 0
             if intent == "ask_source" or is_ask or oars_active:
                 reply, oars_step = await _compose_oars_reply(peer, text, memory)
