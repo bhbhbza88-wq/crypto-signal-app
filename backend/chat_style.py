@@ -14,15 +14,21 @@ import re
 
 import httpx
 
+import anthropic
 import database as db
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+
 # Для чата — лёгкая модель (выше лимиты); тяжёлый gpt-4o часто упирается в 429 от ingest
 AI_MODEL = (
     os.getenv("CHAT_ENGAGE_AI_MODEL")
     or os.getenv("AI_MODEL_CHAT")
     or "gpt-4o-mini"
 ).strip() or "gpt-4o-mini"
+
+# Модель Claude для максимальной живости ответов
+CLAUDE_MODEL = "claude-3-5-sonnet-20240620"
 
 # Чаты-«учителя» стиля (можно переопределить env CSV).
 _DEFAULT_STYLE_CHATS = "BinanceRussianSpeaking,cryptoinside_chat"
@@ -307,9 +313,27 @@ def _normalize_reply(text: str, *, keep_newlines: bool = False) -> str:
     return t
 
 
+async def _generate_claude(system: str, user: str, max_tokens: int = 120) -> str | None:
+    if not ANTHROPIC_API_KEY:
+        return None
+    try:
+        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY, max_retries=2)
+        resp = await client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=max_tokens,
+            temperature=0.9,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return resp.content[0].text
+    except Exception as e:
+        print(f"[chat_style] claude fail: {e}")
+        return None
+
+
 async def compose_natural(kind: str, **ctx) -> str | None:
     """Сгенерировать фразу. kinds: greet|open|close_win|reply_casual|reply_crypto|oars."""
-    if not OPENAI_API_KEY:
+    if not ANTHROPIC_API_KEY and not OPENAI_API_KEY:
         return None
     shots = _few_shot_block()
     incoming = (ctx.get("incoming") or "").strip()[:300]
@@ -367,9 +391,21 @@ async def compose_natural(kind: str, **ctx) -> str | None:
     else:
         return None
 
+    # Динамическое настроение (влияет на многословность и стиль)
+    states = [
+        "ты сейчас занят, отвечаешь на бегу, очень коротко",
+        "ты немного раздражён тупыми вопросами, отвечаешь односложно или с сарказмом",
+        "у тебя хорошее настроение, можешь ответить чуть подробнее",
+        "ты уставший, хочешь спать, отвечаешь лениво",
+        "ты обычный, просто листаешь ленту"
+    ]
+    current_state = random.choice(states)
+
     system = (
-        "Ты обычный русскоязычный парень в Telegram-чате (трейдер, но не гуру). "
-        "Пишешь коротко, разговорно, иногда сленг (ку, норм, имхо, лол, хз). "
+        "Ты обычный русскоязычный парень в Telegram-чате (не гуру). "
+        f"Твоё состояние сейчас: {current_state}. "
+        "Пишешь разговорно, сленг (ку, норм, имхо, лол, хз, бро, ля, капец). "
+        "Пиши все с маленькой буквы (как делают в мессенджерах). Точки в конце предложений не ставь. "
         "Никогда не пиши что ты бот/AI. Без канцелярита и AI-штампов. "
         "Если две мысли — раздели перевод строки. Верни только текст."
     )
@@ -378,38 +414,46 @@ async def compose_natural(kind: str, **ctx) -> str | None:
 
     user = task
     if shots:
-        user = f"Как пишут в похожих чатах (примеры):\n{shots}\n\n{task}"
+        user = f"Примеры из твоего чата (как пишут другие пацаны):\n{shots}\n\nТвоя задача:\n{task}"
 
     allow_links = kind == "oars" and int(ctx.get("oars_step") or 1) >= 4
 
     for _attempt in range(3):
-        payload = {
-            "model": AI_MODEL,
-            "max_tokens": 120,
-            "temperature": 0.95,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        }
         try:
-            async with httpx.AsyncClient(timeout=25) as client:
-                resp = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    json=payload,
-                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                )
-                if resp.status_code == 429:
-                    wait = 2.0 * (_attempt + 1)
-                    print(f"[chat_style] compose {kind}: 429, retry in {wait}s")
-                    await asyncio.sleep(wait)
-                    continue
-                resp.raise_for_status()
-                data = resp.json()
-            text = _normalize_reply(
-                data["choices"][0]["message"]["content"] or "",
-                keep_newlines=keep_nl,
-            )
+            if ANTHROPIC_API_KEY:
+                # Пытаемся сначала Клодом
+                text = await _generate_claude(system, user, max_tokens=120)
+            else:
+                # Fallback на OpenAI
+                payload = {
+                    "model": AI_MODEL,
+                    "max_tokens": 120,
+                    "temperature": 0.95,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                }
+                async with httpx.AsyncClient(timeout=25) as client:
+                    resp = await client.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                    )
+                    if resp.status_code == 429:
+                        wait = 2.0 * (_attempt + 1)
+                        print(f"[chat_style] compose {kind}: 429, retry in {wait}s")
+                        await asyncio.sleep(wait)
+                        continue
+                    resp.raise_for_status()
+                    data = resp.json()
+                text = data["choices"][0]["message"]["content"] or ""
+
+            if not text:
+                continue
+
+            text = _normalize_reply(text, keep_newlines=keep_nl)
+            
             ok = True
             for part in (text.splitlines() or [text]):
                 if part and not passes_human_filter(part, allow_links=allow_links):
