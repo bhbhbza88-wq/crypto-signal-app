@@ -97,9 +97,7 @@ def _bg_for_text() -> Image.Image:
     W, H = img.size
     draw = ImageDraw.Draw(img)
     # Жёстко заливаем левую/среднюю зону — иначе ромбы Binance лезут под «Бессрочный» и ROI.
-    draw.rectangle([0, 0, int(W * 0.62), int(H * 0.60)], fill=(0, 0, 0))
-    # чуть ниже тоже подчищаем под крупный ROI
-    draw.rectangle([0, int(H * 0.35), int(W * 0.58), int(H * 0.60)], fill=(0, 0, 0))
+    draw.rectangle([0, 0, int(W * 0.68), int(H * 0.62)], fill=(0, 0, 0))
     return img
 
 
@@ -138,8 +136,8 @@ def render_profit_card(
 
     # Текст целиком внутри очищенной зоны (эмблема только справа).
     pad = int(W * 0.078)
-    clear_w = int(W * 0.58)
-    text_max_w = max(120, clear_w - pad - int(W * 0.03))
+    clear_w = int(W * 0.55)
+    text_max_w = max(120, clear_w - pad - int(W * 0.02))
     col2_x = int(W * 0.50)
 
     def fit_font(text: str, start: int, bold: bool, min_size: int = 14) -> ImageFont.FreeTypeFont:
