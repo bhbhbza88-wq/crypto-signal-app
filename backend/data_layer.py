@@ -183,6 +183,13 @@ def fetch_candles_json(symbol, timeframe='1h', limit=60, exchange_id=None):
     return payload
 
 
+def fetch_ohlcv_raw(symbol, timeframe='1h', limit=500, exchange_id=None):
+    """Сырые свечи [[ts_ms, o, h, l, c, v], ...] — для реконструкции реальной
+    сделки (когда цена была на уровне входа)."""
+    ex = get_exchange(exchange_id)
+    return api_call(ex.fetch_ohlcv, symbol, timeframe, limit=limit)
+
+
 def build_features(df):
     df = df.copy()
     df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()

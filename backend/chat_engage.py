@@ -347,49 +347,124 @@ async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
     db.clear_chat_engage_posts(symbol)
 
 
-async def _resolve_practice_prices(symbol: str, side: str, pnl: float,
-                                    entry: float | None, exit_price: float | None) -> tuple[float, float, str]:
-    """Тянем реальную рыночную цену (и биржу, где она реально торгуется) и
-    считаем вход/выход так, чтобы движение точно совпадало с pnl% и было
-    привязано к текущей цене монеты (не к рандому)."""
-    real_last = None
+# Диапазон приемлемого профита при реконструкции реальной сделки из истории.
+_PRACTICE_PNL_MIN = 1.2
+_PRACTICE_PNL_MAX = 7.5
+# Не берём вход «только что» (нулевой профит) и держим срок реалистичным
+# для сигнала — не старше ~5 дней.
+_PRACTICE_MIN_AGE_MIN = 25
+_PRACTICE_MAX_AGE_MIN = 5 * 24 * 60
+
+
+def _pick_real_trade_from_history(candles: list, side: str, exit_price: float, pnl_hint: float):
+    """По реальным свечам находим момент, когда цена была подходящей для входа,
+    чтобы вход/выход/%/срок были настоящими и сходились между собой.
+
+    Берём САМЫЙ НЕДАВНИЙ момент с приемлемым профитом — это естественный
+    короткий срок удержания (как реальная сделка), а не «висела 2 недели».
+
+    Возвращает (entry, pnl, duration_minutes) или None."""
+    import time as _time
+    now_ms = _time.time() * 1000.0
+    candidates = []
+    for row in candles or []:
+        try:
+            ts, _o, _h, _l, close, _v = row[0], row[1], row[2], row[3], row[4], row[5]
+        except (IndexError, TypeError):
+            continue
+        age_min = (now_ms - float(ts)) / 60000.0
+        if age_min < _PRACTICE_MIN_AGE_MIN or age_min > _PRACTICE_MAX_AGE_MIN:
+            continue
+        entry = float(close)
+        if entry <= 0:
+            continue
+        if side == "LONG":
+            pnl = (exit_price - entry) / entry * 100.0
+        else:
+            pnl = (entry - exit_price) / entry * 100.0
+        if _PRACTICE_PNL_MIN <= pnl <= _PRACTICE_PNL_MAX:
+            candidates.append((entry, pnl, age_min))
+    if not candidates:
+        return None
+    # Взвешенный выбор: приятнее показать больший %, но короткий срок тоже в
+    # приоритете (делим на возраст в днях). Итог — и достойный профит, и
+    # правдоподобный недлинный срок, и разнообразие между карточками.
+    def weight(c):
+        _entry, pnl, age_min = c
+        age_days = max(0.25, age_min / 1440.0)
+        return (pnl ** 1.5) / age_days
+    weights = [weight(c) for c in candidates]
+    return random.choices(candidates, weights=weights, k=1)[0]
+
+
+async def _resolve_practice_trade(symbol: str, side: str, pnl_hint: float,
+                                  entry: float | None, exit_price: float | None
+                                  ) -> tuple[float, float, str, float, float | None]:
+    """Возвращает (entry, exit, exchange, pnl, duration_minutes).
+
+    Если вход/выход явно не заданы — тянем реальную цену (exit = текущая) и
+    восстанавливаем настоящую точку входа из истории: находим, когда цена
+    реально была на уровне входа, и берём этот момент как время открытия."""
     exchange = "bybit"
-    if entry is None or exit_price is None:
+    real_last = None
+    if entry is not None and exit_price is not None:
+        return float(entry), float(exit_price), exchange, float(pnl_hint), None
+
+    try:
+        import data_layer
+        _listed, preferred, ticker = await asyncio.to_thread(data_layer.probe_listings, symbol)
+        if preferred and ticker and ticker.get("last"):
+            real_last = float(ticker["last"])
+            exchange = preferred
+    except Exception as e:
+        print(f"[chat_engage] probe_listings {symbol}: {e}")
+
+    if real_last is None:
+        lo, hi = _PRACTICE_FALLBACK_RANGE.get(symbol, (1.0, 100.0))
+        real_last = random.uniform(lo, hi)
+        print(f"[chat_engage] тикер {symbol} недоступен — fallback-цена {real_last}")
+
+    exit_val = float(exit_price) if exit_price is not None else real_last
+
+    # Реконструкция настоящей сделки: entry + реальный срок из истории.
+    duration_minutes = None
+    pnl = float(pnl_hint)
+    if entry is None:
         try:
             import data_layer
-            listed, preferred, ticker = await asyncio.to_thread(data_layer.probe_listings, symbol)
-            if preferred and ticker and ticker.get("last"):
-                real_last = float(ticker["last"])
-                exchange = preferred
+            candles = await asyncio.to_thread(
+                data_layer.fetch_ohlcv_raw, symbol, "1h", 720, exchange)
+            picked = _pick_real_trade_from_history(candles, side, exit_val, pnl_hint)
+            if picked:
+                entry, pnl, duration_minutes = picked[0], round(picked[1], 2), picked[2]
+                print(f"[chat_engage] реконструкция {symbol}: вход {entry} был "
+                      f"{duration_minutes/60:.1f}ч назад, pnl {pnl:.2f}%")
         except Exception as e:
-            print(f"[chat_engage] probe_listings {symbol}: {e}")
+            print(f"[chat_engage] history {symbol}: {e}")
+        if entry is None:
+            # Fallback: не нашли историческую точку → считаем вход от % (срок рандомный).
+            entry = _entry_from_real_price(exit_val, side, pnl)
 
-        if real_last is None:
-            lo, hi = _PRACTICE_FALLBACK_RANGE.get(symbol, (1.0, 100.0))
-            real_last = random.uniform(lo, hi)
-            print(f"[chat_engage] тикер {symbol} недоступен — fallback-цена {real_last}")
-
-    if exit_price is None:
-        exit_price = real_last if real_last is not None else float(entry)
-    if entry is None:
-        entry = _entry_from_real_price(exit_price, side, pnl)
-    return float(entry), float(exit_price), exchange
+    return float(entry), float(exit_val), exchange, float(pnl), duration_minutes
 
 
 async def _do_practice_profit(client, target: str, symbol: str, side: str,
                               pnl: float, entry: float | None = None,
                               exit_price: float | None = None) -> None:
-    entry, exit_price, exchange = await _resolve_practice_prices(symbol, side, pnl, entry, exit_price)
+    entry, exit_price, exchange, pnl, duration_minutes = await _resolve_practice_trade(
+        symbol, side, pnl, entry, exit_price)
     text = await _line_close(symbol, float(pnl))
     photo = None
     try:
-        photo = _render_card(symbol, side, entry, pnl, exit_price, exchange=exchange)
+        photo = _render_card(symbol, side, entry, pnl, exit_price,
+                             exchange=exchange, duration_minutes=duration_minutes)
     except Exception as e:
         print(f"[chat_engage] practice card: {e}")
     try:
         await _send_profit(client, target, text, photo)
+        dur = f"{duration_minutes/60:.1f}ч" if duration_minutes else "рандом"
         print(f"[chat_engage] practice → {target}: {symbol} {side} ({exchange}) "
-              f"вход {entry} → {exit_price} ({text!r})")
+              f"вход {entry} → {exit_price}, {pnl:.2f}%, срок {dur} ({text!r})")
     except Exception as e:
         print(f"[chat_engage] practice fail {target}: {e}")
 
