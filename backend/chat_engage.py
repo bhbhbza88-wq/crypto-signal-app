@@ -76,11 +76,21 @@ ASK_RE = re.compile(
     r"(где\s+(бер|наход|смотр|берёшь|берешь|нашел|нашёл)|"
     r"какой\s+(сайт|канал|бот)|"
     r"скинь\s+(ссыл|канал|сайт)|"
-    r"откуда\s+(сигнал|монет|бер)|"
-    r"как\s+(ты\s+)?(деньг|поднима|заработ|вход|плюс|торгу|берёшь|берешь)|"
-    r"как\s*\?|"
+    r"откуда\s+(сигнал|монет|бер|смотр)|"
+    r"как\s+(ты\s+)?(деньг|бабл|поднима|заработ|торгу|берёшь|берешь)|"
+    r"(бабл|деньг\w*)\s*(поднима|зарабат)|"
     r"how\s+do\s+you\s+(find|make|trade)|"
     r"what('?s|\s+is)\s+your\s+(channel|site))",
+    re.IGNORECASE,
+)
+
+# Личные/бытовые реплики — сразу выходим из OARS-воронки
+_PERSONAL_RE = re.compile(
+    r"(как\s+(жизнь|дела|тебя\s+зовут|зовут)|"
+    r"тебя\s+зовут|как\s+звать|тво[её]\s+имя|"
+    r"ты\s+(рома|кто)|чё\s+как|че\s+как|"
+    r"привет|здаров|хай|йо\b|"
+    r"долбо|идиот|туп|ебан|сука|блять)",
     re.IGNORECASE,
 )
 
@@ -771,7 +781,7 @@ async def _compose_dialogue_reply(intent: str, incoming: str, memory: list | Non
 
 
 async def _compose_oars_reply(peer_key: str, incoming: str, memory: list | None) -> tuple[str, int]:
-    """OARS 1→4; на шаге 4 можно soft promo со ссылками."""
+    """OARS 1→4; на шаге 4 один раз soft promo, потом воронка гасится."""
     import chat_style
     step = db.get_oars_step(peer_key)
     if step < 1:
@@ -781,7 +791,7 @@ async def _compose_oars_reply(peer_key: str, incoming: str, memory: list | None)
 
     if step >= 4:
         text = _soft_promo_reply()
-        db.set_oars_step(peer_key, 1)  # цикл заново в следующий раз
+        db.set_oars_step(peer_key, 0)  # не крутить воронку по кругу
         return text, 4
 
     try:
@@ -794,7 +804,8 @@ async def _compose_oars_reply(peer_key: str, incoming: str, memory: list | None)
     except Exception as e:
         print(f"[chat_engage] oars compose: {e}")
 
-    fb = chat_style.oars_fallback(step)
+    # Не слать картонные заготовки мимо темы — лучше обычный ответ Ромы
+    fb = await _compose_dialogue_reply("crypto_chat", incoming or "", memory)
     db.set_oars_step(peer_key, step + 1)
     return fb, step
 
@@ -871,13 +882,25 @@ def _register_ask_handler(client, me):
                     return
 
             oars_step = None
-            # OARS только при явном ask / уже активной воронке — не на каждый small talk
             oars_active = db.get_oars_step(peer) > 0
-            if intent == "ask_source" or is_ask or oars_active:
+            personal = bool(_PERSONAL_RE.search(text))
+
+            # Личный вопрос / оскорбление / smalltalk — выходим из воронки
+            if personal and not (intent == "ask_source" or is_ask):
+                if oars_active:
+                    db.set_oars_step(peer, 0)
+                reply = await _compose_dialogue_reply("smalltalk", text, memory)
+            elif intent == "ask_source" or is_ask:
+                # Явно спросили про источник/деньги — можно OARS
+                reply, oars_step = await _compose_oars_reply(peer, text, memory)
+            elif oars_active and intent == "crypto_chat":
+                # Воронка только пока ещё про крипту
                 reply, oars_step = await _compose_oars_reply(peer, text, memory)
             elif intent == "crypto_chat":
                 reply = await _compose_dialogue_reply("crypto_chat", text, memory)
             else:
+                if oars_active:
+                    db.set_oars_step(peer, 0)
                 reply = await _compose_dialogue_reply("smalltalk", text, memory)
 
             entity = await event.get_input_chat()
