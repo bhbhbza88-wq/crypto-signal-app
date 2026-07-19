@@ -250,7 +250,9 @@ export default function App() {
   const [tgBusy, setTgBusy] = useState(false)
 
   async function openTelegramBot(e) {
-    if (!isPremium) return
+    // Залогинен → тот же deep-link, что «Подключить Telegram» (привязка + каналы если Premium).
+    // Гость → обычная ссылка на бота.
+    if (!user) return
     e.preventDefault()
     if (tgBusy) return
     setTgBusy(true)
