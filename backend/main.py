@@ -48,12 +48,8 @@ async def lifespan(app: FastAPI):
     if chat_engage.needs_own_client():
         asyncio.create_task(chat_engage.run())
     asyncio.create_task(telegram_bot.set_webhook())
-    if crypto_pay.is_configured():
-        domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
-        if domain:
-            asyncio.create_task(
-                crypto_pay.set_webhook(f"https://{domain}/api/crypto-pay-webhook")
-            )
+    # Crypto Pay webhook URL ставится вручную в @CryptoBot → My Apps → Webhooks
+    # (API-метода setWebhook у Crypto Pay нет).
     yield
 
 
