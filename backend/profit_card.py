@@ -102,7 +102,6 @@ def render_profit_card(
     else:
         exit_price = float(exit_price)
 
-    win = pnl_pct > 0
     show_pnl = polish_pnl(pnl_pct, decimals=2)
     # ROI на карточке = движение цены × плечо (как Binance ROE)
     roi = round(show_pnl * leverage, 2)
@@ -118,28 +117,43 @@ def render_profit_card(
     W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # текст ниже эмблемы Binance справа сверху — не пересекается с ней
-    pad = int(W * 0.07)
-    col2_x = int(W * 0.48)
+    # Эмблема Binance справа сверху — весь текст держим в левой половине.
+    # (Как на эталонном share: пара/ROI не залезают на ромбы.)
+    pad = int(W * 0.078)
+    text_max_w = int(W * 0.50)
+    col2_x = int(W * 0.50)
 
-    font_pair = _font(max(28, int(H * 0.045)), bold=True)
-    font_side = _font(max(22, int(H * 0.034)), bold=False)
-    font_roi = _font(max(52, int(H * 0.110)), bold=True)
-    font_label = _font(max(18, int(H * 0.028)), bold=False)
-    font_val = _font(max(22, int(H * 0.036)), bold=True)
+    def fit_font(text: str, start: int, bold: bool, min_size: int = 14) -> ImageFont.FreeTypeFont:
+        size = start
+        while size >= min_size:
+            f = _font(size, bold=bold)
+            if draw.textlength(text, font=f) <= text_max_w:
+                return f
+            size -= 1
+        return _font(min_size, bold=bold)
 
-    draw.text((pad, int(H * 0.255)), pair_line, font=font_pair, fill=WHITE)
+    font_pair = fit_font(pair_line, max(24, int(H * 0.038)), bold=True, min_size=18)
+    font_side = _font(max(18, int(H * 0.030)), bold=False)
+    font_roi = fit_font(roi_str, max(44, int(H * 0.095)), bold=True, min_size=28)
+    font_label = _font(max(16, int(H * 0.026)), bold=False)
+    font_val = _font(max(20, int(H * 0.033)), bold=True)
 
-    y_side = int(H * 0.320)
+    # Вертикаль как на эталоне: пара → лонг → ROI → цены, с зазором от логотипа
+    y_pair = int(H * 0.235)
+    y_side = int(H * 0.295)
+    y_roi = int(H * 0.400)
+    y_lab = int(H * 0.655)
+    y_val = int(H * 0.710)
+
+    draw.text((pad, y_pair), pair_line, font=font_pair, fill=WHITE)
+
     side_text = f"{side_ru} "
     draw.text((pad, y_side), side_text, font=font_side, fill=side_color)
     sw = draw.textlength(side_text, font=font_side)
     draw.text((pad + sw, y_side), f"| {leverage}x", font=font_side, fill=GREY)
 
-    draw.text((pad, int(H * 0.455)), roi_str, font=font_roi, fill=roi_color)
+    draw.text((pad, y_roi), roi_str, font=font_roi, fill=roi_color)
 
-    y_lab = int(H * 0.690)
-    y_val = int(H * 0.745)
     draw.text((pad, y_lab), "Цена входа", font=font_label, fill=GREY)
     draw.text((col2_x, y_lab), "Последняя цена", font=font_label, fill=GREY)
     draw.text((pad, y_val), _fmt_price(entry), font=font_val, fill=WHITE)
