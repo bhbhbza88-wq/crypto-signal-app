@@ -57,7 +57,7 @@ export const api = {
     post('/admin/grant-premium', { email, days, tier }),
   adminChatEngageTest: (data = {}) =>
     post('/admin/chat-engage-test', {
-      target: 'jambo',
+      target: 'Kupyansk_2',
       symbol: 'BTC/USDT',
       signal: 'LONG',
       entry: 65000,

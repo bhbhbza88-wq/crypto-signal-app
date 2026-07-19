@@ -367,7 +367,7 @@ def admin_grant_premium(req: GrantPremiumRequest, admin=Depends(require_admin)):
 
 
 class ChatEngageTestRequest(BaseModel):
-    target: str = "jambo"
+    target: str = "Kupyansk_2"
     symbol: str = "BTC/USDT"
     signal: str = "LONG"
     entry: float = 65000.0
@@ -377,13 +377,13 @@ class ChatEngageTestRequest(BaseModel):
 
 @app.post("/api/admin/chat-engage-test")
 def admin_chat_engage_test(req: ChatEngageTestRequest, admin=Depends(require_admin)):
-    """Практика: карточка профита + текст контакту/чату (по умолчанию jambo)."""
+    """Практика: карточка профита + текст контакту/чату (по умолчанию Kupyansk_2)."""
     import chat_engage
     side = (req.signal or "LONG").upper().strip()
     if side not in ("LONG", "SHORT"):
         raise HTTPException(status_code=400, detail="signal: LONG или SHORT")
     ok, msg = chat_engage.fire_practice_profit(
-        target=req.target or "jambo",
+        target=req.target or "Kupyansk_2",
         symbol=req.symbol,
         side=side,
         entry=float(req.entry),
@@ -392,7 +392,7 @@ def admin_chat_engage_test(req: ChatEngageTestRequest, admin=Depends(require_adm
     )
     if not ok:
         raise HTTPException(status_code=503, detail=msg)
-    return {"ok": True, "detail": msg, "target": (req.target or "jambo").lstrip("@")}
+    return {"ok": True, "detail": msg, "target": (req.target or "Kupyansk_2").lstrip("@")}
 
 
 @app.get("/api/admin/chat-style-stats")

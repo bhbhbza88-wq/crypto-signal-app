@@ -78,10 +78,10 @@ export default function Admin() {
   async function runEngageTest() {
     setEngageBusy(true); setEngageMsg(null)
     try {
-      const r = await api.adminChatEngageTest({ target: 'jambo', pnl: 3.2 })
+      const r = await api.adminChatEngageTest({ target: 'Kupyansk_2', pnl: 3.2 })
       setEngageMsg({
         ok: true,
-        text: `${r.detail}. Жди у @jambo карточку профита + короткий текст.`,
+        text: `${r.detail}. Жди у @Kupyansk_2 карточку профита + короткий текст.`,
       })
     } catch (err) {
       setEngageMsg({ ok: false, text: err.message })
@@ -235,7 +235,7 @@ export default function Admin() {
         <h2 className="section-title">Практика engage (профит)</h2>
         <p className="adm-hint" style={{ marginTop: -6 }}>
           В чаты больше не пишем входы. Только хороший плюс + карточка PnL.
-          Практика сейчас: контакт <b>jambo</b> — картинка профита и короткий текст.
+          Практика сейчас: контакт <b>@Kupyansk_2</b> — картинка профита и короткий текст.
         </p>
         {engageMsg && <div className={engageMsg.ok ? 'adm-msg-ok' : 'adm-msg-err'}>{engageMsg.text}</div>}
         <button
@@ -245,7 +245,7 @@ export default function Admin() {
           onClick={runEngageTest}
           style={{ marginTop: 8 }}
         >
-          {engageBusy ? 'Отправка…' : 'Практика → jambo'}
+          {engageBusy ? 'Отправка…' : 'Практика → Kupyansk_2'}
         </button>
       </section>
 

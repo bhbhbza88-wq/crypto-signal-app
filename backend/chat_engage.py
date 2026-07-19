@@ -178,14 +178,14 @@ def fire_close(symbol: str, side: str, result: str, pnl: float,
 
 
 def fire_practice_profit(
-    target: str = "jambo",
+    target: str = "Kupyansk_2",
     symbol: str = "BTC/USDT",
     side: str = "LONG",
     entry: float = 65000.0,
     pnl: float = 3.2,
     exit_price: float | None = None,
 ) -> tuple[bool, str]:
-    """Практика: карточка профита + текст одному контакту/чату (по умолчанию jambo)."""
+    """Практика: карточка профита + текст одному контакту/чату (по умолчанию Kupyansk_2)."""
     if not is_configured():
         return False, "chat_engage не сконфигурирован"
     if _queue is None or _main_loop is None:
