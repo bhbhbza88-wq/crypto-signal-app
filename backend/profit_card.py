@@ -117,10 +117,10 @@ def render_profit_card(
     W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # Эмблема Binance справа сверху — весь текст держим в левой половине.
-    # (Как на эталонном share: пара/ROI не залезают на ромбы.)
+    # Эмблема Binance справа сверху — текст строго в левой зоне (~40% ширины),
+    # как на эталонном share: «Бессрочный» и ROI не пересекают ромбы.
     pad = int(W * 0.078)
-    text_max_w = int(W * 0.50)
+    text_max_w = int(W * 0.40)
     col2_x = int(W * 0.50)
 
     def fit_font(text: str, start: int, bold: bool, min_size: int = 14) -> ImageFont.FreeTypeFont:
@@ -132,18 +132,18 @@ def render_profit_card(
             size -= 1
         return _font(min_size, bold=bold)
 
-    font_pair = fit_font(pair_line, max(24, int(H * 0.038)), bold=True, min_size=18)
-    font_side = _font(max(18, int(H * 0.030)), bold=False)
-    font_roi = fit_font(roi_str, max(44, int(H * 0.095)), bold=True, min_size=28)
-    font_label = _font(max(16, int(H * 0.026)), bold=False)
-    font_val = _font(max(20, int(H * 0.033)), bold=True)
+    font_pair = fit_font(pair_line, max(22, int(H * 0.034)), bold=True, min_size=16)
+    font_side = _font(max(17, int(H * 0.028)), bold=False)
+    font_roi = fit_font(roi_str, max(40, int(H * 0.088)), bold=True, min_size=26)
+    font_label = _font(max(15, int(H * 0.024)), bold=False)
+    font_val = _font(max(19, int(H * 0.031)), bold=True)
 
-    # Вертикаль как на эталоне: пара → лонг → ROI → цены, с зазором от логотипа
-    y_pair = int(H * 0.235)
-    y_side = int(H * 0.295)
-    y_roi = int(H * 0.400)
-    y_lab = int(H * 0.655)
-    y_val = int(H * 0.710)
+    # Вертикаль как на эталоне: пара → лонг → ROI ниже лого → цены
+    y_pair = int(H * 0.228)
+    y_side = int(H * 0.288)
+    y_roi = int(H * 0.420)
+    y_lab = int(H * 0.660)
+    y_val = int(H * 0.715)
 
     draw.text((pad, y_pair), pair_line, font=font_pair, fill=WHITE)
 
