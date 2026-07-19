@@ -65,6 +65,7 @@ def init_db():
             ("entry_reasons_json", "TEXT"),
             ("dca_done", "INTEGER DEFAULT 0"),
             ("trader_id", "INTEGER"),
+            ("exchange", "TEXT DEFAULT 'bybit'"),
         ]:
             if col not in existing:
                 conn.execute(f"ALTER TABLE open_trades ADD COLUMN {col} {typedef}")
@@ -334,8 +335,9 @@ def insert_trade_if_not_exists(symbol, trade: dict) -> int:
             INSERT INTO open_trades
                 (symbol, signal, entry, stop, tp1, tp2, tp3, score, regime,
                  tp1_hit, tp2_hit, be_hit, potential_warned, pre_tp1_trail,
-                 opened_at, candles_json, entry_reasons_json, position_size, trader_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 opened_at, candles_json, entry_reasons_json, position_size, trader_id,
+                 exchange)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(symbol) DO NOTHING
         """, (
             symbol, trade['signal'], trade['entry'], trade['stop'],
@@ -349,6 +351,7 @@ def insert_trade_if_not_exists(symbol, trade: dict) -> int:
             trade.get('entry_reasons_json'),
             trade.get('position_size'),
             trade.get('trader_id'),
+            trade.get('exchange') or 'bybit',
         ))
         return cur.rowcount
 
@@ -359,8 +362,9 @@ def upsert_trade(symbol, trade: dict):
             INSERT INTO open_trades
                 (symbol, signal, entry, stop, tp1, tp2, tp3, score, regime,
                  tp1_hit, tp2_hit, be_hit, potential_warned, pre_tp1_trail,
-                 opened_at, candles_json, entry_reasons_json, position_size, trader_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 opened_at, candles_json, entry_reasons_json, position_size, trader_id,
+                 exchange)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(symbol) DO UPDATE SET
                 signal=excluded.signal, entry=excluded.entry, stop=excluded.stop,
                 tp1=excluded.tp1, tp2=excluded.tp2, tp3=excluded.tp3,
@@ -371,7 +375,8 @@ def upsert_trade(symbol, trade: dict):
                 candles_json=excluded.candles_json,
                 entry_reasons_json=excluded.entry_reasons_json,
                 position_size=excluded.position_size,
-                trader_id=excluded.trader_id
+                trader_id=excluded.trader_id,
+                exchange=excluded.exchange
         """, (
             symbol, trade['signal'], trade['entry'], trade['stop'],
             trade['tp1'], trade['tp2'], trade['tp3'],
@@ -384,6 +389,7 @@ def upsert_trade(symbol, trade: dict):
             trade.get('entry_reasons_json'),
             trade.get('position_size'),
             trade.get('trader_id'),
+            trade.get('exchange') or 'bybit',
         ))
 
 

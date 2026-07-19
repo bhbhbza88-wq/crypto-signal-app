@@ -85,11 +85,11 @@ def calc_chandelier_trailing(signal, df, current_stop):
         return min(last['close'] + atr * 0.8, current_stop)
 
 
-def check_potential_loss(symbol, signal, entry, price):
+def check_potential_loss(symbol, signal, entry, price, exchange_id=None):
     pnl = pnl_pct(signal, entry, price)
     if pnl > 0.3 or abs(price - entry) / entry >= 0.015:
         return False, [], 0
-    data = fetch_data_cached(symbol)
+    data = fetch_data_cached(symbol, exchange_id=exchange_id)
     if not data:
         return False, [], 0
     df = build_features(data['1h'])
@@ -116,8 +116,8 @@ def check_potential_loss(symbol, signal, entry, price):
     return (weak >= 3), lines, weak
 
 
-def analyze_tp1(symbol, signal):
-    data = fetch_data_cached(symbol)
+def analyze_tp1(symbol, signal, exchange_id=None):
+    data = fetch_data_cached(symbol, exchange_id=exchange_id)
     if not data:
         return "Анализ недоступен", "Тянем дальше"
     df   = build_features(data['1h'])
@@ -150,8 +150,8 @@ def analyze_tp1(symbol, signal):
     return '\n'.join(lines), rec
 
 
-def analyze_tp2(symbol, signal):
-    data = fetch_data_cached(symbol)
+def analyze_tp2(symbol, signal, exchange_id=None):
+    data = fetch_data_cached(symbol, exchange_id=exchange_id)
     if not data:
         return "Фиксируем на TP2"
     df   = build_features(data['1h'])
@@ -175,17 +175,18 @@ def check_trades():
 
     for symbol, trade in open_trades.items():
         try:
+            ex = (trade.get('exchange') or 'bybit').lower().strip()
             # Старые TG-сделки без свечей — догружаем в фоне, не на /api/signals
             if not trade.get('candles_json'):
                 try:
-                    cj = fetch_candles_json(symbol)
+                    cj = fetch_candles_json(symbol, exchange_id=ex)
                     if cj:
                         trade['candles_json'] = cj
                         db.upsert_trade(symbol, trade)
                 except Exception as e:
                     print(f"[tracker] candles backfill {symbol}: {e}")
 
-            ticker = fetch_ticker(symbol)
+            ticker = fetch_ticker(symbol, ex)
             if not ticker or ticker.get('last') is None:
                 continue
             price  = ticker['last']
@@ -202,7 +203,7 @@ def check_trades():
             # этот механизм не моделируется в бэктесте momentum.
             mom_mode = nfi_strategy.STRATEGY_MODE == 'momentum'
             if not mom_mode and not tp1_hit and not trade.get('potential_warned'):
-                lost, lines, _ = check_potential_loss(symbol, signal, entry, price)
+                lost, lines, _ = check_potential_loss(symbol, signal, entry, price, exchange_id=ex)
                 if lost:
                     trade['potential_warned'] = True
                     db.upsert_trade(symbol, trade)
@@ -276,14 +277,14 @@ def check_trades():
                 trade['be_hit']  = True
                 trade['stop']    = entry
                 pnl_tp1 = pnl_pct(signal, entry, tp1)
-                _, rec  = analyze_tp1(symbol, signal)
+                _, rec  = analyze_tp1(symbol, signal, exchange_id=ex)
                 db.add_event(symbol, 'tp1', f"TP1 достигнут (+{pnl_tp1:.1f}%). {rec}")
                 db.add_to_history(symbol, signal, entry, 'tp1', pnl_tp1, trader_id)
                 db.upsert_trade(symbol, trade)
 
             # ── Chandelier Exit trailing после TP1 ────────────────
             if trade.get('tp1_hit'):
-                data_cached = fetch_data_cached(symbol)
+                data_cached = fetch_data_cached(symbol, exchange_id=ex)
                 if data_cached:
                     df_trail = build_features(data_cached['1h'])
                     new_stop = calc_chandelier_trailing(signal, df_trail, trade['stop'])
@@ -295,7 +296,7 @@ def check_trades():
             if not trade.get('tp2_hit') and _hit(signal, price, tp2, 'tp'):
                 trade['tp2_hit'] = True
                 pnl_tp2 = pnl_pct(signal, entry, tp2)
-                rec2 = analyze_tp2(symbol, signal)
+                rec2 = analyze_tp2(symbol, signal, exchange_id=ex)
                 db.add_event(symbol, 'tp2', f"TP2 достигнут (+{pnl_tp2:.1f}%). {rec2}")
                 db.upsert_trade(symbol, trade)
 

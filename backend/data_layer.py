@@ -1,6 +1,6 @@
 """
-Data Layer — получение OHLCV данных с Bybit и расчёт технических индикаторов.
-Перенесено из Telegram-бота без изменений в логике.
+Data Layer — OHLCV/тикеры с Bybit (linear) и Binance USDM + индикаторы.
+По умолчанию Bybit; для монет только на Binance — exchange_id='binance'.
 """
 
 import time
@@ -13,6 +13,16 @@ exchange = ccxt.bybit({
     'enableRateLimit': True,
     'timeout': 15000,
 })
+
+binance = ccxt.binanceusdm({
+    'enableRateLimit': True,
+    'timeout': 15000,
+})
+
+_EXCHANGES = {
+    'bybit': exchange,
+    'binance': binance,
+}
 
 CACHE_TTL = 180
 _data_cache = {}
@@ -34,17 +44,38 @@ def api_call(func, *args, retries=3, delay=2, **kwargs):
     return None
 
 
+def get_exchange(exchange_id=None):
+    """bybit | binance; неизвестный id → bybit."""
+    if not exchange_id:
+        return exchange
+    return _EXCHANGES.get(str(exchange_id).lower().strip(), exchange)
+
+
 def clean_cache():
     now = time.time()
     for s in [k for k, (t, _) in _data_cache.items() if now - t >= CACHE_TTL]:
         del _data_cache[s]
 
 
-def fetch_data(symbol):
+def _ticker_ok(ticker):
+    return bool(ticker and ticker.get('last') is not None)
+
+
+def resolve_listed_exchange(symbol):
+    """Сначала Bybit, иначе Binance USDM. None если нигде нет тикера с last."""
+    for ex_id in ('bybit', 'binance'):
+        ticker = api_call(get_exchange(ex_id).fetch_ticker, symbol)
+        if _ticker_ok(ticker):
+            return ex_id
+    return None
+
+
+def fetch_data(symbol, exchange_id=None):
+    ex = get_exchange(exchange_id)
     cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-    d4h = api_call(exchange.fetch_ohlcv, symbol, '4h', limit=120)
-    d1h = api_call(exchange.fetch_ohlcv, symbol, '1h', limit=100)
-    d30m = api_call(exchange.fetch_ohlcv, symbol, '30m', limit=150)
+    d4h = api_call(ex.fetch_ohlcv, symbol, '4h', limit=120)
+    d1h = api_call(ex.fetch_ohlcv, symbol, '1h', limit=100)
+    d30m = api_call(ex.fetch_ohlcv, symbol, '30m', limit=150)
     if not d4h or not d1h or not d30m:
         return None
     df4h = pd.DataFrame(d4h, columns=cols)
@@ -55,31 +86,48 @@ def fetch_data(symbol):
     return {'4h': df4h, '1h': df1h, '30m': df30m}
 
 
-def fetch_data_cached(symbol):
+def fetch_data_cached(symbol, exchange_id=None):
+    ex_id = (exchange_id or 'bybit').lower().strip()
+    cache_key = f"data:{ex_id}:{symbol}"
     now = time.time()
-    if symbol in _data_cache:
+    if cache_key in _data_cache:
+        t, d = _data_cache[cache_key]
+        if now - t < CACHE_TTL:
+            return d
+    # legacy key without exchange (старый кэш сканера)
+    if ex_id == 'bybit' and symbol in _data_cache:
         t, d = _data_cache[symbol]
         if now - t < CACHE_TTL:
             return d
-    d = fetch_data(symbol)
+    d = fetch_data(symbol, exchange_id=ex_id)
     if d:
-        _data_cache[symbol] = (now, d)
+        _data_cache[cache_key] = (now, d)
     return d
 
 
-def fetch_ticker(symbol):
-    return api_call(exchange.fetch_ticker, symbol)
+def fetch_ticker(symbol, exchange_id=None):
+    """Если exchange_id задан — только эта биржа. Иначе Bybit, затем Binance."""
+    if exchange_id:
+        ticker = api_call(get_exchange(exchange_id).fetch_ticker, symbol)
+        return ticker if _ticker_ok(ticker) else None
+    for ex_id in ('bybit', 'binance'):
+        ticker = api_call(get_exchange(ex_id).fetch_ticker, symbol)
+        if _ticker_ok(ticker):
+            return ticker
+    return None
 
 
-def fetch_candles_json(symbol, timeframe='1h', limit=60):
+def fetch_candles_json(symbol, timeframe='1h', limit=60, exchange_id=None):
     """Свечи для графика на карточке сигнала (JSON-строка как в scanner)."""
     import json
-    cache_key = f"candles:{symbol}:{timeframe}:{limit}"
+    ex_id = (exchange_id or 'bybit').lower().strip()
+    ex = get_exchange(ex_id)
+    cache_key = f"candles:{ex_id}:{symbol}:{timeframe}:{limit}"
     now = time.time()
     hit = _data_cache.get(cache_key)
     if hit and now - hit[0] < 60:
         return hit[1]
-    raw = api_call(exchange.fetch_ohlcv, symbol, timeframe, limit=limit)
+    raw = api_call(ex.fetch_ohlcv, symbol, timeframe, limit=limit)
     if not raw:
         return None
     rows = [

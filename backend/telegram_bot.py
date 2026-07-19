@@ -537,6 +537,11 @@ def _levels_block(entry, stop, tp1, tp2, tp3) -> str:
     )
 
 
+def _exchange_label(signal: dict) -> str:
+    ex = (signal.get("exchange") or "bybit").lower().strip()
+    return "Binance" if ex == "binance" else "Bybit"
+
+
 async def notify_new_signal(signal: dict):
     sym = signal.get("symbol", "")
     side = signal.get("signal", "")
@@ -551,12 +556,13 @@ async def notify_new_signal(signal: dict):
     side_emoji = "🟢 LONG" if side == "LONG" else "🔴 SHORT"
     conf = round((score / 20) * 100) if score else 0
     conf_line = f"\n⚡ Уверенность · <b>{conf}%</b>" if conf else ""
+    venue = _exchange_label(signal)
 
     text = (
         f"<b>◈ NOWICKI SIGNAL</b>\n"
         f"{HR}\n"
         f"{side_emoji}\n"
-        f"<b>{sym}</b>  ·  Bybit{conf_line}\n"
+        f"<b>{sym}</b>  ·  {venue}{conf_line}\n"
         f"{HR}\n"
         f"{_levels_block(entry, stop, tp1, tp2, tp3)}\n"
     )
@@ -577,13 +583,13 @@ async def notify_manual_signal(signal: dict, source: str):
     tp3 = signal.get("tp3", 0)
     stop = signal.get("stop", 0)
     side_emoji = "🟢 LONG" if side == "LONG" else "🔴 SHORT"
-    src = _pretty_source(source)
+    venue = _exchange_label(signal)
 
     text = (
         f"<b>◈ NOWICKI SIGNAL</b>\n"
         f"{HR}\n"
         f"{side_emoji}\n"
-        f"<b>{sym}</b>  ·  {src}\n"
+        f"<b>{sym}</b>  ·  {venue}\n"
         f"{HR}\n"
         f"{_levels_block(entry, stop, tp1, tp2, tp3)}\n"
         f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>  ·  <i>не фин. совет</i>"

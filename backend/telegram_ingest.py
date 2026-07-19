@@ -353,7 +353,8 @@ async def _try_close_from_channel(display_name: str, text: str):
         if not parsed:
             continue
 
-        ticker = await asyncio.to_thread(data_layer.fetch_ticker, symbol)
+        ticker = await asyncio.to_thread(
+            data_layer.fetch_ticker, symbol, trade.get('exchange') or 'bybit')
         if not ticker or ticker.get('last') is None:
             print(f"[telegram_ingest] {display_name}: не удалось получить цену для закрытия {symbol}")
             continue
@@ -410,10 +411,16 @@ async def _handle_message(display_name: str, msg):
         return
 
     symbol = normalize_symbol(str(parsed["symbol"]))
-    ticker = await asyncio.to_thread(data_layer.fetch_ticker, symbol)
-    if not ticker:
-        print(f"[telegram_ingest] {display_name}: символ {symbol} не торгуется на Bybit, пропуск")
+    exchange_id = await asyncio.to_thread(data_layer.resolve_listed_exchange, symbol)
+    if not exchange_id:
+        print(f"[telegram_ingest] {display_name}: символ {symbol} не торгуется на Bybit/Binance, пропуск")
         return
+
+    ticker = await asyncio.to_thread(data_layer.fetch_ticker, symbol, exchange_id)
+    if not ticker:
+        print(f"[telegram_ingest] {display_name}: нет тикера {symbol} на {exchange_id}, пропуск")
+        return
+    print(f"[telegram_ingest] {display_name}: {symbol} via {exchange_id}")
 
     last = ticker.get("last")
     entry, stop, tp1 = float(parsed["entry"]), float(parsed["stop"]), float(parsed["tp1"])
@@ -443,8 +450,10 @@ async def _handle_message(display_name: str, msg):
         reasons=[
             f"Автоимпорт из потока: {display_name}",
             f"Quality filter: {qdetail}",
+            f"Exchange: {exchange_id}",
         ],
         score=quality,
+        exchange=exchange_id,
     )
     if err:
         print(f"[telegram_ingest] {display_name}: {symbol} пропущен ({err})")
@@ -452,8 +461,8 @@ async def _handle_message(display_name: str, msg):
 
     _channel_day_bump(display_name)
     db.add_event(opened_symbol, "telegram_aggregate_signal",
-                 f"{display_name}: {side} {opened_symbol} @ {entry} ({qdetail})")
-    print(f"[telegram_ingest] Открыт сигнал {opened_symbol} от {display_name} ({qdetail})")
+                 f"{display_name}: {side} {opened_symbol} @ {entry} ({qdetail}, {exchange_id})")
+    print(f"[telegram_ingest] Открыт сигнал {opened_symbol} от {display_name} ({qdetail}, via {exchange_id})")
 
     # Публикуем в наш собственный TG-канал тем же путём, что ручные сигналы
     # админа и TradingView-вебхук (telegram_bot.notify_manual_signal) — источник
@@ -463,6 +472,7 @@ async def _handle_message(display_name: str, msg):
             "symbol": opened_symbol, "signal": side,
             "entry": entry, "stop": stop,
             "tp1": tp1, "tp2": tp2, "tp3": tp3,
+            "exchange": exchange_id,
         }, display_name)
     except Exception as e:
         print(f"[telegram_ingest] Ошибка публикации в TG-канал: {e}")
