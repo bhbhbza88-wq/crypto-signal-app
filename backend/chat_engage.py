@@ -1,23 +1,19 @@
 """
-Chat Engage — пишет в whitelist-чаты «как человек» по реальным сделкам NOWICKI.
+Chat Engage — пишет в whitelist-чаты «как человек» только при хорошем плюсе.
 
-  открыли сигнал  → сначала «привет / как дела», через 1.5–10 мин — ТВХ (вход)
-  закрыли в плюс  → в тех же чатах «отработала, +X%»
-  в минус         → молчим
+  открыли сигнал  → молчим (входы не светим)
+  закрыли в плюс  → карточка профита + короткая фраза во все whitelist-чаты
+  в минус / мелочь → молчим
   спросили «где берёшь» → мягко сайт + канал
+
+Стиль письма уже «очеловечен» (короткие фразы / AI) — историю чатов
+постоянно не копируем.
 
 Env:
   TELEGRAM_API_ID / TELEGRAM_API_HASH
-  TELEGRAM_CHAT_WHITELIST              — username чатов через запятую
-                                         (если пусто — дефолтный набор RU-чатов)
-  TELEGRAM_CHAT_SESSION                — опционально, второй аккаунт
-  TELEGRAM_SESSION                     — fallback, если CHAT_SESSION пустой
-  CHAT_ENGAGE_GREET_MIN_SEC            — мин. пауза привет→ТВХ (default 90)
-  CHAT_ENGAGE_GREET_MAX_SEC            — макс. пауза привет→ТВХ (default 600 = 10м)
-
-Режим shared (один аккаунт с ingest): не поднимаем второй Telethon-клиент —
-ingest вызывает attach_to_client(client). Иначе AuthKeyDuplicatedError.
-Отдельный аккаунт: TELEGRAM_CHAT_SESSION ≠ TELEGRAM_SESSION → run() сам.
+  TELEGRAM_CHAT_WHITELIST
+  TELEGRAM_CHAT_SESSION / TELEGRAM_SESSION
+  CHAT_ENGAGE_MIN_PNL          — мин. сырой PnL% для поста (default 1.0)
 """
 
 from __future__ import annotations
@@ -26,6 +22,7 @@ import asyncio
 import os
 import random
 import re
+from io import BytesIO
 
 import database as db
 
@@ -34,7 +31,6 @@ TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "").strip()
 TELEGRAM_CHAT_SESSION = os.getenv("TELEGRAM_CHAT_SESSION", "").strip()
 
-# Отобранные чаты для engage (override через TELEGRAM_CHAT_WHITELIST на Railway).
 _DEFAULT_CHAT_WHITELIST = (
     "kriptovaluta_01,bybitrussian,BinanceRussianSpeaking,"
     "cryptoinside_chat,minter_traders_chat,CryptoFLUD,cscalp_crypto"
@@ -43,12 +39,7 @@ TELEGRAM_CHAT_WHITELIST = (os.getenv("TELEGRAM_CHAT_WHITELIST") or _DEFAULT_CHAT
 
 CHANNEL_URL = os.getenv("TELEGRAM_PUBLIC_CHANNEL_URL", "").strip() or "https://t.me/papayaqq"
 SITE_URL = "https://nowicki.trade"
-
-# Пауза между «привет» и ТВХ (секунды), по умолчанию до 10 минут.
-_GREET_MIN = float(os.getenv("CHAT_ENGAGE_GREET_MIN_SEC", "90") or "90")
-_GREET_MAX = float(os.getenv("CHAT_ENGAGE_GREET_MAX_SEC", "600") or "600")
-if _GREET_MAX < _GREET_MIN:
-    _GREET_MAX = _GREET_MIN
+MIN_PROFIT_PCT = float(os.getenv("CHAT_ENGAGE_MIN_PNL", "1.0") or "1.0")
 
 from display_polish import polish_pnl  # noqa: E402
 
@@ -72,7 +63,6 @@ def _session_string() -> str:
 
 
 def uses_ingest_session() -> bool:
-    """True = пишем тем же аккаунтом, что и ingest — отдельный клиент нельзя."""
     if not TELEGRAM_CHAT_WHITELIST:
         return False
     if not TELEGRAM_CHAT_SESSION:
@@ -85,7 +75,6 @@ def is_configured() -> bool:
 
 
 def needs_own_client() -> bool:
-    """Отдельный run() только если есть свой CHAT_SESSION, отличный от ingest."""
     return is_configured() and not uses_ingest_session()
 
 
@@ -97,22 +86,7 @@ def _coin(symbol: str) -> str:
     return (symbol or "").replace("/USDT", "").replace("USDT", "").upper()
 
 
-def _fmt_entry(v) -> str:
-    try:
-        n = float(v)
-    except (TypeError, ValueError):
-        return str(v)
-    if n >= 100:
-        return f"{n:.2f}"
-    if n >= 1:
-        return f"{n:.4f}"
-    return f"{n:.6f}".rstrip("0").rstrip(".")
-
-
-# не повторяем одни и те же фразы подряд
-_recent_open: list[str] = []
 _recent_close: list[str] = []
-_recent_greet: list[str] = []
 
 
 def _pick_unique(candidates: list[str], recent: list[str], remember: int = 8) -> str:
@@ -121,51 +95,6 @@ def _pick_unique(candidates: list[str], recent: list[str], remember: int = 8) ->
     recent.append(choice)
     del recent[:-remember]
     return choice
-
-
-def _greet_text() -> str:
-    """Fallback, если AI/стиль недоступны — короче и живее."""
-    templates = [
-        "ку",
-        "здарова",
-        "всем ку",
-        "привет",
-        "как дела",
-        "как рынок",
-        "есть кто",
-        "че по рынку",
-        "здарова народ",
-        "ку, как оно",
-        "тихо сегодня?",
-        "всем привет",
-        "йо",
-        "ну че",
-        "как настроение",
-    ]
-    return _pick_unique(templates, _recent_greet, remember=10)
-
-
-def _open_text(symbol: str, side: str, entry) -> str:
-    coin = _coin(symbol)
-    side_ru = "лонг" if side == "LONG" else "шорт"
-    e = _fmt_entry(entry)
-    templates = [
-        f"взял {side_ru} {coin} от {e}",
-        f"зашёл {coin} {side_ru} ~{e}",
-        f"{coin} {side_ru} с {e}, посмотрим",
-        f"ну короче {coin} в {side_ru} от {e}",
-        f"пробую {coin} {side_ru} {e}",
-        f"залетела идея по {coin}, {side_ru} от {e}",
-        f"{coin} взял в {side_ru}",
-        f"я в {side_ru} по {coin} уже",
-        f"имхо {coin} норм в {side_ru} от {e}",
-        f"чекните {coin}, я {side_ru} от {e}",
-        f"маленько взял {coin} {side_ru}",
-        f"{coin} шортну" if side == "SHORT" else f"{coin} лонганул",
-        f"по {coin} зашёл, {e}",
-        f"есть вход по {coin} ({side_ru})",
-    ]
-    return _pick_unique(templates, _recent_open)
 
 
 def _close_win_text(symbol: str, pnl: float) -> str:
@@ -182,38 +111,28 @@ def _close_win_text(symbol: str, pnl: float) -> str:
         f"норм, {coin} +{show}%",
         f"закрыл ту {coin}, +{show}%",
         f"{coin} в плюс вышла",
+        f"забрал по {coin}",
+        f"ну вот, {coin} дала +{show}%",
     ]
     return _pick_unique(templates, _recent_close)
 
 
-async def _line_greet() -> str:
-    import chat_style
-    ai = await chat_style.compose_natural("greet")
-    return ai or _greet_text()
-
-
-async def _line_open(symbol: str, side: str, entry) -> str:
-    import chat_style
-    ai = await chat_style.compose_natural(
-        "open",
-        coin=_coin(symbol),
-        side_ru="лонг" if side == "LONG" else "шорт",
-        entry=_fmt_entry(entry),
-    )
-    return ai or _open_text(symbol, side, entry)
-
-
 async def _line_close(symbol: str, pnl: float) -> str:
-    import chat_style
-    show = polish_pnl(pnl, decimals=1)
-    if show < 0:
-        show = abs(show)
-    ai = await chat_style.compose_natural(
-        "close_win",
-        coin=_coin(symbol),
-        pnl_show=str(show),
-    )
-    return ai or _close_win_text(symbol, pnl)
+    try:
+        import chat_style
+        show = polish_pnl(pnl, decimals=1)
+        if show < 0:
+            show = abs(show)
+        ai = await chat_style.compose_natural(
+            "close_win",
+            coin=_coin(symbol),
+            pnl_show=str(show),
+        )
+        if ai:
+            return ai
+    except Exception as e:
+        print(f"[chat_engage] style close: {e}")
+    return _close_win_text(symbol, pnl)
 
 
 def _soft_promo_reply() -> str:
@@ -239,9 +158,8 @@ def _enqueue(job: dict) -> None:
 
 
 def fire_open(symbol: str, side: str, entry) -> None:
-    if not is_configured():
-        return
-    _enqueue({"kind": "open", "symbol": symbol, "side": side, "entry": entry})
+    """Входы в чаты не пишем — только профит при закрытии."""
+    return
 
 
 def fire_close(symbol: str, side: str, result: str, pnl: float,
@@ -259,153 +177,117 @@ def fire_close(symbol: str, side: str, result: str, pnl: float,
     })
 
 
-async def _do_open_one_chat(client, chat: str, symbol: str, side: str, entry,
-                            stagger_sec: float = 0,
-                            greet_min: float | None = None,
-                            greet_max: float | None = None) -> None:
-    """Привет → пауза → ТВХ в одном чате."""
-    try:
-        if stagger_sec > 0:
-            await asyncio.sleep(stagger_sec)
-        entity = await client.get_entity(chat)
-        greet = await _line_greet()
-        await client.send_message(entity, greet)
-        print(f"[chat_engage] greet → {chat}: {greet!r}")
-
-        lo = _GREET_MIN if greet_min is None else float(greet_min)
-        hi = _GREET_MAX if greet_max is None else float(greet_max)
-        if hi < lo:
-            hi = lo
-        delay = random.uniform(lo, hi)
-        print(f"[chat_engage] {chat}: ТВХ через {delay / 60:.1f} мин")
-        await asyncio.sleep(delay)
-
-        text = await _line_open(symbol, side, entry)
-        msg = await client.send_message(entity, text)
-        db.save_chat_engage_post(symbol, int(entity.id), int(msg.id), str(chat))
-        print(f"[chat_engage] open → {chat}: {text!r}")
-    except Exception as e:
-        print(f"[chat_engage] не смог написать в {chat}: {e}")
-
-
-async def _do_open(client, symbol: str, side: str, entry) -> None:
-    chats = _whitelist()
-    if not chats:
-        return
-    # Параллельно по чатам, старт приветов разнесён на ~0–2 мин,
-    # чтобы не слать во все сразу одним пакетом.
-    tasks = [
-        asyncio.create_task(
-            _do_open_one_chat(
-                client, chat, symbol, side, entry,
-                stagger_sec=i * random.uniform(8, 25),
-            )
-        )
-        for i, chat in enumerate(chats)
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for chat, res in zip(chats, results):
-        if isinstance(res, Exception):
-            print(f"[chat_engage] open task fail {chat}: {res}")
-
-
-def fire_test(chat: str = "kriptovaluta_01",
-              symbol: str = "BTC/USDT",
-              side: str = "LONG",
-              entry: float = 65000.0,
-              fast: bool = True) -> tuple[bool, str]:
-    """Очередь тестового привет→ТВХ в один чат. fast=True → пауза ~25–45с."""
+def fire_practice_profit(
+    target: str = "jambo",
+    symbol: str = "BTC/USDT",
+    side: str = "LONG",
+    entry: float = 65000.0,
+    pnl: float = 3.2,
+    exit_price: float | None = None,
+) -> tuple[bool, str]:
+    """Практика: карточка профита + текст одному контакту/чату (по умолчанию jambo)."""
     if not is_configured():
         return False, "chat_engage не сконфигурирован"
     if _queue is None or _main_loop is None:
         return False, "воркер ещё не готов (нужен живой telegram_ingest / chat session)"
-    chat = (chat or "").strip().lstrip("@")
-    if not chat:
-        return False, "не указан chat"
+    target = (target or "").strip().lstrip("@")
+    if not target:
+        return False, "не указан target"
     _enqueue({
-        "kind": "test_open",
-        "chat": chat,
+        "kind": "practice_profit",
+        "target": target,
         "symbol": symbol,
         "side": side,
         "entry": entry,
-        "fast": bool(fast),
+        "pnl": pnl,
+        "exit_price": exit_price,
     })
-    return True, f"тест в очередь → @{chat} (привет, потом ТВХ)"
+    return True, f"практика профита → @{target}"
+
+
+def _render_card(symbol, side, entry, pnl, exit_price):
+    from profit_card import render_profit_card
+    return render_profit_card(
+        symbol=symbol, side=side, entry=float(entry),
+        pnl_pct=float(pnl), exit_price=exit_price,
+    )
+
+
+async def _send_profit(client, target, text: str, photo: bytes | None) -> None:
+    entity = await client.get_entity(target)
+    if photo:
+        bio = BytesIO(photo)
+        bio.name = "pnl.png"
+        await client.send_file(entity, bio, caption=text, force_document=False)
+    else:
+        await client.send_message(entity, text)
 
 
 async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
                     entry=None, exit_price=None) -> None:
-    if pnl is None or float(pnl) <= 0:
+    try:
+        pnl_f = float(pnl)
+    except (TypeError, ValueError):
+        return
+    if pnl_f < MIN_PROFIT_PCT:
         db.clear_chat_engage_posts(symbol)
         return
-    posts = db.list_chat_engage_posts(symbol)
-    if not posts:
-        return
-    text = await _line_close(symbol, float(pnl))
+
+    text = await _line_close(symbol, pnl_f)
     photo = None
     if entry is not None:
         try:
-            from profit_card import render_profit_card
-            photo = render_profit_card(
-                symbol=symbol, side=side, entry=float(entry),
-                pnl_pct=float(pnl), exit_price=exit_price,
-            )
+            photo = _render_card(symbol, side, entry, pnl_f, exit_price)
         except Exception as e:
             print(f"[chat_engage] profit_card: {e}")
 
-    for i, row in enumerate(posts):
+    chats = _whitelist()
+    for i, chat in enumerate(chats):
         try:
             if i:
-                await asyncio.sleep(random.uniform(3, 9))
-            target = row.get("chat_ref") or row["chat_id"]
-            reply_to = row.get("msg_id")
-            if photo:
-                from io import BytesIO
-                bio = BytesIO(photo)
-                bio.name = "pnl.png"  # без .png Telethon шлёт как файл-документ
-                await client.send_file(
-                    target,
-                    bio,
-                    caption=text,
-                    reply_to=reply_to,
-                    force_document=False,
-                )
-            else:
-                await client.send_message(target, text, reply_to=reply_to)
-            print(f"[chat_engage] close+ → {target}: {symbol} {float(pnl):+.1f}%")
+                await asyncio.sleep(random.uniform(4, 14))
+            await _send_profit(client, chat, text, photo)
+            print(f"[chat_engage] profit → {chat}: {symbol} {pnl_f:+.1f}% | {text!r}")
         except Exception as e:
-            print(f"[chat_engage] close fail {row}: {e}")
+            print(f"[chat_engage] profit fail {chat}: {e}")
     db.clear_chat_engage_posts(symbol)
+
+
+async def _do_practice_profit(client, target: str, symbol: str, side: str,
+                              entry: float, pnl: float, exit_price=None) -> None:
+    text = await _line_close(symbol, float(pnl))
+    photo = None
+    try:
+        photo = _render_card(symbol, side, entry, pnl, exit_price)
+    except Exception as e:
+        print(f"[chat_engage] practice card: {e}")
+    try:
+        await _send_profit(client, target, text, photo)
+        print(f"[chat_engage] practice → {target}: {text!r}")
+    except Exception as e:
+        print(f"[chat_engage] practice fail {target}: {e}")
 
 
 async def _worker_loop(client):
     while True:
         job = await _queue.get()
         try:
-            if job["kind"] == "open":
-                await _do_open(client, job["symbol"], job["side"], job["entry"])
-            elif job["kind"] == "test_open":
-                fast = job.get("fast", True)
-                await _do_open_one_chat(
-                    client,
-                    job["chat"],
-                    job["symbol"],
-                    job["side"],
-                    job["entry"],
-                    stagger_sec=0,
-                    greet_min=25 if fast else None,
-                    greet_max=45 if fast else None,
-                )
-            elif job["kind"] == "style_ingest":
-                import chat_style
-                chats = job.get("chats")
-                stats = await chat_style.ingest_style_chats(client, chats)
-                print(f"[chat_engage] style ingest: {stats}")
-            elif job["kind"] == "close":
+            kind = job.get("kind")
+            if kind == "close":
                 await _do_close(
                     client, job["symbol"], job["side"],
                     job.get("result", ""), job.get("pnl", 0),
                     entry=job.get("entry"),
+                    exit_price=job.get("exit_price"),
+                )
+            elif kind == "practice_profit":
+                await _do_practice_profit(
+                    client,
+                    job["target"],
+                    job["symbol"],
+                    job["side"],
+                    job["entry"],
+                    job["pnl"],
                     exit_price=job.get("exit_price"),
                 )
         except Exception as e:
@@ -439,18 +321,7 @@ def _register_ask_handler(client, me):
         await event.respond(_soft_promo_reply())
 
 
-def fire_style_ingest(chats: list[str] | None = None) -> tuple[bool, str]:
-    """Поставить в очередь загрузку истории для обучения стиля."""
-    if not is_configured():
-        return False, "chat_engage не сконфигурирован"
-    if _queue is None or _main_loop is None:
-        return False, "воркер ещё не готов"
-    _enqueue({"kind": "style_ingest", "chats": chats})
-    return True, "загрузка истории в очереди"
-
-
 async def attach_to_client(client) -> asyncio.Task | None:
-    """Подцепить очередь к уже запущенному ingest-клиенту (один аккаунт)."""
     global _queue, _main_loop, _attached
     if not is_configured() or not uses_ingest_session():
         return None
@@ -464,20 +335,12 @@ async def attach_to_client(client) -> asyncio.Task | None:
     _attached = True
     print(
         f"[chat_engage] shared с ingest: @{me.username or me.id}, "
-        f"чаты: {', '.join(_whitelist())}"
+        f"только профит ≥{MIN_PROFIT_PCT}%, чаты: {', '.join(_whitelist())}"
     )
-    # Подтянуть стиль из учительских чатов в фоне (если корпуса мало)
-    try:
-        if db.count_chat_style_samples() < 40:
-            _enqueue({"kind": "style_ingest", "chats": None})
-            print("[chat_engage] авто-загрузка истории для стиля")
-    except Exception as e:
-        print(f"[chat_engage] style auto: {e}")
     return task
 
 
 def detach():
-    """Сброс при disconnect ingest — следующий _run_once снова attach."""
     global _queue, _main_loop, _attached
     _attached = False
     _queue = None
@@ -485,7 +348,6 @@ def detach():
 
 
 async def run():
-    """Отдельный аккаунт (TELEGRAM_CHAT_SESSION свой)."""
     global _queue, _main_loop
     if not needs_own_client():
         if is_configured() and uses_ingest_session():
@@ -499,7 +361,7 @@ async def run():
 
     _main_loop = asyncio.get_running_loop()
     _queue = asyncio.Queue()
-    print(f"[chat_engage] отдельный аккаунт, чаты: {', '.join(_whitelist())}")
+    print(f"[chat_engage] отдельный аккаунт, профит-посты → {', '.join(_whitelist())}")
 
     while True:
         client = None
@@ -517,11 +379,6 @@ async def run():
             print(f"[chat_engage] online as {me.first_name} (@{me.username or me.id})")
             _register_ask_handler(client, me)
             worker_task = asyncio.create_task(_worker_loop(client))
-            try:
-                if db.count_chat_style_samples() < 40:
-                    _enqueue({"kind": "style_ingest", "chats": None})
-            except Exception as e:
-                print(f"[chat_engage] style auto: {e}")
             await client.run_until_disconnected()
         except asyncio.CancelledError:
             if client:
