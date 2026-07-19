@@ -28,8 +28,6 @@ def _send_email_bg(fn, *args):
 
 PBKDF2_ITERATIONS = 200_000
 SESSION_DAYS = 30
-TRIAL_DAYS = 3
-TRIAL_TIER = 'premium'
 VERIFY_HOURS = 24
 RESET_HOURS = 1
 
@@ -41,21 +39,11 @@ TIERS = ['free', 'premium', 'vip']
 TIER_RANK = {t: i for i, t in enumerate(TIERS)}
 
 
-def _trial_active(user: dict) -> bool:
-    ends = user.get('trial_ends_at') if user else None
-    if not ends:
-        return False
-    try:
-        return datetime.now() < datetime.fromisoformat(ends)
-    except (ValueError, TypeError):
-        return False
-
-
 def effective_tier(user: dict) -> str:
     if not user:
         return 'free'
     base = user.get('tier', 'free')
-    # Платный premium с истекшим сроком → free (trial отдельно ниже)
+    # Платный premium с истекшим сроком → free
     until = user.get('premium_until')
     if base == 'premium' and until:
         try:
@@ -63,10 +51,6 @@ def effective_tier(user: dict) -> str:
                 base = 'free'
         except (ValueError, TypeError):
             pass
-    if TIER_RANK.get(base, 0) >= TIER_RANK.get(TRIAL_TIER, 0):
-        return base
-    if _trial_active(user):
-        return TRIAL_TIER
     return base
 
 
@@ -134,10 +118,9 @@ def register(email: str, password: str):
         return None, 'Email уже зарегистрирован'
 
     h, salt = hash_password(password)
-    trial_ends = (datetime.now() + timedelta(days=TRIAL_DAYS)).isoformat()
     need_verify = _email_verify_required()
     uid = db.create_user(
-        email, h, salt, tier='free', trial_ends_at=trial_ends,
+        email, h, salt, tier='free', trial_ends_at=None,
         email_verified=0 if need_verify else 1,
     )
     user = db.get_user_by_id(uid)
@@ -242,9 +225,8 @@ def login_with_google(id_token_str: str):
     else:
         # Неиспользуемый пароль — вход только через Google, пока не зададут пароль через reset
         h, salt = hash_password(secrets.token_urlsafe(32))
-        trial_ends = (datetime.now() + timedelta(days=TRIAL_DAYS)).isoformat()
         uid = db.create_user(
-            email, h, salt, tier='free', trial_ends_at=trial_ends,
+            email, h, salt, tier='free', trial_ends_at=None,
             email_verified=1, google_id=sub,
         )
         user = db.get_user_by_id(uid)
@@ -289,23 +271,14 @@ def public_auth_config() -> dict:
 def public_user(user: dict) -> dict:
     if not user:
         return None
-    eff = effective_tier(user)
-    active = _trial_active(user) and eff == TRIAL_TIER and TIER_RANK.get(user.get('tier', 'free'), 0) < TIER_RANK.get(TRIAL_TIER, 0)
-    days_left = None
-    if active:
-        try:
-            delta = datetime.fromisoformat(user['trial_ends_at']) - datetime.now()
-            days_left = max(0, delta.days + (1 if delta.seconds else 0))
-        except (ValueError, TypeError):
-            days_left = None
     return {
         'id': user['id'],
         'email': user['email'],
-        'tier': eff,
+        'tier': effective_tier(user),
         'base_tier': user.get('tier', 'free'),
-        'on_trial': active,
-        'trial_days_left': days_left,
-        'trial_ends_at': user.get('trial_ends_at'),
+        'on_trial': False,
+        'trial_days_left': None,
+        'trial_ends_at': None,
         'is_admin': bool(user.get('is_admin')),
         'email_verified': bool(user.get('email_verified')),
         'has_google': bool(user.get('google_id')),
