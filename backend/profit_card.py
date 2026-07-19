@@ -92,19 +92,14 @@ def _load_bg() -> Image.Image:
 
 
 def _bg_for_text() -> Image.Image:
-    """Фон с чистой левой зоной: эмблема Binance остаётся справа, под текст не залезает."""
+    """Фон как на эталоне: слева чистое чёрное поле под текст, эмблема только справа."""
     img = _load_bg().copy()
     W, H = img.size
-    clear_w = int(W * 0.58)
-    clear_h = int(H * 0.62)
-    px = img.load()
-    for y in range(clear_h):
-        for x in range(clear_w):
-            r, g, b = px[x, y]
-            # слева гасим эмблему почти в ноль, у правого края зоны — плавный переход
-            t = 1.0 - (x / max(clear_w - 1, 1))  # 1 → 0
-            keep = 1.0 - t * 0.97
-            px[x, y] = (int(r * keep), int(g * keep), int(b * keep))
+    draw = ImageDraw.Draw(img)
+    # Жёстко заливаем левую/среднюю зону — иначе ромбы Binance лезут под «Бессрочный» и ROI.
+    draw.rectangle([0, 0, int(W * 0.56), int(H * 0.58)], fill=(0, 0, 0))
+    # чуть ниже тоже подчищаем под крупный ROI
+    draw.rectangle([0, int(H * 0.35), int(W * 0.52), int(H * 0.58)], fill=(0, 0, 0))
     return img
 
 
