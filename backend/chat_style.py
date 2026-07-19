@@ -235,12 +235,57 @@ async def classify_intent(text: str, *, ask_re) -> str:
     return base
 
 
+_OARS_FALLBACKS = {
+    1: [
+        "а ты сам откуда обычно смотришь?",
+        "ну хз, а тебе что заходит больше?",
+        "а ты давно в теме?",
+    ],
+    2: [
+        "ага понял, сам через кучу шума пробираюсь",
+        "ну да, везде одно и то же льют",
+        "жиза, сам устал от шлака",
+    ],
+    3: [
+        "я просто сканер гоняю + канал, без магии",
+        "ну у меня свой поток, не сигнальный чат всякий",
+        "смотрю по сканеру, иногда кидают в тг",
+    ],
+}
+
+
+def memory_block(rows: list | None) -> str:
+    if not rows:
+        return ""
+    lines = []
+    for r in rows[-8:]:
+        role = "я" if r.get("role") == "assistant" else "он"
+        lines.append(f"{role}: {r.get('text', '')}")
+    return "Недавний диалог:\n" + "\n".join(lines)
+
+
+def oars_fallback(step: int) -> str:
+    return random.choice(_OARS_FALLBACKS.get(step, _OARS_FALLBACKS[1]))
+
+
+def _normalize_reply(text: str, *, keep_newlines: bool = False) -> str:
+    t = (text or "").strip().strip('"').strip("'")
+    if keep_newlines:
+        lines = [_WS_RE.sub(" ", ln).strip() for ln in t.splitlines()]
+        t = "\n".join(ln for ln in lines if ln)
+    else:
+        t = _WS_RE.sub(" ", t)
+    return t
+
+
 async def compose_natural(kind: str, **ctx) -> str | None:
-    """Сгенерировать фразу. kinds: greet|open|close_win|reply_casual|reply_crypto."""
+    """Сгенерировать фразу. kinds: greet|open|close_win|reply_casual|reply_crypto|oars."""
     if not OPENAI_API_KEY:
         return None
     shots = _few_shot_block()
     incoming = (ctx.get("incoming") or "").strip()[:300]
+    mem = memory_block(ctx.get("memory"))
+    keep_nl = kind in ("reply_casual", "reply_crypto", "oars")
 
     if kind == "greet":
         task = (
@@ -265,35 +310,51 @@ async def compose_natural(kind: str, **ctx) -> str | None:
         )
     elif kind == "reply_casual":
         task = (
-            "Ответь на сообщение в чате коротко и по-человечески — small talk, не про рекламу. "
-            "Можно поддержать диалог, пошутить легко, согласиться/усомниться. "
-            "Без ссылок, без продажи, без крипто-советов если не просили.\n"
-            f"Сообщение:\n{incoming or '(пусто)'}"
+            "Ответь на сообщение коротко и по-человечески (small talk). "
+            "Можно 1–2 короткие реплики через перевод строки. "
+            "Без ссылок и без продажи.\n"
+            f"{mem}\nСообщение:\n{incoming or '(пусто)'}"
         )
     elif kind == "reply_crypto":
         task = (
-            "Ответь как обычный трейдер в чате на реплику про рынок/монету. "
-            "Коротко, без сигналов «входи сюда», без ссылок и без гарантий.\n"
-            f"Сообщение:\n{incoming or '(пусто)'}"
+            "Ответь как обычный трейдер на реплику про рынок. "
+            "1–2 коротких пузыря через перевод строки. Без сигналов «входи», без ссылок.\n"
+            f"{mem}\nСообщение:\n{incoming or '(пусто)'}"
+        )
+    elif kind == "oars":
+        step = int(ctx.get("oars_step") or 1)
+        goals = {
+            1: "Шаг Open: задай короткий живой вопрос, покажи интерес. БЕЗ ссылок и рекламы.",
+            2: "Шаг Affirm: коротко согласись/посочувствуй. БЕЗ решений и ссылок.",
+            3: "Шаг Reflect: мягко намекни что смотришь свой поток/сканер, без ссылок и без «купи».",
+            4: "Шаг Summary: можно мягко дать сайт nowicki.trade и канал — коротко, по-свойски.",
+        }
+        task = (
+            f"OARS шаг {step}/4. {goals.get(step, goals[1])}\n"
+            f"{mem}\nСообщение собеседника:\n{incoming or '(пусто)'}"
         )
     else:
         return None
 
     system = (
         "Ты обычный русскоязычный парень в Telegram-чате (трейдер, но не гуру). "
-        "Пишешь коротко (до 100 символов), разговорно, иногда с опечатками или сленгом "
-        "(ку, здарова, норм, имхо, лол, хз). "
-        "Никогда не пиши что ты бот/AI. Не вставляй ссылки и @юзернеймы. "
-        "Не используй канцелярит и AI-штампы. Верни только текст сообщения, без кавычек."
+        "Пишешь коротко, разговорно, иногда сленг (ку, норм, имхо, лол, хз). "
+        "Никогда не пиши что ты бот/AI. Без канцелярита и AI-штампов. "
+        "Если две мысли — раздели перевод строки. Верни только текст."
     )
+    if kind != "oars" or int(ctx.get("oars_step") or 1) < 4:
+        system += " Не вставляй ссылки и @юзернеймы."
+
     user = task
     if shots:
         user = f"Как пишут в похожих чатах (примеры):\n{shots}\n\n{task}"
 
+    allow_links = kind == "oars" and int(ctx.get("oars_step") or 1) >= 4
+
     for _attempt in range(2):
         payload = {
             "model": AI_MODEL,
-            "max_tokens": 80,
+            "max_tokens": 120,
             "temperature": 0.95,
             "messages": [
                 {"role": "system", "content": system},
@@ -309,9 +370,17 @@ async def compose_natural(kind: str, **ctx) -> str | None:
                 )
                 resp.raise_for_status()
                 data = resp.json()
-            text = (data["choices"][0]["message"]["content"] or "").strip().strip('"').strip("'")
-            text = _WS_RE.sub(" ", text)
-            if passes_human_filter(text):
+            text = _normalize_reply(
+                data["choices"][0]["message"]["content"] or "",
+                keep_newlines=keep_nl,
+            )
+            # для multi-bubble проверяем каждую строку
+            ok = True
+            for part in (text.splitlines() or [text]):
+                if part and not passes_human_filter(part, allow_links=allow_links):
+                    ok = False
+                    break
+            if ok and text:
                 return text
         except Exception as e:
             print(f"[chat_style] compose {kind}: {e}")

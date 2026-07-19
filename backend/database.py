@@ -308,6 +308,27 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_chat_engage_events_global "
             "ON chat_engage_events(kind, created_at)"
         )
+        # Память диалога + OARS-шаг на peer (chat:user)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_dialog_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                peer_key TEXT NOT NULL,
+                role TEXT NOT NULL,
+                text TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_dialog_peer "
+            "ON chat_dialog_memory(peer_key, id)"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_oars_state (
+                peer_key TEXT PRIMARY KEY,
+                step INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )
+        """)
         # Общий key-value склад для мелких флагов/маркеров (напр. до какого id
         # истории уже сделан бэкфилл в публичный канал) — чтобы не городить
         # отдельную таблицу под каждую мелочь.
@@ -472,6 +493,53 @@ def count_chat_engage_events(
                 (since_iso,),
             ).fetchone()
         return int(row["n"] if row else 0)
+
+
+def add_dialog_memory(peer_key: str, role: str, text: str, keep: int = 12) -> None:
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "INSERT INTO chat_dialog_memory (peer_key, role, text, created_at) VALUES (?,?,?,?)",
+            (peer_key, role, text[:400], datetime.now().isoformat()),
+        )
+        rows = conn.execute(
+            "SELECT id FROM chat_dialog_memory WHERE peer_key=? ORDER BY id DESC",
+            (peer_key,),
+        ).fetchall()
+        if len(rows) > keep:
+            drop_ids = [r["id"] for r in rows[keep:]]
+            conn.executemany(
+                "DELETE FROM chat_dialog_memory WHERE id=?",
+                [(i,) for i in drop_ids],
+            )
+
+
+def list_dialog_memory(peer_key: str, limit: int = 8) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT role, text FROM chat_dialog_memory WHERE peer_key=? "
+            "ORDER BY id DESC LIMIT ?",
+            (peer_key, limit),
+        ).fetchall()
+    return list(reversed([dict(r) for r in rows]))
+
+
+def get_oars_step(peer_key: str) -> int:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT step FROM chat_oars_state WHERE peer_key=?", (peer_key,)
+        ).fetchone()
+        return int(row["step"]) if row else 0
+
+
+def set_oars_step(peer_key: str, step: int) -> None:
+    with _lock, get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO chat_oars_state (peer_key, step, updated_at) VALUES (?,?,?)
+            ON CONFLICT(peer_key) DO UPDATE SET step=excluded.step, updated_at=excluded.updated_at
+            """,
+            (peer_key, int(step), datetime.now().isoformat()),
+        )
 
 
 # ── Open trades ──────────────────────────────────────────

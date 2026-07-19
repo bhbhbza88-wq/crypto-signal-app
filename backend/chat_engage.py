@@ -17,6 +17,8 @@ Env:
   CHAT_ENGAGE_LIGHT_REACT_PROB (default 0.04)
   CHAT_ENGAGE_MIN_GAP_SEC (default 45)
   CHAT_ENGAGE_QUIET_HOURS (default 1-8, Europe/Warsaw)
+  CHAT_ENGAGE_IGNORE_LIGHT / IGNORE_DIRECT / TYPO_PROB / MULTI_BUBBLE
+  CHAT_ENGAGE_PEER_FLOOD_SEC
 """
 
 from __future__ import annotations
@@ -27,7 +29,6 @@ import random
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
 
 import database as db
 
@@ -272,40 +273,13 @@ async def _human_send(
     reply_to: int | None = None,
     read_msg_id: int | None = None,
 ) -> None:
-    """Read + typing + delay + send; FloodWait retry."""
-    from telethon.errors import FloodWaitError
-
-    try:
-        if read_msg_id is not None:
-            await client.send_read_acknowledge(entity, max_id=read_msg_id)
-    except Exception:
-        pass
-
-    delay = await _human_delay(text or "")
-    try:
-        async with client.action(entity, "typing"):
-            await asyncio.sleep(delay)
-    except Exception:
-        await asyncio.sleep(delay)
-
-    async def _do_send():
-        if photo:
-            bio = BytesIO(photo)
-            bio.name = "pnl.png"
-            await client.send_file(
-                entity, bio, caption=text or None, force_document=False,
-                reply_to=reply_to,
-            )
-        else:
-            await client.send_message(entity, text, reply_to=reply_to)
-
-    try:
-        await _do_send()
-    except FloodWaitError as e:
-        wait = int(getattr(e, "seconds", 5) or 5) + random.uniform(2, 8)
-        print(f"[chat_engage] FloodWait {wait:.0f}s")
-        await asyncio.sleep(wait)
-        await _do_send()
+    """Делегируем в chat_humanize (jagged typing / bubbles / PeerFlood)."""
+    import chat_humanize
+    await chat_humanize.send_human(
+        client, entity, text,
+        photo=photo, reply_to=reply_to, read_msg_id=read_msg_id,
+        allow_split=not bool(photo),
+    )
 
 
 def _coin(symbol: str) -> str:
@@ -742,11 +716,11 @@ async def _worker_loop(client):
             _queue.task_done()
 
 
-async def _compose_dialogue_reply(intent: str, incoming: str) -> str:
+async def _compose_dialogue_reply(intent: str, incoming: str, memory: list | None = None) -> str:
     import chat_style
     kind = "reply_crypto" if intent == "crypto_chat" else "reply_casual"
     try:
-        ai = await chat_style.compose_natural(kind, incoming=incoming)
+        ai = await chat_style.compose_natural(kind, incoming=incoming, memory=memory)
         if ai:
             return _pick_unique([ai], _recent_casual, remember=12)
     except Exception as e:
@@ -758,9 +732,45 @@ async def _compose_dialogue_reply(intent: str, incoming: str) -> str:
     )
 
 
+async def _compose_oars_reply(peer_key: str, incoming: str, memory: list | None) -> tuple[str, int]:
+    """OARS 1→4; на шаге 4 можно soft promo со ссылками."""
+    import chat_style
+    step = db.get_oars_step(peer_key)
+    if step < 1:
+        step = 1
+    if step > 4:
+        step = 4
+
+    if step >= 4:
+        text = _soft_promo_reply()
+        db.set_oars_step(peer_key, 1)  # цикл заново в следующий раз
+        return text, 4
+
+    try:
+        ai = await chat_style.compose_natural(
+            "oars", oars_step=step, incoming=incoming, memory=memory,
+        )
+        if ai:
+            db.set_oars_step(peer_key, step + 1)
+            return ai, step
+    except Exception as e:
+        print(f"[chat_engage] oars compose: {e}")
+
+    fb = chat_style.oars_fallback(step)
+    db.set_oars_step(peer_key, step + 1)
+    return fb, step
+
+
+def _peer_key(event) -> str:
+    chat_id = getattr(event, "chat_id", None) or "x"
+    sender = getattr(event, "sender_id", None) or "u"
+    return f"{chat_id}:{sender}"
+
+
 def _register_ask_handler(client, me):
-    """Живой диалог + промо только на ask_source."""
+    """Живой диалог + OARS-промо + humanize."""
     from telethon import events
+    import chat_humanize
 
     @client.on(events.NewMessage(incoming=True))
     async def on_msg(event):
@@ -768,6 +778,8 @@ def _register_ask_handler(client, me):
             if event.sender_id == me.id:
                 return
             if _in_quiet_hours():
+                return
+            if chat_humanize.peer_flood_active():
                 return
             if not _event_in_whitelist(event):
                 return
@@ -792,25 +804,35 @@ def _register_ask_handler(client, me):
                 else:
                     return
 
+            is_ask = bool(ASK_RE.search(text))
+            if chat_humanize.should_ignore(direct=direct, is_ask=is_ask):
+                print(f"[chat_engage] ignore (human busy) chat={_chat_key_from_event(event)}")
+                return
+
             chat_key = _chat_key_from_event(event)
             if not _rate_allows(chat_key):
                 return
 
+            peer = _peer_key(event)
+            memory = db.list_dialog_memory(peer, limit=8)
+            db.add_dialog_memory(peer, "user", text)
+
             import chat_style
             intent = await chat_style.classify_intent(text, ask_re=ASK_RE)
-            if intent == "ignore" and not (direct and ASK_RE.search(text)):
-                # прямой mention всё равно можно smalltalk'нуть
+            if intent == "ignore" and not (direct and is_ask):
                 if direct:
                     intent = "smalltalk"
                 else:
                     return
 
-            if intent == "ask_source" or (direct and ASK_RE.search(text)):
-                reply = _soft_promo_reply()
+            oars_step = None
+            oars_active = db.get_oars_step(peer) > 0
+            if intent == "ask_source" or is_ask or oars_active:
+                reply, oars_step = await _compose_oars_reply(peer, text, memory)
             elif intent == "crypto_chat":
-                reply = await _compose_dialogue_reply("crypto_chat", text)
+                reply = await _compose_dialogue_reply("crypto_chat", text, memory)
             else:
-                reply = await _compose_dialogue_reply("smalltalk", text)
+                reply = await _compose_dialogue_reply("smalltalk", text, memory)
 
             entity = await event.get_input_chat()
             await _human_send(
@@ -820,11 +842,17 @@ def _register_ask_handler(client, me):
                 reply_to=event.id if (reply_to_us or mentioned or event.is_private) else None,
                 read_msg_id=event.id,
             )
+            db.add_dialog_memory(peer, "assistant", reply)
             _mark_replied(chat_key)
             tag = "light" if light else "direct"
-            print(f"[chat_engage] reply ({tag}/{intent}) → {chat_key}: {reply!r}")
+            oars_tag = f"/oars{oars_step}" if oars_step else ""
+            print(f"[chat_engage] reply ({tag}/{intent}{oars_tag}) → {chat_key}: {reply!r}")
         except Exception as e:
-            print(f"[chat_engage] on_msg: {e}")
+            err = str(e)
+            if "peer_flood" in err.lower() or "PeerFlood" in err:
+                print(f"[chat_engage] peer flood skip: {e}")
+            else:
+                print(f"[chat_engage] on_msg: {e}")
 
 
 async def attach_to_client(client) -> asyncio.Task | None:
