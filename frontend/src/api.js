@@ -67,15 +67,10 @@ export const api = {
   adminAddSignal: (data) => post('/admin/add-signal', data),
   adminGrantPremium: (email, days = 30, tier = 'premium') =>
     post('/admin/grant-premium', { email, days, tier }),
+  // Без symbol/signal/entry/pnl backend сам берёт случайную монету и % —
+  // каждая практика выглядит по-разному, а не всегда BTC +3.2%.
   adminChatEngageTest: (data = {}) =>
-    post('/admin/chat-engage-test', {
-      target: 'Kupyansk_2',
-      symbol: 'BTC/USDT',
-      signal: 'LONG',
-      entry: 65000,
-      pnl: 3.2,
-      ...data,
-    }),
+    post('/admin/chat-engage-test', { target: 'Kupyansk_2', ...data }),
   adminPremiumRequests: () => get('/admin/premium-requests'),
   adminChannelDaily: (days = 14) => get(`/admin/channel-daily?days=${days}`),
   analyzeChannel: (channelUrl, days = 30, entryTimeoutHours = 6, maxHoldHours = 168, riskPerTradeUsd = 100) =>

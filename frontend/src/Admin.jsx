@@ -78,7 +78,7 @@ export default function Admin() {
   async function runEngageTest() {
     setEngageBusy(true); setEngageMsg(null)
     try {
-      const r = await api.adminChatEngageTest({ target: 'Kupyansk_2', pnl: 3.2 })
+      const r = await api.adminChatEngageTest({ target: 'Kupyansk_2' })
       setEngageMsg({
         ok: true,
         text: `${r.detail}. Жди у @Kupyansk_2 карточку профита + короткий текст.`,

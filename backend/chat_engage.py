@@ -177,15 +177,49 @@ def fire_close(symbol: str, side: str, result: str, pnl: float,
     })
 
 
+# Пул монет для практики: (символ, типичная цена входа) — чтобы карточка
+# выглядела правдоподобно (правильный порядок цены/дробность для каждой монеты).
+_PRACTICE_COINS = [
+    ("BTC/USDT", (58000.0, 72000.0)),
+    ("ETH/USDT", (2400.0, 3600.0)),
+    ("SOL/USDT", (120.0, 200.0)),
+    ("BNB/USDT", (520.0, 680.0)),
+    ("XRP/USDT", (0.42, 0.75)),
+    ("ADA/USDT", (0.32, 0.55)),
+    ("DOGE/USDT", (0.10, 0.22)),
+    ("TON/USDT", (5.5, 8.5)),
+    ("AVAX/USDT", (22.0, 42.0)),
+    ("LINK/USDT", (11.0, 19.0)),
+    ("MATIC/USDT", (0.45, 0.85)),
+    ("LTC/USDT", (65.0, 95.0)),
+    ("TRX/USDT", (0.09, 0.16)),
+    ("NEAR/USDT", (4.0, 8.0)),
+    ("DOT/USDT", (5.0, 9.0)),
+]
+
+
+def _random_practice_params() -> tuple[str, str, float, float]:
+    """Случайные symbol/side/entry/pnl для практики — каждый раз другая монета и %."""
+    symbol, (lo, hi) = random.choice(_PRACTICE_COINS)
+    entry = round(random.uniform(lo, hi), 6 if hi < 1 else 2)
+    side = "LONG" if random.random() < 0.8 else "SHORT"
+    pnl = round(random.uniform(1.5, 6.5), 2)  # сырой % движения, ROI = pnl × leverage
+    return symbol, side, entry, pnl
+
+
 def fire_practice_profit(
     target: str = "Kupyansk_2",
-    symbol: str = "BTC/USDT",
-    side: str = "LONG",
-    entry: float = 65000.0,
-    pnl: float = 3.2,
+    symbol: str | None = None,
+    side: str | None = None,
+    entry: float | None = None,
+    pnl: float | None = None,
     exit_price: float | None = None,
 ) -> tuple[bool, str]:
-    """Практика: карточка профита + текст одному контакту/чату (по умолчанию Kupyansk_2)."""
+    """Практика: карточка профита + текст одному контакту/чату (по умолчанию Kupyansk_2).
+
+    Если symbol/side/entry/pnl не переданы — берутся случайно из пула монет,
+    чтобы карточки не были всегда «BTC +39%», а выглядели живыми и разными.
+    """
     if not is_configured():
         return False, "chat_engage не сконфигурирован"
     if _queue is None or _main_loop is None:
@@ -193,6 +227,13 @@ def fire_practice_profit(
     target = (target or "").strip().lstrip("@")
     if not target:
         return False, "не указан target"
+
+    r_symbol, r_side, r_entry, r_pnl = _random_practice_params()
+    symbol = symbol or r_symbol
+    side = side or r_side
+    entry = entry if entry is not None else r_entry
+    pnl = pnl if pnl is not None else r_pnl
+
     _enqueue({
         "kind": "practice_profit",
         "target": target,
@@ -202,7 +243,7 @@ def fire_practice_profit(
         "pnl": pnl,
         "exit_price": exit_price,
     })
-    return True, f"практика профита → @{target}"
+    return True, f"практика профита → @{target}: {symbol} {side} +{pnl:.2f}%"
 
 
 def _render_card(symbol, side, entry, pnl, exit_price):
