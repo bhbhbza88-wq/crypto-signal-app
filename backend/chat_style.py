@@ -232,36 +232,25 @@ def heuristic_intent(text: str, *, ask_re) -> str:
 async def classify_intent(text: str, *, ask_re) -> str:
     """ignore | smalltalk | crypto_chat | ask_source."""
     base = heuristic_intent(text, ask_re=ask_re)
-    if base in ("ask_source", "ignore") or not OPENAI_API_KEY:
+    if base in ("ask_source", "ignore") or not ANTHROPIC_API_KEY:
         return base
     if len(text) < 40:
         return base
     try:
-        payload = {
-            "model": AI_MODEL,
-            "max_tokens": 12,
-            "temperature": 0.2,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "Классифицируй сообщение из крипто-Telegram чата. "
-                        "Ответь ОДНИМ словом: ignore | smalltalk | crypto_chat | ask_source. "
-                        "ask_source — спрашивают откуда сигналы/канал/сайт. "
-                        "ignore — спам, реклама, оффтоп не к разговору, команды ботов."
-                    ),
-                },
-                {"role": "user", "content": text[:400]},
-            ],
-        }
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                json=payload,
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            )
-            resp.raise_for_status()
-            raw = (resp.json()["choices"][0]["message"]["content"] or "").strip().lower()
+        client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY, max_retries=1)
+        resp = await client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=15,
+            temperature=0.2,
+            system=(
+                "Классифицируй сообщение из крипто-Telegram чата. "
+                "Ответь ОДНИМ словом: ignore | smalltalk | crypto_chat | ask_source. "
+                "ask_source — спрашивают откуда сигналы/канал/сайт. "
+                "ignore — спам, реклама, оффтоп не к разговору, команды ботов."
+            ),
+            messages=[{"role": "user", "content": text[:400]}],
+        )
+        raw = (resp.content[0].text or "").strip().lower()
         for label in ("ask_source", "crypto_chat", "smalltalk", "ignore"):
             if label in raw:
                 return label
@@ -420,34 +409,10 @@ async def compose_natural(kind: str, **ctx) -> str | None:
 
     for _attempt in range(3):
         try:
-            if ANTHROPIC_API_KEY:
-                # Пытаемся сначала Клодом
-                text = await _generate_claude(system, user, max_tokens=120)
-            else:
-                # Fallback на OpenAI
-                payload = {
-                    "model": AI_MODEL,
-                    "max_tokens": 120,
-                    "temperature": 0.95,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                }
-                async with httpx.AsyncClient(timeout=25) as client:
-                    resp = await client.post(
-                        "https://api.openai.com/v1/chat/completions",
-                        json=payload,
-                        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-                    )
-                    if resp.status_code == 429:
-                        wait = 2.0 * (_attempt + 1)
-                        print(f"[chat_style] compose {kind}: 429, retry in {wait}s")
-                        await asyncio.sleep(wait)
-                        continue
-                    resp.raise_for_status()
-                    data = resp.json()
-                text = data["choices"][0]["message"]["content"] or ""
+            if not ANTHROPIC_API_KEY:
+                return None
+            
+            text = await _generate_claude(system, user, max_tokens=120)
 
             if not text:
                 continue
