@@ -1,19 +1,22 @@
 """
-Chat Engage — пишет в whitelist-чаты «как человек» только при хорошем плюсе.
+Chat Engage — user-аккаунт в whitelist-чатах «как человек».
 
   открыли сигнал  → молчим (входы не светим)
-  закрыли в плюс  → карточка профита + короткая фраза во все whitelist-чаты
+  закрыли в плюс  → карточка/текст профита (со stagger) в whitelist
   в минус / мелочь → молчим
-  спросили «где берёшь» → мягко сайт + канал
-
-Стиль письма уже «очеловечен» (короткие фразы / AI) — историю чатов
-постоянно не копируем.
+  mention/reply / редкий light-react → живой small talk или crypto-чат
+  спросили «где берёшь» → мягко сайт + канал (только тогда ссылки)
 
 Env:
   TELEGRAM_API_ID / TELEGRAM_API_HASH
   TELEGRAM_CHAT_WHITELIST
   TELEGRAM_CHAT_SESSION / TELEGRAM_SESSION
-  CHAT_ENGAGE_MIN_PNL          — мин. сырой PnL% для поста (default 1.0)
+  CHAT_ENGAGE_MIN_PNL
+  CHAT_ENGAGE_MAX_REPLIES_PER_CHAT_HOUR (default 3)
+  CHAT_ENGAGE_MAX_REPLIES_GLOBAL_HOUR (default 12)
+  CHAT_ENGAGE_LIGHT_REACT_PROB (default 0.04)
+  CHAT_ENGAGE_MIN_GAP_SEC (default 45)
+  CHAT_ENGAGE_QUIET_HOURS (default 1-8, Europe/Warsaw)
 """
 
 from __future__ import annotations
@@ -22,9 +25,17 @@ import asyncio
 import os
 import random
 import re
+import time
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 import database as db
+
+try:
+    from zoneinfo import ZoneInfo
+    QUIET_TZ = ZoneInfo(os.getenv("CHAT_ENGAGE_TZ", "Europe/Warsaw") or "Europe/Warsaw")
+except Exception:
+    QUIET_TZ = timezone(timedelta(hours=2))  # fallback ≈ Warsaw winter
 
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "")
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
@@ -41,11 +52,21 @@ CHANNEL_URL = os.getenv("TELEGRAM_PUBLIC_CHANNEL_URL", "").strip() or "https://t
 SITE_URL = "https://nowicki.trade"
 MIN_PROFIT_PCT = float(os.getenv("CHAT_ENGAGE_MIN_PNL", "1.0") or "1.0")
 
+MAX_REPLIES_PER_CHAT_HOUR = int(os.getenv("CHAT_ENGAGE_MAX_REPLIES_PER_CHAT_HOUR", "3") or "3")
+MAX_REPLIES_GLOBAL_HOUR = int(os.getenv("CHAT_ENGAGE_MAX_REPLIES_GLOBAL_HOUR", "12") or "12")
+LIGHT_REACT_PROB = float(os.getenv("CHAT_ENGAGE_LIGHT_REACT_PROB", "0.04") or "0.04")
+MIN_GAP_SEC = float(os.getenv("CHAT_ENGAGE_MIN_GAP_SEC", "45") or "45")
+QUIET_HOURS_RAW = (os.getenv("CHAT_ENGAGE_QUIET_HOURS", "1-8") or "1-8").strip()
+
 from display_polish import polish_pnl  # noqa: E402
 
 _queue: asyncio.Queue | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
 _attached = False
+_whitelist_ids: set[int] = set()
+_whitelist_usernames: set[str] = set()
+_last_reply_mono: float = 0.0
+_recent_casual: list[str] = []
 
 ASK_RE = re.compile(
     r"(где\s+(бер|наход|смотр|берёшь|берешь|нашел|нашёл)|"
@@ -112,6 +133,179 @@ async def _resolve_entity(client, target: str):
             print(f"[chat_engage] ImportContacts {phone}: {e}")
         return await client.get_entity(phone)
     return await client.get_entity(target)
+
+
+def _parse_quiet_hours() -> tuple[int, int] | None:
+    raw = QUIET_HOURS_RAW
+    if not raw or raw.lower() in ("off", "none", "-"):
+        return None
+    try:
+        a, b = raw.split("-", 1)
+        return int(a.strip()), int(b.strip())
+    except Exception:
+        return (1, 8)
+
+
+def _in_quiet_hours() -> bool:
+    bounds = _parse_quiet_hours()
+    if not bounds:
+        return False
+    start, end = bounds
+    hour = datetime.now(QUIET_TZ).hour
+    if start == end:
+        return False
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end
+
+
+def _hour_ago_iso() -> str:
+    return (datetime.now() - timedelta(hours=1)).isoformat()
+
+
+def _chat_key_from_event(event) -> str:
+    chat_id = getattr(event, "chat_id", None)
+    if chat_id is not None:
+        return str(chat_id)
+    return "unknown"
+
+
+def _rate_allows(chat_key: str) -> bool:
+    global _last_reply_mono
+    if time.monotonic() - _last_reply_mono < MIN_GAP_SEC:
+        return False
+    since = _hour_ago_iso()
+    per = db.count_chat_engage_events(chat_key=chat_key, kind="reply", since_iso=since)
+    if per >= MAX_REPLIES_PER_CHAT_HOUR:
+        return False
+    glob = db.count_chat_engage_events(chat_key=None, kind="reply", since_iso=since)
+    if glob >= MAX_REPLIES_GLOBAL_HOUR:
+        return False
+    return True
+
+
+def _mark_replied(chat_key: str) -> None:
+    global _last_reply_mono
+    _last_reply_mono = time.monotonic()
+    db.record_chat_engage_event(chat_key, "reply")
+
+
+async def _warm_whitelist(client) -> None:
+    _whitelist_ids.clear()
+    _whitelist_usernames.clear()
+    for w in _whitelist():
+        try:
+            ent = await _resolve_entity(client, w)
+            _whitelist_ids.add(int(ent.id))
+            uname = getattr(ent, "username", None)
+            if uname:
+                _whitelist_usernames.add(uname.lower())
+        except Exception as e:
+            print(f"[chat_engage] warm whitelist {w}: {e}")
+            _whitelist_usernames.add(w.lstrip("@").lower())
+
+
+def _event_in_whitelist(event) -> bool:
+    if event.is_private:
+        return True
+    chat_id = getattr(event, "chat_id", None)
+    if chat_id is not None and int(chat_id) in _whitelist_ids:
+        return True
+    # fallback: username from chat
+    chat = getattr(event, "chat", None)
+    uname = getattr(chat, "username", None) if chat else None
+    if uname and uname.lower() in _whitelist_usernames:
+        return True
+    return False
+
+
+def _name_addressed(text: str, me) -> bool:
+    if not text or not me:
+        return False
+    low = text.lower()
+    uname = (me.username or "").lower()
+    if uname and (f"@{uname}" in low or re.search(rf"\b{re.escape(uname)}\b", low)):
+        return True
+    first = (me.first_name or "").strip()
+    if first and len(first) >= 3 and re.search(rf"\b{re.escape(first)}\b", text, re.I):
+        return True
+    return False
+
+
+async def _is_reply_to_us(event, me) -> bool:
+    if not event.is_reply or not event.reply_to:
+        return False
+    try:
+        replied = await event.get_reply_message()
+        return bool(replied and replied.sender_id == me.id)
+    except Exception:
+        return False
+
+
+def _light_react_candidate(text: str) -> bool:
+    t = (text or "").strip()
+    if len(t) < 4 or len(t) > 140:
+        return False
+    if ASK_RE.search(t):
+        return False
+    low = t.lower()
+    if any(x in low for x in ("http", "t.me/", "подпиш", "реклам", "vip", "промокод")):
+        return False
+    if t.count("\n") > 2:
+        return False
+    return True
+
+
+async def _human_delay(text: str) -> float:
+    delay = len(text or "") * 0.08 + random.uniform(1.5, 5.0)
+    if random.random() < 0.15:
+        delay += random.uniform(3.0, 10.0)
+    return delay
+
+
+async def _human_send(
+    client,
+    entity,
+    text: str,
+    *,
+    photo: bytes | None = None,
+    reply_to: int | None = None,
+    read_msg_id: int | None = None,
+) -> None:
+    """Read + typing + delay + send; FloodWait retry."""
+    from telethon.errors import FloodWaitError
+
+    try:
+        if read_msg_id is not None:
+            await client.send_read_acknowledge(entity, max_id=read_msg_id)
+    except Exception:
+        pass
+
+    delay = await _human_delay(text or "")
+    try:
+        async with client.action(entity, "typing"):
+            await asyncio.sleep(delay)
+    except Exception:
+        await asyncio.sleep(delay)
+
+    async def _do_send():
+        if photo:
+            bio = BytesIO(photo)
+            bio.name = "pnl.png"
+            await client.send_file(
+                entity, bio, caption=text or None, force_document=False,
+                reply_to=reply_to,
+            )
+        else:
+            await client.send_message(entity, text, reply_to=reply_to)
+
+    try:
+        await _do_send()
+    except FloodWaitError as e:
+        wait = int(getattr(e, "seconds", 5) or 5) + random.uniform(2, 8)
+        print(f"[chat_engage] FloodWait {wait:.0f}s")
+        await asyncio.sleep(wait)
+        await _do_send()
 
 
 def _coin(symbol: str) -> str:
@@ -335,12 +529,7 @@ def _render_card(symbol, side, entry, pnl, exit_price, exchange=None, duration_m
 
 async def _send_profit(client, target, text: str, photo: bytes | None) -> None:
     entity = await _resolve_entity(client, target)
-    if photo:
-        bio = BytesIO(photo)
-        bio.name = "pnl.png"
-        await client.send_file(entity, bio, caption=text, force_document=False)
-    else:
-        await client.send_message(entity, text)
+    await _human_send(client, entity, text, photo=photo)
 
 
 def _duration_from_opened_at(opened_at: str | None) -> float | None:
@@ -348,7 +537,6 @@ def _duration_from_opened_at(opened_at: str | None) -> float | None:
     if not opened_at:
         return None
     try:
-        from datetime import datetime
         delta = datetime.now() - datetime.fromisoformat(opened_at)
         minutes = delta.total_seconds() / 60.0
         return minutes if minutes > 0 else None
@@ -377,12 +565,25 @@ async def _do_close(client, symbol: str, side: str, result: str, pnl: float,
         except Exception as e:
             print(f"[chat_engage] profit_card: {e}")
 
+    # Вариативность: иногда только текст, иногда короткая подпись к картинке
+    mode = random.random()
+    if mode < 0.15:
+        photo = None
+    elif mode < 0.30 and photo:
+        text = random.choice([
+            text,
+            f"+{_display_pct(pnl_f)}%",
+            _coin(symbol),
+            "ну вот",
+        ])
+
     chats = _whitelist()
     for i, chat in enumerate(chats):
         try:
             if i:
-                await asyncio.sleep(random.uniform(4, 14))
+                await asyncio.sleep(random.uniform(20, 90))
             await _send_profit(client, chat, text, photo)
+            db.record_chat_engage_event(chat, "profit")
             print(f"[chat_engage] profit → {chat}: {symbol} {pnl_f:+.1f}% | {text!r}")
         except Exception as e:
             print(f"[chat_engage] profit fail {chat}: {e}")
@@ -541,29 +742,89 @@ async def _worker_loop(client):
             _queue.task_done()
 
 
+async def _compose_dialogue_reply(intent: str, incoming: str) -> str:
+    import chat_style
+    kind = "reply_crypto" if intent == "crypto_chat" else "reply_casual"
+    try:
+        ai = await chat_style.compose_natural(kind, incoming=incoming)
+        if ai:
+            return _pick_unique([ai], _recent_casual, remember=12)
+    except Exception as e:
+        print(f"[chat_engage] dialogue compose: {e}")
+    return _pick_unique(
+        [chat_style.fallback_reply(kind)],
+        _recent_casual,
+        remember=12,
+    )
+
+
 def _register_ask_handler(client, me):
+    """Живой диалог + промо только на ask_source."""
     from telethon import events
 
     @client.on(events.NewMessage(incoming=True))
     async def on_msg(event):
-        text = event.raw_text or ""
-        if not ASK_RE.search(text):
-            return
-        if event.sender_id == me.id:
-            return
-        if not event.is_private:
-            mentioned = bool(getattr(event.message, "mentioned", False))
-            is_reply_to_us = False
-            if event.is_reply and event.reply_to:
-                try:
-                    replied = await event.get_reply_message()
-                    is_reply_to_us = replied and replied.sender_id == me.id
-                except Exception:
-                    pass
-            if not (mentioned or is_reply_to_us):
+        try:
+            if event.sender_id == me.id:
                 return
-        await asyncio.sleep(random.uniform(2, 6))
-        await event.respond(_soft_promo_reply())
+            if _in_quiet_hours():
+                return
+            if not _event_in_whitelist(event):
+                return
+
+            text = (event.raw_text or "").strip()
+            if not text:
+                return
+
+            mentioned = bool(getattr(event.message, "mentioned", False))
+            reply_to_us = await _is_reply_to_us(event, me)
+            named = _name_addressed(text, me)
+            direct = event.is_private or mentioned or reply_to_us or named
+
+            light = False
+            if not direct:
+                if (
+                    not event.is_private
+                    and _light_react_candidate(text)
+                    and random.random() < LIGHT_REACT_PROB
+                ):
+                    light = True
+                else:
+                    return
+
+            chat_key = _chat_key_from_event(event)
+            if not _rate_allows(chat_key):
+                return
+
+            import chat_style
+            intent = await chat_style.classify_intent(text, ask_re=ASK_RE)
+            if intent == "ignore" and not (direct and ASK_RE.search(text)):
+                # прямой mention всё равно можно smalltalk'нуть
+                if direct:
+                    intent = "smalltalk"
+                else:
+                    return
+
+            if intent == "ask_source" or (direct and ASK_RE.search(text)):
+                reply = _soft_promo_reply()
+            elif intent == "crypto_chat":
+                reply = await _compose_dialogue_reply("crypto_chat", text)
+            else:
+                reply = await _compose_dialogue_reply("smalltalk", text)
+
+            entity = await event.get_input_chat()
+            await _human_send(
+                client,
+                entity,
+                reply,
+                reply_to=event.id if (reply_to_us or mentioned or event.is_private) else None,
+                read_msg_id=event.id,
+            )
+            _mark_replied(chat_key)
+            tag = "light" if light else "direct"
+            print(f"[chat_engage] reply ({tag}/{intent}) → {chat_key}: {reply!r}")
+        except Exception as e:
+            print(f"[chat_engage] on_msg: {e}")
 
 
 async def attach_to_client(client) -> asyncio.Task | None:
@@ -575,12 +836,13 @@ async def attach_to_client(client) -> asyncio.Task | None:
     _main_loop = asyncio.get_running_loop()
     _queue = asyncio.Queue()
     me = await client.get_me()
+    await _warm_whitelist(client)
     _register_ask_handler(client, me)
     task = asyncio.create_task(_worker_loop(client))
     _attached = True
     print(
         f"[chat_engage] shared с ingest: @{me.username or me.id}, "
-        f"только профит ≥{MIN_PROFIT_PCT}%, чаты: {', '.join(_whitelist())}"
+        f"профит ≥{MIN_PROFIT_PCT}%, диалог+лимиты, чаты: {', '.join(_whitelist())}"
     )
     return task
 
@@ -606,7 +868,7 @@ async def run():
 
     _main_loop = asyncio.get_running_loop()
     _queue = asyncio.Queue()
-    print(f"[chat_engage] отдельный аккаунт, профит-посты → {', '.join(_whitelist())}")
+    print(f"[chat_engage] отдельный аккаунт, профит+диалог → {', '.join(_whitelist())}")
 
     while True:
         client = None
@@ -622,6 +884,7 @@ async def run():
                 raise RuntimeError("TELEGRAM_CHAT_SESSION не авторизована")
             me = await client.get_me()
             print(f"[chat_engage] online as {me.first_name} (@{me.username or me.id})")
+            await _warm_whitelist(client)
             _register_ask_handler(client, me)
             worker_task = asyncio.create_task(_worker_loop(client))
             await client.run_until_disconnected()

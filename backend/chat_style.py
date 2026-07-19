@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import random
 import re
@@ -34,6 +33,57 @@ _LINK_RE = re.compile(r"https?://|t\.me/|@\w{4,}", re.I)
 _CYR_RE = re.compile(r"[а-яёА-ЯЁ]")
 _WS_RE = re.compile(r"\s+")
 
+# Типичные AI-штампы — регенерация / отсев
+_AI_TELL_RE = re.compile(
+    r"(абсолютно|безусловно|в\s+сегодняшнем\s+мире|давайте\s+разбер|"
+    r"как\s+(ии|ai|бот|нейросеть)|я\s+(языковая|искусственн)|"
+    r"в\s+качестве\s+ии|оптимальн\w*\s+решени|важно\s+отметить|"
+    r"подвед[её]м\s+итог|в\s+заключение|разумеется)",
+    re.IGNORECASE,
+)
+
+_CRYPTO_RE = re.compile(
+    r"\b(btc|eth|sol|long|short|лонг|шорт|ликвидац|фьюч|леверидж|"
+    r"маржа|памп|дамп|альт|биток|эфир|вход|выход|тейк|стоп|"
+    r"рынок|тренд|график|свеч)\b",
+    re.IGNORECASE,
+)
+
+_SPAM_RE = re.compile(
+    r"(подпиш|реклам|vip\b|сигнал\s+на|бесплатн|промокод|заработок\s+\d|"
+    r"пиши\s+в\s+лс|гарант\w*\s+доход)",
+    re.IGNORECASE,
+)
+
+_CASUAL_FALLBACKS = [
+    "норм)",
+    "ага",
+    "хз, посмотрим",
+    "ну такое",
+    "понял",
+    "лол",
+    "да уж",
+    "интересно",
+    "ну бывает",
+    "ок)",
+    "согласен",
+    "хм",
+    "ну да",
+    "жиза",
+    "ладно",
+]
+
+_CRYPTO_FALLBACKS = [
+    "хз, смотрю пока",
+    "ну рынок странный",
+    "имхо рано ещё",
+    "осторожно там",
+    "посмотрим",
+    "ну может и да",
+    "не уверен",
+    "норм идея в целом",
+]
+
 
 def _clean_msg(text: str) -> str | None:
     if not text:
@@ -45,14 +95,26 @@ def _clean_msg(text: str) -> str | None:
         return None
     if t.count("\n") > 2:
         return None
-    # Нужен живой разговорный текст, желательно с кириллицей
     if not _CYR_RE.search(t) and not re.search(r"[a-zA-Z]", t):
         return None
-    # отсев явной рекламы/ботов
     low = t.lower()
     if any(x in low for x in ("подпиш", "реклам", "vip", "сигнал на", "бесплатн", "промокод")):
         return None
     return t
+
+
+def passes_human_filter(text: str, *, allow_links: bool = False) -> bool:
+    """Откинуть AI-штампы / слишком длинное / ссылки (если не промо)."""
+    if not text:
+        return False
+    t = _WS_RE.sub(" ", text).strip()
+    if len(t) < 2 or len(t) > 140:
+        return False
+    if not allow_links and _LINK_RE.search(t):
+        return False
+    if _AI_TELL_RE.search(t):
+        return False
+    return True
 
 
 async def fetch_chat_history(client, chat: str, limit: int = _FETCH_PER_CHAT) -> list[str]:
@@ -88,7 +150,6 @@ async def ingest_style_chats(client, chats: list[str] | None = None) -> dict:
         total += n
         print(f"[chat_style] @{chat}: сохранено {n} фраз")
         await asyncio_sleep_brief()
-    # обрезка глобального хвоста
     db.trim_chat_style_samples(_MAX_SAMPLES_TOTAL)
     return {"ok": True, "total": total, "per_chat": per, "chats": targets}
 
@@ -107,14 +168,79 @@ def _few_shot_block(n: int = 18) -> str:
     return "\n".join(lines)
 
 
+def fallback_reply(kind: str) -> str:
+    if kind == "reply_crypto":
+        return random.choice(_CRYPTO_FALLBACKS)
+    return random.choice(_CASUAL_FALLBACKS)
+
+
+def heuristic_intent(text: str, *, ask_re) -> str:
+    """Быстрая классификация без LLM: ignore | ask_source | smalltalk | crypto_chat."""
+    t = (text or "").strip()
+    if not t or len(t) > 280:
+        return "ignore"
+    if _SPAM_RE.search(t) or (_LINK_RE.search(t) and "http" in t.lower()):
+        return "ignore"
+    if ask_re.search(t):
+        return "ask_source"
+    if _CRYPTO_RE.search(t):
+        return "crypto_chat"
+    if len(t) <= 120 and (
+        "?" in t
+        or re.search(r"^(ку|привет|здаров|хай|йо|как дела|чо как|ну как)", t, re.I)
+        or _CYR_RE.search(t)
+    ):
+        return "smalltalk"
+    return "ignore"
+
+
+async def classify_intent(text: str, *, ask_re) -> str:
+    """ignore | smalltalk | crypto_chat | ask_source."""
+    base = heuristic_intent(text, ask_re=ask_re)
+    if base in ("ask_source", "ignore") or not OPENAI_API_KEY:
+        return base
+    if len(text) < 40:
+        return base
+    try:
+        payload = {
+            "model": AI_MODEL,
+            "max_tokens": 12,
+            "temperature": 0.2,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Классифицируй сообщение из крипто-Telegram чата. "
+                        "Ответь ОДНИМ словом: ignore | smalltalk | crypto_chat | ask_source. "
+                        "ask_source — спрашивают откуда сигналы/канал/сайт. "
+                        "ignore — спам, реклама, оффтоп не к разговору, команды ботов."
+                    ),
+                },
+                {"role": "user", "content": text[:400]},
+            ],
+        }
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            )
+            resp.raise_for_status()
+            raw = (resp.json()["choices"][0]["message"]["content"] or "").strip().lower()
+        for label in ("ask_source", "crypto_chat", "smalltalk", "ignore"):
+            if label in raw:
+                return label
+    except Exception as e:
+        print(f"[chat_style] classify: {e}")
+    return base
+
+
 async def compose_natural(kind: str, **ctx) -> str | None:
-    """Сгенерировать фразу в стиле чатов. kind: greet | open | close_win."""
+    """Сгенерировать фразу. kinds: greet|open|close_win|reply_casual|reply_crypto."""
     if not OPENAI_API_KEY:
         return None
     shots = _few_shot_block()
-    if not shots and kind != "greet":
-        # без корпуса всё равно можно, но слабее
-        pass
+    incoming = (ctx.get("incoming") or "").strip()[:300]
 
     if kind == "greet":
         task = (
@@ -137,45 +263,57 @@ async def compose_natural(kind: str, **ctx) -> str | None:
             f"Напиши ОДНО короткое сообщение: закрыл {coin} в плюс примерно +{pnl}%. "
             f"Спокойно, по-человечески. Без ссылок и без рекламы."
         )
+    elif kind == "reply_casual":
+        task = (
+            "Ответь на сообщение в чате коротко и по-человечески — small talk, не про рекламу. "
+            "Можно поддержать диалог, пошутить легко, согласиться/усомниться. "
+            "Без ссылок, без продажи, без крипто-советов если не просили.\n"
+            f"Сообщение:\n{incoming or '(пусто)'}"
+        )
+    elif kind == "reply_crypto":
+        task = (
+            "Ответь как обычный трейдер в чате на реплику про рынок/монету. "
+            "Коротко, без сигналов «входи сюда», без ссылок и без гарантий.\n"
+            f"Сообщение:\n{incoming or '(пусто)'}"
+        )
     else:
         return None
 
     system = (
-        "Ты обычный русскоязычный трейдер в Telegram-чате. "
-        "Пишешь коротко (до 90 символов), разговорно, иногда с опечатками или сленгом "
-        "(ку, здарова, норм, имхо, лонг/шорт). "
+        "Ты обычный русскоязычный парень в Telegram-чате (трейдер, но не гуру). "
+        "Пишешь коротко (до 100 символов), разговорно, иногда с опечатками или сленгом "
+        "(ку, здарова, норм, имхо, лол, хз). "
         "Никогда не пиши что ты бот/AI. Не вставляй ссылки и @юзернеймы. "
-        "Верни только текст сообщения, без кавычек."
+        "Не используй канцелярит и AI-штампы. Верни только текст сообщения, без кавычек."
     )
     user = task
     if shots:
         user = f"Как пишут в похожих чатах (примеры):\n{shots}\n\n{task}"
 
-    payload = {
-        "model": AI_MODEL,
-        "max_tokens": 80,
-        "temperature": 0.95,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    }
-    try:
-        async with httpx.AsyncClient(timeout=25) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                json=payload,
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        text = (data["choices"][0]["message"]["content"] or "").strip().strip('"').strip("'")
-        text = _WS_RE.sub(" ", text)
-        if len(text) < 3 or len(text) > 180:
+    for _attempt in range(2):
+        payload = {
+            "model": AI_MODEL,
+            "max_tokens": 80,
+            "temperature": 0.95,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=25) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            text = (data["choices"][0]["message"]["content"] or "").strip().strip('"').strip("'")
+            text = _WS_RE.sub(" ", text)
+            if passes_human_filter(text):
+                return text
+        except Exception as e:
+            print(f"[chat_style] compose {kind}: {e}")
             return None
-        if _LINK_RE.search(text):
-            return None
-        return text
-    except Exception as e:
-        print(f"[chat_style] compose {kind}: {e}")
-        return None
+    return None

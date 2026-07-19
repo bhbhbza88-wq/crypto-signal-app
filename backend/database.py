@@ -291,6 +291,23 @@ def init_db():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chat_style_chat ON chat_style_samples(chat_ref)"
         )
+        # Антидетект: счётчики исходящих reply/profit по чатам
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_engage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_key TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_engage_events_lookup "
+            "ON chat_engage_events(chat_key, created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_chat_engage_events_global "
+            "ON chat_engage_events(kind, created_at)"
+        )
         # Общий key-value склад для мелких флагов/маркеров (напр. до какого id
         # истории уже сделан бэкфилл в публичный канал) — чтобы не городить
         # отдельную таблицу под каждую мелочь.
@@ -403,6 +420,58 @@ def list_chat_engage_posts(symbol: str) -> list:
 def clear_chat_engage_posts(symbol: str):
     with _lock, get_conn() as conn:
         conn.execute("DELETE FROM chat_engage_posts WHERE symbol=?", (symbol,))
+
+
+def record_chat_engage_event(chat_key: str, kind: str = "reply") -> None:
+    from datetime import datetime
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "INSERT INTO chat_engage_events (chat_key, kind, created_at) VALUES (?,?,?)",
+            (chat_key, kind, datetime.now().isoformat()),
+        )
+        n = conn.execute("SELECT COUNT(*) AS n FROM chat_engage_events").fetchone()["n"]
+        if n > 5000:
+            conn.execute(
+                """
+                DELETE FROM chat_engage_events WHERE id IN (
+                    SELECT id FROM chat_engage_events ORDER BY id ASC LIMIT ?
+                )
+                """,
+                (n - 5000,),
+            )
+
+
+def count_chat_engage_events(
+    *,
+    chat_key: str | None = None,
+    kind: str | None = "reply",
+    since_iso: str,
+) -> int:
+    with get_conn() as conn:
+        if chat_key and kind:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM chat_engage_events "
+                "WHERE chat_key=? AND kind=? AND created_at>=?",
+                (chat_key, kind, since_iso),
+            ).fetchone()
+        elif chat_key:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM chat_engage_events "
+                "WHERE chat_key=? AND created_at>=?",
+                (chat_key, since_iso),
+            ).fetchone()
+        elif kind:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM chat_engage_events "
+                "WHERE kind=? AND created_at>=?",
+                (kind, since_iso),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM chat_engage_events WHERE created_at>=?",
+                (since_iso,),
+            ).fetchone()
+        return int(row["n"] if row else 0)
 
 
 # ── Open trades ──────────────────────────────────────────
