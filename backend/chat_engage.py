@@ -64,10 +64,13 @@ from display_polish import polish_pnl  # noqa: E402
 _queue: asyncio.Queue | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
 _attached = False
+_live_client = None
 _whitelist_ids: set[int] = set()
 _whitelist_usernames: set[str] = set()
 _last_reply_mono: float = 0.0
 _recent_casual: list[str] = []
+_style_refresh_task: asyncio.Task | None = None
+_STYLE_REFRESH_SEC = float(os.getenv("CHAT_STYLE_REFRESH_HOURS", "8") or "8") * 3600
 
 ASK_RE = re.compile(
     r"(где\s+(бер|наход|смотр|берёшь|берешь|нашел|нашёл)|"
@@ -197,6 +200,31 @@ def _mark_replied(chat_key: str) -> None:
     global _last_reply_mono
     _last_reply_mono = time.monotonic()
     db.record_chat_engage_event(chat_key, "reply")
+
+
+async def _refresh_style_samples(client, *, force: bool = False) -> dict:
+    """Скачать живые реплики из @BinanceRussianSpeaking и @cryptoinside_chat."""
+    import chat_style
+    try:
+        n = db.count_chat_style_samples()
+        if not force and n >= 40:
+            print(f"[chat_engage] style samples уже есть ({n}), skip fetch")
+            return {"ok": True, "skipped": True, "total": n}
+        stats = await chat_style.ingest_style_chats(client)
+        print(f"[chat_engage] style ingest: {stats}")
+        return stats
+    except Exception as e:
+        print(f"[chat_engage] style ingest fail: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+async def _style_refresh_loop(client) -> None:
+    """Периодически обновляем примеры речи из крипто-чатов."""
+    # первый прогон сразу (если пусто) / мягкий refresh
+    await _refresh_style_samples(client, force=False)
+    while True:
+        await asyncio.sleep(_STYLE_REFRESH_SEC)
+        await _refresh_style_samples(client, force=True)
 
 
 async def _warm_whitelist(client) -> None:
@@ -884,9 +912,13 @@ async def attach_to_client(client) -> asyncio.Task | None:
     _main_loop = asyncio.get_running_loop()
     _queue = asyncio.Queue()
     me = await client.get_me()
+    global _live_client, _style_refresh_task
+    _live_client = client
     await _warm_whitelist(client)
     _register_ask_handler(client, me)
     task = asyncio.create_task(_worker_loop(client))
+    if _style_refresh_task is None or _style_refresh_task.done():
+        _style_refresh_task = asyncio.create_task(_style_refresh_loop(client))
     _attached = True
     print(
         f"[chat_engage] shared с ingest: @{me.username or me.id}, "
@@ -896,14 +928,15 @@ async def attach_to_client(client) -> asyncio.Task | None:
 
 
 def detach():
-    global _queue, _main_loop, _attached
+    global _queue, _main_loop, _attached, _live_client
     _attached = False
     _queue = None
     _main_loop = None
+    _live_client = None
 
 
 async def run():
-    global _queue, _main_loop
+    global _queue, _main_loop, _live_client, _style_refresh_task
     if not needs_own_client():
         if is_configured() and uses_ingest_session():
             print("[chat_engage] режим shared — ждём attach от telegram_ingest")
@@ -931,10 +964,13 @@ async def run():
             if not await client.is_user_authorized():
                 raise RuntimeError("TELEGRAM_CHAT_SESSION не авторизована")
             me = await client.get_me()
+            _live_client = client
             print(f"[chat_engage] online as {me.first_name} (@{me.username or me.id})")
             await _warm_whitelist(client)
             _register_ask_handler(client, me)
             worker_task = asyncio.create_task(_worker_loop(client))
+            if _style_refresh_task is None or _style_refresh_task.done():
+                _style_refresh_task = asyncio.create_task(_style_refresh_loop(client))
             await client.run_until_disconnected()
         except asyncio.CancelledError:
             if client:
@@ -943,6 +979,7 @@ async def run():
         except Exception as e:
             print(f"[chat_engage] упал: {e}, рестарт через 20с")
         finally:
+            _live_client = None
             if worker_task:
                 worker_task.cancel()
                 try:

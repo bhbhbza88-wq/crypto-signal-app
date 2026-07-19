@@ -454,8 +454,24 @@ def admin_chat_engage_test(req: ChatEngageTestRequest, admin=Depends(require_adm
 def admin_chat_style_stats(admin=Depends(require_admin)):
     return {
         "total": db.count_chat_style_samples(),
-        "note": "Историю больше не качаем постоянно — стиль уже в текстах/AI.",
+        "sources": ["BinanceRussianSpeaking", "cryptoinside_chat"],
+        "note": "Сэмплы качаются при старте chat_engage и обновляются каждые ~8ч.",
     }
+
+
+@app.post("/api/admin/chat-style-refresh")
+async def admin_chat_style_refresh(admin=Depends(require_admin)):
+    """Принудительно скачать свежие реплики из крипто-чатов-учителей."""
+    import chat_engage
+    # refresh идёт через уже живой telethon-клиент chat_engage
+    client = getattr(chat_engage, "_live_client", None)
+    if client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="chat_engage клиент ещё не онлайн — подожди деплой/старт",
+        )
+    stats = await chat_engage._refresh_style_samples(client, force=True)
+    return stats
 
 
 @app.post("/api/admin/backfill-channel-history")

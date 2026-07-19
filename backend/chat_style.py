@@ -180,9 +180,10 @@ def passes_human_filter(text: str, *, allow_links: bool = False) -> bool:
 async def fetch_chat_history(client, chat: str, limit: int = _FETCH_PER_CHAT) -> list[str]:
     """Скачать свежие текстовые сообщения из чата (без ссылок/мусора)."""
     out: list[str] = []
+    crypto_first: list[str] = []
     try:
         entity = await client.get_entity(chat)
-        async for msg in client.iter_messages(entity, limit=max(limit * 3, 80)):
+        async for msg in client.iter_messages(entity, limit=max(limit * 4, 120)):
             if not msg or not getattr(msg, "message", None):
                 continue
             if getattr(msg, "out", False):
@@ -190,12 +191,28 @@ async def fetch_chat_history(client, chat: str, limit: int = _FETCH_PER_CHAT) ->
             cleaned = _clean_msg(msg.message)
             if not cleaned:
                 continue
-            out.append(cleaned)
-            if len(out) >= limit:
+            if _CRYPTO_RE.search(cleaned):
+                crypto_first.append(cleaned)
+            else:
+                out.append(cleaned)
+            if len(crypto_first) + len(out) >= limit * 2:
                 break
     except Exception as e:
         print(f"[chat_style] fetch @{chat}: {e}")
-    return out
+    # крипто-реплики в приоритете, потом обычный smalltalk
+    merged = crypto_first + out
+    # dedupe preserving order
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for t in merged:
+        key = t.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(t)
+        if len(uniq) >= limit:
+            break
+    return uniq
 
 
 async def ingest_style_chats(client, chats: list[str] | None = None) -> dict:
@@ -219,11 +236,17 @@ async def asyncio_sleep_brief():
     await asyncio.sleep(random.uniform(0.4, 1.2))
 
 
-def _few_shot_block(n: int = 18) -> str:
-    rows = db.list_chat_style_samples(limit=80)
+def _few_shot_block(n: int = 18, *, crypto_bias: bool = False) -> str:
+    """Примеры живых реплик из BinanceRussianSpeaking / cryptoinside_chat."""
+    rows = db.list_chat_style_samples(limit=120)
     if not rows:
         return ""
-    picks = random.sample(rows, min(n, len(rows)))
+    if crypto_bias:
+        crypto_rows = [r for r in rows if _CRYPTO_RE.search(r.get("text") or "")]
+        pool = crypto_rows if len(crypto_rows) >= 6 else rows
+    else:
+        pool = rows
+    picks = random.sample(pool, min(n, len(pool)))
     lines = [f"- {r['text']}" for r in picks]
     return "\n".join(lines)
 
@@ -349,7 +372,8 @@ async def compose_natural(kind: str, **ctx) -> str | None:
     """Сгенерировать фразу. kinds: greet|open|close_win|reply_casual|reply_crypto|oars."""
     if not ANTHROPIC_API_KEY:
         return None
-    shots = _few_shot_block()
+    crypto_bias = kind in ("reply_crypto", "open", "close_win", "oars")
+    shots = _few_shot_block(n=22 if crypto_bias else 14, crypto_bias=crypto_bias)
     incoming = (ctx.get("incoming") or "").strip()[:300]
     mem = memory_block(ctx.get("memory"))
     keep_nl = kind in ("reply_casual", "reply_crypto", "oars")
@@ -419,9 +443,11 @@ async def compose_natural(kind: str, **ctx) -> str | None:
 
     user = f"Твоя задача сейчас:\n{task}"
     if shots:
+        src = "из реальных крипто-чатов (@BinanceRussianSpeaking, @cryptoinside_chat)"
         user = (
-            f"Как обычно пишут в похожих чатах (только стиль, не копируй):\n{shots}\n\n"
-            f"Твоя задача сейчас:\n{task}"
+            f"Как пишут живые люди {src} (только стиль и тон, не копируй дословно):\n"
+            f"{shots}\n\n"
+            f"Ответь в похожей манере.\nТвоя задача сейчас:\n{task}"
         )
 
     allow_links = kind == "oars" and int(ctx.get("oars_step") or 1) >= 4
