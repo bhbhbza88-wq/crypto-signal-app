@@ -1,6 +1,7 @@
 """
 Карточка закрытия: статичный фон (assets/pnl_card_bg.png) + текст поверх.
 Раскладка как у Binance Futures share.
+Шрифты с кириллицей — backend/assets/fonts (DejaVu), иначе системные.
 """
 
 from __future__ import annotations
@@ -19,7 +20,10 @@ SHARE_LEVERAGE = int(os.getenv("PROFIT_CARD_LEVERAGE", "10"))
 from display_polish import polish_pnl  # noqa: E402
 PNL_SHOW_MULT = float(os.getenv("PNL_WIN_MULT", "1.22") or "1.22")
 
-BG_PATH = Path(__file__).resolve().parent / "assets" / "pnl_card_bg.png"
+_ASSETS = Path(__file__).resolve().parent / "assets"
+BG_PATH = _ASSETS / "pnl_card_bg.png"
+_FONT_REG = _ASSETS / "fonts" / "card-regular.ttf"
+_FONT_BOLD = _ASSETS / "fonts" / "card-bold.ttf"
 
 WHITE = (255, 255, 255)
 GREY = (132, 142, 156)
@@ -27,20 +31,29 @@ GREEN = (14, 203, 129)
 RED = (246, 70, 93)
 
 
+@lru_cache(maxsize=8)
 def _font(size: int, bold: bool = False):
+    """Всегда шрифт с кириллицей — иначе на Railway подписи превращаются в □□□."""
+    bundled = _FONT_BOLD if bold else _FONT_REG
     candidates = [
-        r"C:\Windows\Fonts\arialbd.ttf" if bold else r"C:\Windows\Fonts\arial.ttf",
-        r"C:\Windows\Fonts\seguisb.ttf" if bold else r"C:\Windows\Fonts\segoeui.ttf",
+        str(bundled),
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        r"C:\Windows\Fonts\arialbd.ttf" if bold else r"C:\Windows\Fonts\arial.ttf",
+        r"C:\Windows\Fonts\seguisb.ttf" if bold else r"C:\Windows\Fonts\segoeui.ttf",
     ]
     for path in candidates:
-        if os.path.exists(path):
+        if path and os.path.exists(path):
             try:
                 return ImageFont.truetype(path, size)
             except OSError:
                 continue
-    return ImageFont.load_default()
+    # load_default() без кириллицы — лучше громко упасть, чем слать □□□
+    raise RuntimeError(
+        "Нет TTF с кириллицей для profit_card. "
+        "Положи DejaVu в backend/assets/fonts/card-regular.ttf и card-bold.ttf"
+    )
 
 
 def _fmt_price(v: float) -> str:
