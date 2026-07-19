@@ -14,6 +14,7 @@ Env:
   TELEGRAM_PUBLIC_CHANNEL_ID    — публичный канал результатов
   TELEGRAM_PUBLIC_CHANNEL_URL   — https://t.me/... для кнопок/бота
   TELEGRAM_ADMIN_IDS            — CSV telegram user id админов (/grant)
+  PUBLIC_CHANNEL_MAX_LOSS_PCT   — макс. |PnL%| минуса для публикации в публичный канал (default 3.0)
   CRYPTO_PAY_*
 """
 from __future__ import annotations
@@ -604,8 +605,24 @@ async def notify_manual_signal(signal: dict, source: str):
     await publish_signal_open(text, _channel_cta())
 
 
+
+# Публичный канал результатов — витрина, а не полный журнал сделок: крупные
+# минусы туда не публикуем (иначе выглядит как обычный слив, а не сигналка,
+# за которую стоит платить). Профит и небольшой минус — публикуем, чуть
+# приукрасив цифру (polish_pnl), как и остальную витрину.
+PUBLIC_CHANNEL_MAX_LOSS_PCT = float(os.getenv("PUBLIC_CHANNEL_MAX_LOSS_PCT", "3.0") or "3.0")
+
+
 async def notify_signal_closed(signal: dict, result: str, pnl: float):
     from display_polish import polish_pnl
+
+    try:
+        pnl = float(pnl)
+    except (TypeError, ValueError):
+        return
+    if pnl < 0 and abs(pnl) > PUBLIC_CHANNEL_MAX_LOSS_PCT:
+        print(f"[telegram_bot] закрытие {signal.get('symbol')} ({pnl:+.2f}%) — крупный минус, в канал не публикуем")
+        return
 
     sym = signal.get("symbol", "")
     side = signal.get("signal", "")
@@ -613,8 +630,12 @@ async def notify_signal_closed(signal: dict, result: str, pnl: float):
     exit_price = signal.get("exit")
     win = pnl > 0
     show = polish_pnl(pnl, decimals=2)
-    emoji = "✅" if win else ("➖" if pnl == 0 else "❌")
-    title = "СДЕЛКА В ПЛЮС" if win else ("БЕЗУБЫТОК" if pnl == 0 else "СДЕЛКА ЗАКРЫТА")
+    if pnl == 0:
+        emoji, title = "➖", "БЕЗУБЫТОК"
+    elif win:
+        emoji, title = "✅", "СДЕЛКА В ПЛЮС"
+    else:
+        emoji, title = "➖", "МИНИМАЛЬНЫЙ МИНУС"
     pnl_str = f"+{show:.2f}%" if show > 0 else f"{show:.2f}%"
     labels = {
         "tp1": "TP1 достигнут",
@@ -636,7 +657,7 @@ async def notify_signal_closed(signal: dict, result: str, pnl: float):
     )
 
     photo = None
-    if win and entry is not None:
+    if entry is not None:
         try:
             from profit_card import render_profit_card
             photo = render_profit_card(
