@@ -348,8 +348,6 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
       </div>
 
       <div className="sf-page">
-        <p className="ca-lead">{t('chart.lead')}</p>
-
         <div className="ca-grid">
           <div className="ca-panel">
             <div
@@ -618,7 +616,6 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
           background: var(--bg);
         }
 
-        .ca-lead { color: var(--text-secondary); font-size: 14px; line-height: 1.5; margin: 0 0 18px; max-width: 62ch; }
         .ca-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         @media (max-width: 900px) { .ca-grid { grid-template-columns: 1fr; } }
         .ca-panel {
