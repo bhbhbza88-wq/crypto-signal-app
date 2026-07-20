@@ -232,7 +232,11 @@ async def _refresh_style_samples(client, *, force: bool = False) -> dict:
 
 async def _style_refresh_loop(client) -> None:
     """Периодически обновляем примеры речи из крипто-чатов."""
-    # первый прогон сразу (если пусто) / мягкий refresh
+    import chat_style
+    # Локальный backup — сразу, без Telegram API
+    chat_style.seed_from_local_backup(force=False)
+    # Telegram-fetch откладываем — иначе flood и бот «молчит» после старта
+    await asyncio.sleep(120)
     await _refresh_style_samples(client, force=False)
     while True:
         await asyncio.sleep(_STYLE_REFRESH_SEC)
@@ -856,7 +860,7 @@ def _register_ask_handler(client, me):
                     return
 
             is_ask = bool(ASK_RE.search(text))
-            if chat_humanize.should_ignore(direct=direct, is_ask=is_ask):
+            if chat_humanize.should_ignore(direct=direct, is_ask=is_ask, is_private=bool(event.is_private)):
                 print(f"[chat_engage] ignore (human busy) chat={_chat_key_from_event(event)}")
                 return
 

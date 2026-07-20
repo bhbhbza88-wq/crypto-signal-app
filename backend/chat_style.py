@@ -371,7 +371,7 @@ async def classify_intent(text: str, *, ask_re) -> str:
             ),
             messages=[{"role": "user", "content": text[:400]}],
         )
-        raw = (resp.content[0].text or "").strip().lower()
+        raw = _claude_response_text(resp).strip().lower()
         for label in ("ask_source", "crypto_chat", "smalltalk", "ignore"):
             if label in raw:
                 return label
@@ -423,25 +423,44 @@ def _normalize_reply(text: str, *, keep_newlines: bool = False) -> str:
     return t
 
 
+def _claude_response_text(resp) -> str:
+    """Достать текст из ответа Claude (Sonnet 5 может вернуть thinking + text)."""
+    parts: list[str] = []
+    for block in resp.content:
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None):
+            parts.append(block.text)
+        elif hasattr(block, "text") and getattr(block, "type", None) != "thinking":
+            parts.append(block.text)
+    return "\n".join(parts).strip()
+
+
 async def _generate_claude(system: str, user: str, max_tokens: int = 400) -> str | None:
     if not claude_api_key():
         return None
     try:
         client = async_claude_client(max_retries=2)
-        resp = await client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=max_tokens,
-            temperature=0.9,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+        resp = await asyncio.wait_for(
+            client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=max_tokens,
+                temperature=0.9,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            ),
+            timeout=45,
         )
-        raw_text = resp.content[0].text
-        
-        # Пытаемся достать текст из тегов <reply>...</reply>
+        raw_text = _claude_response_text(resp)
+        if not raw_text:
+            print("[chat_style] claude: empty response (thinking-only?)")
+            return None
+
         match = re.search(r"<reply>(.*?)</reply>", raw_text, re.DOTALL | re.IGNORECASE)
         if match:
             return match.group(1).strip()
         return raw_text.strip()
+    except asyncio.TimeoutError:
+        print("[chat_style] claude fail: timeout 45s")
+        return None
     except Exception as e:
         print(f"[chat_style] claude fail: {e}")
         return None

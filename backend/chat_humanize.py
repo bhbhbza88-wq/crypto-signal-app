@@ -32,9 +32,9 @@ def trip_peer_flood(seconds: float | None = None) -> None:
     print(f"[chat_humanize] PeerFlood cooldown {PEER_FLOOD_COOLDOWN_SEC:.0f}s")
 
 
-def should_ignore(*, direct: bool, is_ask: bool) -> bool:
-    """Иногда «занят» — как живой человек. На явный ask_source не игнорим."""
-    if is_ask:
+def should_ignore(*, direct: bool, is_ask: bool, is_private: bool = False) -> bool:
+    """Иногда «занят» — как живой человек. В ЛС и на ask не игнорим."""
+    if is_private or is_ask:
         return False
     p = IGNORE_PROB_DIRECT if direct else IGNORE_PROB_LIGHT
     return random.random() < p
