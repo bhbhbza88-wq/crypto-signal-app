@@ -459,33 +459,14 @@ export default function App() {
             <div className="animate-in dash dash-console">
               <div className="dash-window">
                 <div className="dash-titlebar">
-                  <span className="dash-dot r" /><span className="dash-dot a" /><span className="dash-dot g" />
-                  <span className="dash-path mono">{t('dash.path')}</span>
+                  <div className="dash-titlebar-left">
+                    <span className="dash-dot r" /><span className="dash-dot a" /><span className="dash-dot g" />
+                    <span className="dash-path mono">{t('dash.path')}</span>
+                  </div>
+                  <h1 className="dash-titlebar-title">{t('dash.title')}</h1>
                   <span className="dash-live-pill"><i />{t('dash.live')}</span>
                 </div>
                 <div className="dash-body">
-                  <div className="dash-hero">
-                    <div className="dash-hero-text">
-                      <h1 className="page-title">{t('dash.title')}</h1>
-                      <p className="page-subtitle">{t('dash.sub')}</p>
-                    </div>
-                    {prices && (
-                      <div className="dash-ticker">
-                        <div className="dt-head mono">$ quote.watch</div>
-                        <div className="dt-row">
-                          <span className="mono">BTC</span>
-                          <b className="mono">${prices.btc.price}</b>
-                          <i className={`mono ${prices.btc.positive ? 'pos' : 'neg'}`}>{prices.btc.positive ? '+' : ''}{prices.btc.change}%</i>
-                        </div>
-                        <div className="dt-row">
-                          <span className="mono">ETH</span>
-                          <b className="mono">${prices.eth.price}</b>
-                          <i className={`mono ${prices.eth.positive ? 'pos' : 'neg'}`}>{prices.eth.positive ? '+' : ''}{prices.eth.change}%</i>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
                   <div className="kpi-grid">
                     <KPI keyName="active_signals" label={t('kpi.active')} value={signals.length} sub={signals.length ? t('kpi.activeSub') : t('kpi.wait')} accent />
                     <KPI keyName="closed_30d" label={t('kpi.closed')} value={displayStats.total} sub={t('kpi.closedSub')} />
