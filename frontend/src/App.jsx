@@ -47,10 +47,10 @@ class ErrorBoundary extends Component {
 
 const NAV_SECTIONS = [
   { titleKey: 'nav.main', items: [
-    { key: 'overview',     labelKey: 'nav.dashboard', icon: '◈' },
-    { key: 'history',      labelKey: 'nav.history',   icon: '📋' },
-    { key: 'ai_assistant', labelKey: 'nav.ai',        icon: '✦', badge: 'BETA' },
-    { key: 'chart_analyze', labelKey: 'nav.chart',    icon: '▣', badge: 'NEW' },
+    { key: 'overview',      labelKey: 'nav.dashboard', icon: '◈' },
+    { key: 'chart_analyze', labelKey: 'nav.chart',     icon: '▣', badge: 'NEW' },
+    { key: 'history',       labelKey: 'nav.history',   icon: '📋' },
+    { key: 'ai_assistant',  labelKey: 'nav.ai',        icon: '✦', badge: 'BETA' },
   ]},
   { titleKey: 'nav.account', items: [
     { key: 'pricing',      labelKey: 'nav.pricing',   icon: '💎' },
@@ -426,7 +426,11 @@ export default function App() {
 
           <ErrorBoundary resetKey={tab} t={t}>
           <Suspense fallback={<div className="section animate-in" style={{ padding: 40, color: 'var(--text-tertiary)' }}>{t('load.section')}</div>}>
-          {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">{t('ai.title')} <span className="beta-tag">BETA</span></h1></div><AIChat /></section>}
+          {tab === 'ai_assistant' && (
+            <section className="section section-ai-desk animate-in">
+              <AIChat />
+            </section>
+          )}
           {tab === 'chart_analyze' && (
             <section className="section animate-in">
               <div className="page-header">

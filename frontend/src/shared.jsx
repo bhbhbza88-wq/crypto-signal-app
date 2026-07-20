@@ -20,7 +20,7 @@ export function resultLabel(t, key) {
 }
 
 export const APP_SECTIONS = [
-  'overview', 'ai_assistant', 'chart_analyze', 'history',
+  'overview', 'chart_analyze', 'history', 'ai_assistant',
   'pricing', 'admin', 'channel_analyzer',
 ]
 

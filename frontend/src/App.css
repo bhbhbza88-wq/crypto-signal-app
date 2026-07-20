@@ -151,6 +151,18 @@
 .main-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .content { flex: 1; max-width: 1280px; width: 100%; margin: 0 auto; padding: 28px 32px 88px; display: flex; flex-direction: column; gap: 0; }
 .section { display: flex; flex-direction: column; gap: 14px; }
+.content:has(.section-ai-desk) {
+  max-width: none;
+  padding: 16px 18px 18px;
+  min-height: 0;
+}
+.section-ai-desk {
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+  height: calc(100vh - 56px - 34px);
+  max-height: calc(100dvh - 56px - 34px);
+}
 .dash-section { margin-top: 32px; }
 .section-title { font-size: 11px; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.1em; display: flex; align-items: center; gap: 10px; }
 .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
@@ -232,6 +244,11 @@
   .layout.sidebar-open .sidebar { left: 0; }
   .burger { display: flex; }
   .content { padding: 18px 14px 80px; }
+  .content:has(.section-ai-desk) { padding: 10px 10px 12px; }
+  .section-ai-desk {
+    height: calc(100vh - 56px - 22px);
+    max-height: calc(100dvh - 56px - 22px);
+  }
   .topbar-prices { display: none; }
   .kpi-grid { grid-template-columns: 1fr 1fr; }
   .topbar { padding: 0 12px; }
