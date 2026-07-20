@@ -624,7 +624,174 @@ def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTas
 GROQ_API_KEY = ai_client.GROQ_API_KEY  # legacy alias
 AI_MODEL = ai_client.MODEL_CHAT
 AI_DAILY_LIMITS = {'free': 5, 'premium': 50, 'vip': 200}
+CHART_DAILY_LIMITS = {'free': 2, 'premium': 15, 'vip': 40}
 _ai_usage: dict[int, dict] = {}   # user_id -> {'date': 'YYYY-MM-DD', 'count': int}
+_chart_usage: dict[int, dict] = {}
+
+CHART_ANALYZE_SYSTEM = """Ты — desk analyst NOWICKI. Разбираешь СКРИНШОТ графика криптопары.
+Это НЕ торговый сигнал и НЕ рекомендация купить/продать.
+
+ЖЁСТКИЕ ПРАВИЛА:
+1. Опирайся ТОЛЬКО на то, что видно на картинке. Не выдумывай тикер, ТФ, уровни, индикаторы.
+2. Если скрин размыт, обрезан, нет графика, нет понятной структуры — bias="flat", confidence="low",
+   evidence_ok=false, в reasons объясни чего не хватает.
+3. Не обещай прибыль. Не пиши «обязательно зайдёт», «гарантия», «100%».
+4. Bias long/short только если на скрине есть хотя бы 2 видимых аргумента (тренд/структура/уровень/свечной триггер).
+5. Всегда укажи invalidation: где идея ломается. Если не видишь — напиши "не видно на скрине".
+6. Язык полей reasons/invalidation/risks/watch = язык пользователя (поле language), иначе русский.
+
+Верни JSON строго такой схемы:
+{
+  "evidence_ok": bool,
+  "symbol": string|null,
+  "timeframe": string|null,
+  "price_hint": string|null,
+  "bias": "long"|"short"|"flat",
+  "confidence": "low"|"medium"|"high",
+  "seen": [string],
+  "reasons": [string],
+  "invalidation": string,
+  "risks": [string],
+  "watch": [string],
+  "disclaimer": string
+}
+seen — что реально видно; reasons — почему bias; risks — что может пойти не так; watch — на что смотреть дальше.
+disclaimer — коротко: разбор картинки, не инвестсовет.
+"""
+
+
+class ChartAnalyzeRequest(BaseModel):
+    image_base64: str
+    media_type: str = "image/jpeg"
+    symbol_hint: str | None = None
+    timeframe_hint: str | None = None
+    question: str | None = None
+    language: str | None = None
+
+
+def _chart_quota(user_id: int, tier: str) -> tuple[dict, int]:
+    limit = CHART_DAILY_LIMITS.get(tier, CHART_DAILY_LIMITS['free'])
+    today = datetime.now().strftime('%Y-%m-%d')
+    usage = _chart_usage.get(user_id)
+    if not usage or usage['date'] != today:
+        usage = {'date': today, 'count': 0}
+    return usage, limit
+
+
+def _normalize_chart_result(raw: dict) -> dict:
+    bias = str(raw.get('bias') or 'flat').lower().strip()
+    if bias not in ('long', 'short', 'flat'):
+        bias = 'flat'
+    conf = str(raw.get('confidence') or 'low').lower().strip()
+    if conf not in ('low', 'medium', 'high'):
+        conf = 'low'
+    evidence_ok = bool(raw.get('evidence_ok'))
+    reasons = [str(x).strip() for x in (raw.get('reasons') or []) if str(x).strip()][:6]
+    seen = [str(x).strip() for x in (raw.get('seen') or []) if str(x).strip()][:8]
+    risks = [str(x).strip() for x in (raw.get('risks') or []) if str(x).strip()][:5]
+    watch = [str(x).strip() for x in (raw.get('watch') or []) if str(x).strip()][:5]
+
+    # Анти-"от балды": мало доказательств → flat
+    if not evidence_ok or len(reasons) < 2 or conf == 'low':
+        if bias in ('long', 'short') and (not evidence_ok or len(reasons) < 2):
+            bias = 'flat'
+            conf = 'low'
+
+    disclaimer = (raw.get('disclaimer') or '').strip() or (
+        "Это разбор скриншота, не торговая рекомендация и не сигнал NOWICKI."
+    )
+    return {
+        "evidence_ok": evidence_ok,
+        "symbol": raw.get('symbol') or None,
+        "timeframe": raw.get('timeframe') or None,
+        "price_hint": raw.get('price_hint') or None,
+        "bias": bias,
+        "confidence": conf,
+        "seen": seen,
+        "reasons": reasons,
+        "invalidation": (raw.get('invalidation') or '').strip() or "не видно на скрине",
+        "risks": risks,
+        "watch": watch,
+        "disclaimer": disclaimer,
+    }
+
+
+@app.post("/api/ai/chart-analyze")
+async def ai_chart_analyze(req: ChartAnalyzeRequest, authorization: str | None = Header(default=None)):
+    """Разбор скриншота графика: структурированный bias, не «сигнал»."""
+    import base64
+    import re as _re
+
+    user = auth.user_from_token(_token_from_header(authorization))
+    if not user:
+        raise HTTPException(status_code=401, detail="Войди в аккаунт, чтобы разобрать график")
+    if not ai_client.fast_configured():
+        raise HTTPException(status_code=503, detail="Разбор графика временно недоступен")
+
+    tier = auth.effective_tier(user)
+    usage, limit = _chart_quota(user['id'], tier)
+    if usage['count'] >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Дневной лимит разборов графика исчерпан ({limit}/день на тарифе {tier}).",
+        )
+
+    media = (req.media_type or "image/jpeg").split(";")[0].strip().lower()
+    if media not in ("image/jpeg", "image/jpg", "image/png", "image/webp"):
+        raise HTTPException(status_code=400, detail="Нужен JPEG, PNG или WebP")
+    if media == "image/jpg":
+        media = "image/jpeg"
+
+    raw_b64 = (req.image_base64 or "").strip()
+    if "," in raw_b64 and raw_b64.startswith("data:"):
+        raw_b64 = raw_b64.split(",", 1)[1]
+    raw_b64 = _re.sub(r"\s+", "", raw_b64)
+    if not raw_b64:
+        raise HTTPException(status_code=400, detail="Пустое изображение")
+    try:
+        image_bytes = base64.b64decode(raw_b64, validate=False)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Некорректный base64 изображения")
+    if len(image_bytes) < 800:
+        raise HTTPException(status_code=400, detail="Файл слишком маленький")
+    if len(image_bytes) > 2_500_000:
+        raise HTTPException(status_code=400, detail="Файл слишком большой (сжми скрин до ~1–2 МБ)")
+
+    lang = (req.language or "ru").strip().lower()[:5]
+    caption_parts = [
+        f"language={lang}",
+        "Разбери скриншот графика по схеме. Не угадывай.",
+    ]
+    if req.symbol_hint:
+        caption_parts.append(f"user_symbol_hint={req.symbol_hint.strip()[:32]}")
+    if req.timeframe_hint:
+        caption_parts.append(f"user_timeframe_hint={req.timeframe_hint.strip()[:16]}")
+    if req.question:
+        caption_parts.append(f"user_question={req.question.strip()[:300]}")
+
+    try:
+        raw = await ai_client.vision_json_completion(
+            system=CHART_ANALYZE_SYSTEM,
+            image_bytes=image_bytes,
+            caption="\n".join(caption_parts),
+            max_tokens=700,
+            media_type=media,
+            require_ingest_flag=False,
+        )
+    except Exception as e:
+        print(f"[chart_analyze] error: {e}")
+        raise HTTPException(status_code=502, detail="Не удалось разобрать скрин, попробуй другое фото")
+
+    result = _normalize_chart_result(raw if isinstance(raw, dict) else {})
+    if req.symbol_hint and not result.get("symbol"):
+        result["symbol"] = req.symbol_hint.strip()[:32]
+    if req.timeframe_hint and not result.get("timeframe"):
+        result["timeframe"] = req.timeframe_hint.strip()[:16]
+
+    usage['count'] += 1
+    _chart_usage[user['id']] = usage
+    return {"analysis": result, "used": usage['count'], "limit": limit}
+
 
 class AIChatRequest(BaseModel):
     messages: list[dict]

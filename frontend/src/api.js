@@ -67,6 +67,7 @@ export const api = {
   },
   getStats: () => get('/stats'),
   aiChat: (messages) => post('/ai/chat', { messages }),
+  chartAnalyze: (body) => post('/ai/chart-analyze', body),
   adminGetTraders: () => get('/admin/traders'),
   adminCreateTrader: (data) => post('/admin/traders', data),
   adminAddSignal: (data) => post('/admin/add-signal', data),

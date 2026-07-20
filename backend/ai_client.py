@@ -252,12 +252,18 @@ async def vision_json_completion(
     caption: str = "",
     max_tokens: int = 180,
     media_type: str = "image/jpeg",
+    require_ingest_flag: bool = True,
 ) -> dict:
-    """Vision через Haiku (если INGEST_VISION включён)."""
+    """Vision через Haiku.
+    require_ingest_flag=True — только если INGEST_VISION=1 (парсинг каналов).
+    Для разбора графика пользователем передавайте require_ingest_flag=False.
+    """
     import base64
 
-    if not INGEST_VISION:
+    if require_ingest_flag and not INGEST_VISION:
         raise RuntimeError("INGEST_VISION=0")
+    if not claude_api_key():
+        raise RuntimeError("Anthropic not configured (set ANTHROPIC_API_KEY)")
     b64 = base64.b64encode(image_bytes).decode()
     user_content = [
         {
@@ -266,7 +272,7 @@ async def vision_json_completion(
         },
         {
             "type": "text",
-            "text": (caption[:400] if caption.strip() else "Извлеки параметры сигнала со скриншота."),
+            "text": (caption[:800] if caption.strip() else "Извлеки параметры сигнала со скриншота."),
         },
     ]
     sys = system.rstrip() + "\n\nОтветь ТОЛЬКО валидным JSON-объектом. Без markdown и пояснений."
@@ -276,7 +282,7 @@ async def vision_json_completion(
         model=MODEL_VISION,
         max_tokens=max_tokens,
         temperature=0.0,
-        timeout=45,
+        timeout=60,
     )
     return parse_json_content(raw)
 

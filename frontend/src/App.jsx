@@ -11,6 +11,7 @@ import './App.css'
 const Pricing = lazy(() => import('./Pricing'))
 const HistoryTable = lazy(() => import('./HistoryTable'))
 const AIChat = lazy(() => import('./AIChat'))
+const ChartAnalyze = lazy(() => import('./ChartAnalyze'))
 const Admin = lazy(() => import('./Admin'))
 const ChannelAnalyzer = lazy(() => import('./ChannelAnalyzer'))
 
@@ -49,6 +50,7 @@ const NAV_SECTIONS = [
     { key: 'overview',     labelKey: 'nav.dashboard', icon: '◈' },
     { key: 'history',      labelKey: 'nav.history',   icon: '📋' },
     { key: 'ai_assistant', labelKey: 'nav.ai',        icon: '✦', badge: 'BETA' },
+    { key: 'chart_analyze', labelKey: 'nav.chart',    icon: '▣', badge: 'NEW' },
   ]},
   { titleKey: 'nav.account', items: [
     { key: 'pricing',      labelKey: 'nav.pricing',   icon: '💎' },
@@ -425,6 +427,18 @@ export default function App() {
           <ErrorBoundary resetKey={tab} t={t}>
           <Suspense fallback={<div className="section animate-in" style={{ padding: 40, color: 'var(--text-tertiary)' }}>{t('load.section')}</div>}>
           {tab === 'ai_assistant' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">{t('ai.title')} <span className="beta-tag">BETA</span></h1></div><AIChat /></section>}
+          {tab === 'chart_analyze' && (
+            <section className="section animate-in">
+              <div className="page-header">
+                <h1 className="page-title">{t('chart.title')} <span className="beta-tag">BETA</span></h1>
+                <p className="page-subtitle">{t('chart.subtitle')}</p>
+              </div>
+              <ChartAnalyze
+                user={user}
+                onNeedAuth={() => { setAuthMode('login'); setShowAuth(true) }}
+              />
+            </section>
+          )}
           {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">{t('hist.title')}</h1><p className="page-subtitle">{t('hist.subtitle')}</p></div><HistoryTable history={history} stats={stats} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
           {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} /></section>}
           {tab === 'admin' && user?.is_admin && <Admin />}
