@@ -78,6 +78,10 @@ def _default_vision_model() -> str:
 MODEL_CHAT = (os.getenv("COMETAPI_MODEL_CHAT") or os.getenv("AI_MODEL") or _default_chat_model()).strip()
 MODEL_FAST = (os.getenv("COMETAPI_MODEL_FAST") or os.getenv("AI_MODEL_CHAT") or _default_fast_model()).strip()
 MODEL_VISION = (os.getenv("COMETAPI_MODEL_VISION") or _default_vision_model()).strip()
+# Telegram-бот: haiku в ~10x дешевле sonnet — для коротких реплик хватает
+MODEL_CHAT_ENGAGE = (
+    os.getenv("COMETAPI_MODEL_CHAT_ENGAGE") or MODEL_FAST
+).strip()
 CLAUDE_MODEL = (os.getenv("CLAUDE_MODEL") or MODEL_CHAT).strip()
 
 
