@@ -20,7 +20,6 @@ White-Label: пользователь видит только внутренни
 import os
 import re
 import json
-import base64
 import asyncio
 
 import ai_client
@@ -36,12 +35,31 @@ TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "")
 # "username1:Display Name 1,username2:Display Name 2"
 TELEGRAM_SOURCE_CHANNELS = os.getenv("TELEGRAM_SOURCE_CHANNELS", "")
 
-GROQ_API_KEY = ai_client.api_key()  # legacy alias — фактически CometAPI
+GROQ_API_KEY = ai_client.api_key()  # legacy alias
 AI_MODEL = ai_client.MODEL_FAST
 AI_VISION_MODEL = ai_client.MODEL_VISION
 
 SOURCE_TYPE = "telegram_aggregate"
 AGG_MAX_OPEN = 8  # с 7 источниками лимит 5 слишком рано режет поток
+
+# Предфильтр: не звать Haiku на мемы/флуд (см. channel_backtest.looks_like_signal)
+_SIGNAL_KEYWORDS_RE = re.compile(
+    r'\b(LONG|SHORT|BUY|SELL|ВХОД|ENTRY|ЛОНГ|ШОРТ|TP\d?|SL|STOP|СТОП|TARGET|ЦЕЛЬ|TAKE.?PROFIT|STOP.?LOSS)\b',
+    re.IGNORECASE,
+)
+_TICKER_RE = re.compile(r'\$?\b[A-Z]{2,10}\s?/?\s?USDT\b|#[A-Z]{2,10}\b')
+_PRICE_RE = re.compile(r'\d{1,3}[.,]\d{1,8}|\d{3,}')
+
+
+def looks_like_signal(text: str) -> bool:
+    """Локально: похоже на сигнал? False → без API-вызова."""
+    if not text or not text.strip():
+        return False
+    return bool(
+        _SIGNAL_KEYWORDS_RE.search(text)
+        or _TICKER_RE.search(text)
+        or _PRICE_RE.search(text)
+    )
 
 # Отбор лучших сетапов: чем выше вес — тем охотнее берём канал.
 # Foxtrot шумный → ниже; VIP/качество → выше.
@@ -107,20 +125,16 @@ def _parse_channel_config(raw: str) -> dict:
 
 
 async def _extract_signal(text: str) -> dict | None:
-    if not ai_client.configured() or not text.strip():
+    if not ai_client.fast_configured() or not text.strip():
         return None
-    payload = {
-        "model": AI_MODEL,
-        "max_tokens": 200,
-        "messages": [
-            {"role": "system", "content": EXTRACTOR_SYSTEM_PROMPT},
-            {"role": "user", "content": text[:2000]},
-        ],
-        "response_format": {"type": "json_object"},
-    }
+    if not looks_like_signal(text):
+        return None
     try:
-        data = await ai_client.openai_chat_completion(payload, timeout=30)
-        parsed = json.loads(data["choices"][0]["message"]["content"])
+        parsed = await ai_client.fast_json_completion(
+            system=EXTRACTOR_SYSTEM_PROMPT,
+            user_text=text[:1200],
+            max_tokens=160,
+        )
     except Exception as e:
         print(f"[telegram_ingest] Ошибка извлечения сигнала: {e}")
         return None
@@ -133,30 +147,22 @@ async def _extract_signal(text: str) -> dict | None:
 
 
 async def _extract_signal_from_image(image_bytes: bytes, caption: str = "") -> dict | None:
-    """Некоторые каналы публикуют сигнал как скриншот/баннер (цены нарисованы
-    на картинке) без подписи или с почти пустой подписью — такие посты раньше
-    вообще не попадали в анализ, потому что _extract_signal читает только
-    текст. Тот же промпт и та же схема ответа, просто по картинке вместо
-    текста (llama-3.2-90b-vision-preview умеет читать изображения)."""
-    if not ai_client.configured() or not image_bytes:
+    """Скрин/баннер с ценами — только если INGEST_VISION=1 (дорого по токенам)."""
+    if not ai_client.INGEST_VISION:
         return None
-    b64 = base64.b64encode(image_bytes).decode()
-    user_content = [
-        {"type": "text", "text": caption[:500] if caption.strip() else "Извлеки параметры сигнала со скриншота."},
-        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-    ]
-    payload = {
-        "model": AI_VISION_MODEL,
-        "max_tokens": 200,
-        "messages": [
-            {"role": "system", "content": EXTRACTOR_SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
-        "response_format": {"type": "json_object"},
-    }
+    if not ai_client.fast_configured() or not image_bytes:
+        return None
+    # Подпись без признаков сигнала + фото: всё равно пробуем vision.
+    # Подпись явно «не сигнал» и без цифр — пропускаем.
+    if caption.strip() and not looks_like_signal(caption) and len(caption) > 80:
+        return None
     try:
-        data = await ai_client.openai_chat_completion(payload, timeout=30)
-        parsed = json.loads(data["choices"][0]["message"]["content"])
+        parsed = await ai_client.vision_json_completion(
+            system=EXTRACTOR_SYSTEM_PROMPT,
+            image_bytes=image_bytes,
+            caption=caption,
+            max_tokens=160,
+        )
     except Exception as e:
         print(f"[telegram_ingest] Ошибка извлечения сигнала с картинки: {e}")
         return None
@@ -281,20 +287,14 @@ CLOSE_SYSTEM_PROMPT = (
 
 
 async def _extract_close_signal(text: str, symbol_base: str) -> dict | None:
-    if not ai_client.configured() or not text.strip():
+    if not ai_client.fast_configured() or not text.strip():
         return None
-    payload = {
-        "model": AI_MODEL,
-        "max_tokens": 100,
-        "messages": [
-            {"role": "system", "content": CLOSE_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Тикер открытой позиции: {symbol_base}\n\nСообщение канала:\n{text[:1500]}"},
-        ],
-        "response_format": {"type": "json_object"},
-    }
     try:
-        data = await ai_client.openai_chat_completion(payload, timeout=20)
-        parsed = json.loads(data["choices"][0]["message"]["content"])
+        parsed = await ai_client.fast_json_completion(
+            system=CLOSE_SYSTEM_PROMPT,
+            user_text=f"Тикер открытой позиции: {symbol_base}\n\nСообщение канала:\n{text[:800]}",
+            max_tokens=80,
+        )
     except Exception as e:
         print(f"[telegram_ingest] Ошибка проверки закрытия: {e}")
         return None
@@ -365,15 +365,17 @@ async def _try_close_from_channel(display_name: str, text: str):
 
 
 async def _handle_message(display_name: str, msg):
-    """`msg` — Telethon Message или NewMessage.Event (оба дают .raw_text,
-    .photo, .download_media). Сначала пробуем текст/подпись; если текста нет
-    или он ничего не дал, а в сообщении есть фото — читаем сигнал с картинки
-    (скриншоты/баннеры с ценами без подписи иначе никогда бы не попали
-    в обработку вообще)."""
+    """`msg` — Telethon Message или NewMessage.Event.
+    Предфильтр → Haiku JSON; vision только при INGEST_VISION=1."""
     text = (msg.raw_text or "").strip() if hasattr(msg, "raw_text") else ""
     parsed = await _extract_signal(text) if text else None
 
-    if not parsed and getattr(msg, "photo", None):
+    if (
+        not parsed
+        and ai_client.INGEST_VISION
+        and getattr(msg, "photo", None)
+        and (not text or looks_like_signal(text) or len(text) < 40)
+    ):
         try:
             image_bytes = await msg.download_media(file=bytes)
         except Exception as e:
@@ -498,7 +500,8 @@ async def _backfill_loop(client, channels: dict, last_ids: dict):
                 print(f"[telegram_ingest] Ошибка догоняющего опроса {display_name}: {e}")
 
 
-STARTUP_LOOKBACK = 40  # при старте перечитаем хвост канала — иначе посты за downtime теряются
+# Меньше lookback = меньше Haiku-вызовов на каждый рестарт Railway
+STARTUP_LOOKBACK = int(os.getenv("INGEST_STARTUP_LOOKBACK", "12") or "12")
 
 
 async def _run_once():

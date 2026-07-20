@@ -619,9 +619,9 @@ def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTas
     return {"ok": True, "symbol": symbol, "signal": signal, "trader": trader['name']}
 
 
-# ── AI Ассистент (CometAPI) ────────────────────────────────────────
+# ── AI Ассистент (Groq бесплатно; парсинг сигналов — Anthropic Haiku) ──
 
-GROQ_API_KEY = ai_client.api_key()  # legacy alias
+GROQ_API_KEY = ai_client.GROQ_API_KEY  # legacy alias
 AI_MODEL = ai_client.MODEL_CHAT
 AI_DAILY_LIMITS = {'free': 5, 'premium': 50, 'vip': 200}
 _ai_usage: dict[int, dict] = {}   # user_id -> {'date': 'YYYY-MM-DD', 'count': int}
@@ -697,16 +697,15 @@ def _ai_market_context() -> str:
                 f"uptrend={ov.get('uptrend_count')} downtrend={ov.get('downtrend_count')} "
                 f"chop={ov.get('chop_count')}."
             )
-            up = sorted([s for s in syms if s['regime'] == 'UPTREND'], key=lambda s: -s['adx'])[:8]
-            dn = sorted([s for s in syms if s['regime'] == 'DOWNTREND'], key=lambda s: -s['adx'])[:8]
+            up = sorted([s for s in syms if s['regime'] == 'UPTREND'], key=lambda s: -s['adx'])[:5]
+            dn = sorted([s for s in syms if s['regime'] == 'DOWNTREND'], key=lambda s: -s['adx'])[:5]
             if up:
-                lines.append("Топ UPTREND по ADX: " + ", ".join(
+                lines.append("Топ UPTREND: " + ", ".join(
                     f"{s['symbol'].replace('/USDT','')} ADX={s['adx']}" for s in up))
             if dn:
-                lines.append("Топ DOWNTREND по ADX: " + ", ".join(
+                lines.append("Топ DOWNTREND: " + ", ".join(
                     f"{s['symbol'].replace('/USDT','')} ADX={s['adx']}" for s in dn))
-            lines.append("Universe (sym:regime:ADX): " + "; ".join(
-                f"{s['symbol'].replace('/USDT','')}:{s['regime']}:{s['adx']}" for s in syms))
+            # Полный universe 39 пар не шлём — жрёт токены без пользы для большинства вопросов
     except Exception:
         pass
 
@@ -791,7 +790,7 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
     user = auth.user_from_token(_token_from_header(authorization))
     if not user:
         raise HTTPException(status_code=401, detail="Войди в аккаунт, чтобы пользоваться AI-ассистентом")
-    if not ai_client.configured():
+    if not ai_client.chat_configured():
         raise HTTPException(status_code=503, detail="AI-ассистент временно недоступен")
 
     tier = auth.effective_tier(user)
@@ -818,7 +817,7 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
 
     payload = json.dumps({
         'model': AI_MODEL,
-        'max_tokens': 1400,
+        'max_tokens': 900,
         'temperature': 0.45,
         'messages': msgs,
     }).encode()

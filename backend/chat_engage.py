@@ -43,10 +43,7 @@ TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "").strip()
 TELEGRAM_CHAT_SESSION = os.getenv("TELEGRAM_CHAT_SESSION", "").strip()
 
-_DEFAULT_CHAT_WHITELIST = (
-    "kriptovaluta_01,bybitrussian,BinanceRussianSpeaking,"
-    "cryptoinside_chat,minter_traders_chat,CryptoFLUD,cscalp_crypto"
-)
+_DEFAULT_CHAT_WHITELIST = ""
 TELEGRAM_CHAT_WHITELIST = (os.getenv("TELEGRAM_CHAT_WHITELIST") or _DEFAULT_CHAT_WHITELIST).strip()
 
 CHANNEL_URL = os.getenv("TELEGRAM_PUBLIC_CHANNEL_URL", "").strip() or "https://t.me/papayaqq"
@@ -89,7 +86,7 @@ _PERSONAL_RE = re.compile(
     r"тебя\s+зовут|как\s+звать|тво[её]\s+имя|"
     r"ты\s+(рома|кто)|чё\s+как|че\s+как|"
     r"привет|здаров|хай|йо\b|"
-    r"долбо|идиот|туп|ебан|сука|блять)",
+    r"долбо|идиот|туп|ебан|сука|блять|чмо)",
     re.IGNORECASE,
 )
 
@@ -770,11 +767,19 @@ async def _worker_loop(client):
             _queue.task_done()
 
 
-async def _compose_dialogue_reply(intent: str, incoming: str, memory: list | None = None) -> str:
+async def _compose_dialogue_reply(
+    intent: str,
+    incoming: str,
+    memory: list | None = None,
+    *,
+    is_private: bool = False,
+) -> str:
     import chat_style
     kind = "reply_crypto" if intent == "crypto_chat" else "reply_casual"
     try:
-        ai = await chat_style.compose_natural(kind, incoming=incoming, memory=memory)
+        ai = await chat_style.compose_natural(
+            kind, incoming=incoming, memory=memory, is_private=is_private,
+        )
         if ai:
             return _pick_unique([ai], _recent_casual, remember=12)
     except Exception as e:
@@ -786,7 +791,13 @@ async def _compose_dialogue_reply(intent: str, incoming: str, memory: list | Non
     )
 
 
-async def _compose_oars_reply(peer_key: str, incoming: str, memory: list | None) -> tuple[str, int]:
+async def _compose_oars_reply(
+    peer_key: str,
+    incoming: str,
+    memory: list | None,
+    *,
+    is_private: bool = False,
+) -> tuple[str, int]:
     """OARS 1→4; на шаге 4 один раз soft promo, потом воронка гасится."""
     import chat_style
     step = db.get_oars_step(peer_key)
@@ -802,7 +813,7 @@ async def _compose_oars_reply(peer_key: str, incoming: str, memory: list | None)
 
     try:
         ai = await chat_style.compose_natural(
-            "oars", oars_step=step, incoming=incoming, memory=memory,
+            "oars", oars_step=step, incoming=incoming, memory=memory, is_private=is_private,
         )
         if ai:
             db.set_oars_step(peer_key, step + 1)
@@ -811,7 +822,7 @@ async def _compose_oars_reply(peer_key: str, incoming: str, memory: list | None)
         print(f"[chat_engage] oars compose: {e}")
 
     # Не слать картонные заготовки мимо темы — лучше обычный ответ Ромы
-    fb = await _compose_dialogue_reply("crypto_chat", incoming or "", memory)
+    fb = await _compose_dialogue_reply("crypto_chat", incoming or "", memory, is_private=is_private)
     db.set_oars_step(peer_key, step + 1)
     return fb, step
 
@@ -878,6 +889,7 @@ def _register_ask_handler(client, me):
             peer = _peer_key(event)
             memory = db.list_dialog_memory(peer, limit=8)
             db.add_dialog_memory(peer, "user", text)
+            is_private = bool(event.is_private)
 
             import chat_style
             intent = await chat_style.classify_intent(text, ask_re=ASK_RE)
@@ -895,19 +907,19 @@ def _register_ask_handler(client, me):
             if personal and not (intent == "ask_source" or is_ask):
                 if oars_active:
                     db.set_oars_step(peer, 0)
-                reply = await _compose_dialogue_reply("smalltalk", text, memory)
+                reply = await _compose_dialogue_reply("smalltalk", text, memory, is_private=is_private)
             elif intent == "ask_source" or is_ask:
                 # Явно спросили про источник/деньги — можно OARS
-                reply, oars_step = await _compose_oars_reply(peer, text, memory)
+                reply, oars_step = await _compose_oars_reply(peer, text, memory, is_private=is_private)
             elif oars_active and intent == "crypto_chat":
                 # Воронка только пока ещё про крипту
-                reply, oars_step = await _compose_oars_reply(peer, text, memory)
+                reply, oars_step = await _compose_oars_reply(peer, text, memory, is_private=is_private)
             elif intent == "crypto_chat":
-                reply = await _compose_dialogue_reply("crypto_chat", text, memory)
+                reply = await _compose_dialogue_reply("crypto_chat", text, memory, is_private=is_private)
             else:
                 if oars_active:
                     db.set_oars_step(peer, 0)
-                reply = await _compose_dialogue_reply("smalltalk", text, memory)
+                reply = await _compose_dialogue_reply("smalltalk", text, memory, is_private=is_private)
 
             entity = await event.get_input_chat()
             # В ЛС не цитируем каждое сообщение — выглядит как бот
@@ -981,6 +993,14 @@ async def run():
     _main_loop = asyncio.get_running_loop()
     _queue = asyncio.Queue()
     print(f"[chat_engage] отдельный аккаунт, профит+диалог → {', '.join(_whitelist())}")
+    import ai_client
+    prov = ai_client.chat_engage_provider()
+    if prov == "ollama":
+        print(f"[chat_engage] LLM: Ollama {ai_client.OLLAMA_URL} / {ai_client.OLLAMA_MODEL_CHAT_ENGAGE}")
+    elif prov == "cometapi":
+        print(f"[chat_engage] LLM: CometAPI / {ai_client.MODEL_CHAT_ENGAGE}")
+    else:
+        print("[chat_engage] LLM: не настроен (OLLAMA_URL или COMETAPI_KEY)")
 
     while True:
         client = None

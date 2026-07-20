@@ -9,3 +9,4 @@ Pillow
 qrcode
 google-auth
 anthropic
+python-dotenv
