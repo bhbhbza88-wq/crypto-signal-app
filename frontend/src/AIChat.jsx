@@ -1,81 +1,52 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { api } from './api'
 import { useI18n } from './i18n'
 
-// Инлайновый markdown: **жирный** и `код`. Возвращает массив React-узлов.
-function renderInline(text, keyPrefix) {
-  const parts = []
-  const regex = /(\*\*[^*]+\*\*|`[^`]+`)/g
-  let last = 0, m, i = 0
-  while ((m = regex.exec(text)) !== null) {
-    if (m.index > last) parts.push(text.slice(last, m.index))
-    const tok = m[0]
-    if (tok.startsWith('**')) parts.push(<strong key={`${keyPrefix}-b${i}`}>{tok.slice(2, -2)}</strong>)
-    else parts.push(<code key={`${keyPrefix}-c${i}`} className="md-code">{tok.slice(1, -1)}</code>)
-    last = m.index + tok.length
-    i++
-  }
-  if (last < text.length) parts.push(text.slice(last))
-  return parts
+function stripMd(text) {
+  return String(text || '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^#+\s*/gm, '')
+    .replace(/^\s*[-*•]\s+/gm, '  • ')
 }
 
-// Блочный markdown: абзацы, маркированные и нумерованные списки, заголовки.
-function MarkdownMessage({ content }) {
-  const lines = content.split('\n')
-  const blocks = []
-  let list = null   // { type: 'ul'|'ol', items: [] }
-  const flush = () => { if (list) { blocks.push(list); list = null } }
-
-  lines.forEach((raw) => {
-    const line = raw.trimEnd()
-    const bullet = line.match(/^\s*[-*•]\s+(.*)$/)
-    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/)
-    if (bullet) {
-      if (!list || list.type !== 'ul') { flush(); list = { type: 'ul', items: [] } }
-      list.items.push(bullet[1])
-    } else if (numbered) {
-      if (!list || list.type !== 'ol') { flush(); list = { type: 'ol', items: [] } }
-      list.items.push(numbered[1])
-    } else {
-      flush()
-      if (line.trim()) blocks.push({ type: 'p', text: line.replace(/^#+\s*/, '') })
-    }
-  })
-  flush()
+function TermBlock({ role, content }) {
+  const lines = stripMd(content).split('\n')
+  const prompt = role === 'user' ? 'you@nowicki ~ %' : 'nick@desk ~ %'
+  const tone = role === 'user' ? 'user' : 'asst'
 
   return (
-    <>
-      {blocks.map((b, i) => {
-        if (b.type === 'p') return <p key={i} className="md-p">{renderInline(b.text, `p${i}`)}</p>
-        const Tag = b.type === 'ol' ? 'ol' : 'ul'
-        return (
-          <Tag key={i} className="md-list">
-            {b.items.map((it, j) => <li key={j}>{renderInline(it, `l${i}-${j}`)}</li>)}
-          </Tag>
-        )
-      })}
-    </>
+    <div className={`term-block ${tone}`}>
+      {lines.map((line, i) => (
+        <div key={i} className="term-line">
+          <span className="term-gutter">
+            {i === 0 ? <span className="term-prompt">{prompt} </span> : null}
+          </span>
+          <span className="term-text">{line || ' '}</span>
+        </div>
+      ))}
+    </div>
   )
 }
 
 export default function AIChat() {
-  const { t, lang } = useI18n()
-  const SUGGESTIONS = useMemo(() => [
-    t('ai.chip1'), t('ai.chip2'), t('ai.chip3'), t('ai.chip4'), t('ai.chip5'), t('ai.chip6'),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [lang])
-
+  const { t } = useI18n()
   const [messages, setMessages] = useState([
     { role: 'assistant', content: t('ai.greeting') }
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [quota, setQuota] = useState(null)   // {used, limit} с бэкенда
+  const [quota, setQuota] = useState(null)
   const bottomRef = useRef(null)
+  const inputRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, loading])
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
 
   async function sendMessage(text) {
     if (!text.trim() || loading) return
@@ -86,7 +57,6 @@ export default function AIChat() {
     setLoading(true)
 
     try {
-      // Системный контекст (цены, скринер, сигналы, фаза) строит бэкенд из реальных данных.
       const data = await api.aiChat([
         ...messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
         userMsg,
@@ -94,14 +64,15 @@ export default function AIChat() {
       setQuota({ used: data.used, limit: data.limit })
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `❌ ${e.message}` }])
+      setMessages(prev => [...prev, { role: 'assistant', content: `error: ${e.message}` }])
     } finally {
       setLoading(false)
+      requestAnimationFrame(() => inputRef.current?.focus())
     }
   }
 
   return (
-    <div className="ai-chat">
+    <div className="ai-chat term-window" onClick={() => inputRef.current?.focus()}>
       <div className="chat-titlebar">
         <div className="traffic-lights" aria-hidden="true">
           <span className="tl tl-close" />
@@ -109,265 +80,168 @@ export default function AIChat() {
           <span className="tl tl-max" />
         </div>
         <div className="chat-titlebar-center">
-          <span className="chat-title">{t('ai.deskTitle')}</span>
-          <span className="beta-pill">BETA</span>
+          <span className="chat-title">nick — zsh — 120×40</span>
         </div>
         <div className="chat-header-right">
           {quota && <span className="quota-text">{t('ai.quotaToday', { used: quota.used, limit: quota.limit })}</span>}
-          <div className="ai-status">
-            <span className="status-dot" />
-            <span className="status-text">{t('ai.online')}</span>
-          </div>
         </div>
       </div>
 
-      <div className="chat-toolbar">
-        <div className="chat-header-left">
-          <div className="ai-avatar">AI</div>
-          <div>
-            <span className="chat-sub-title">{t('ai.title')}</span>
-            <span className="chat-sub">{t('ai.deskSub')}</span>
-          </div>
-        </div>
-      </div>
+      <div className="term-body">
+        <pre className="term-boot">{`# NOWICKI · octo-cmd
+# session online · type a command / question
+# ─────────────────────────────────────────`}</pre>
 
-      <div className="chat-messages">
         {messages.map((msg, i) => (
-          <div key={i} className={`message ${msg.role}`}>
-            {msg.role === 'assistant' && <div className="msg-avatar">AI</div>}
-            <div className="msg-bubble">
-              {msg.role === 'assistant'
-                ? <MarkdownMessage content={msg.content} />
-                : msg.content.split('\n').map((line, j) => (
-                    <span key={j}>{line}{j < msg.content.split('\n').length - 1 && <br />}</span>
-                  ))}
-            </div>
-          </div>
+          <TermBlock key={i} role={msg.role} content={msg.content} />
         ))}
+
         {loading && (
-          <div className="message assistant">
-            <div className="msg-avatar">AI</div>
-            <div className="msg-bubble typing">
-              <span /><span /><span />
+          <div className="term-block asst">
+            <div className="term-line">
+              <span className="term-prompt">nick@desk ~ % </span>
+              <span className="term-cursor blink">█</span>
             </div>
           </div>
         )}
+
+        <div className="term-input-row">
+          <span className="term-prompt">you@nowicki ~ % </span>
+          <input
+            ref={inputRef}
+            className="term-input"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                sendMessage(input)
+              }
+            }}
+            placeholder={t('ai.placeholder')}
+            disabled={loading}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+          />
+          {!loading && !input && <span className="term-cursor blink ghost">█</span>}
+        </div>
         <div ref={bottomRef} />
       </div>
 
-      {messages.length <= 1 && (
-        <div className="suggestions">
-          {SUGGESTIONS.map((s, i) => (
-            <button key={i} className="suggestion-btn" onClick={() => sendMessage(s)}>
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="chat-input-wrap">
-        <input
-          className="chat-input"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage(input)}
-          placeholder={t('ai.placeholder')}
-          disabled={loading}
-        />
-        <button className="send-btn" onClick={() => sendMessage(input)} disabled={loading || !input.trim()}>
-          ↑
-        </button>
-      </div>
-
       <style>{`
-        .ai-chat {
+        .ai-chat.term-window {
           display: flex; flex-direction: column;
           height: 100%; width: 100%; min-height: 0;
-          border-radius: 14px; overflow: hidden;
-          background: color-mix(in srgb, var(--surface) 72%, transparent);
-          border: 1px solid color-mix(in srgb, #fff 12%, var(--border));
+          border-radius: 12px; overflow: hidden;
+          background: #1e1e1e;
+          border: 1px solid rgba(255,255,255,0.1);
           box-shadow:
-            0 0 0 0.5px color-mix(in srgb, #000 25%, transparent),
-            0 22px 48px rgba(0, 0, 0, 0.32),
-            0 2px 6px rgba(0, 0, 0, 0.18),
-            inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
-          backdrop-filter: saturate(160%) blur(28px);
-          -webkit-backdrop-filter: saturate(160%) blur(28px);
+            0 0 0 0.5px rgba(0,0,0,0.35),
+            0 24px 56px rgba(0,0,0,0.45),
+            inset 0 1px 0 rgba(255,255,255,0.08);
+          font-family: var(--font-mono), ui-monospace, Menlo, Monaco, "Courier New", monospace;
         }
 
-        .chat-titlebar {
-          height: 44px; flex-shrink: 0;
+        .term-window .chat-titlebar {
+          height: 40px; flex-shrink: 0;
           display: grid; grid-template-columns: 1fr auto 1fr;
           align-items: center; gap: 12px;
           padding: 0 14px;
-          background: color-mix(in srgb, var(--surface-hover) 55%, transparent);
-          border-bottom: 1px solid color-mix(in srgb, #fff 8%, var(--border));
+          background: linear-gradient(180deg, #3a3a3c 0%, #2c2c2e 100%);
+          border-bottom: 1px solid rgba(0,0,0,0.45);
         }
-        .traffic-lights {
-          display: flex; align-items: center; gap: 8px; justify-self: start;
-        }
+        .traffic-lights { display: flex; align-items: center; gap: 8px; justify-self: start; }
         .tl {
           width: 12px; height: 12px; border-radius: 50%;
-          box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.18);
+          box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.25);
         }
         .tl-close { background: #ff5f57; }
         .tl-min { background: #febc2e; }
         .tl-max { background: #28c840; }
-        .chat-titlebar-center {
-          display: flex; align-items: center; gap: 8px; justify-self: center;
-        }
+        .chat-titlebar-center { justify-self: center; }
         .chat-title {
-          font-size: 13px; font-weight: 650; color: var(--text);
-          font-family: var(--font-display); letter-spacing: -0.02em;
+          font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.72);
+          font-family: var(--font-ui); letter-spacing: -0.01em;
         }
-        .beta-pill {
-          font-size: 9px; font-weight: 800; letter-spacing: 0.06em;
-          color: var(--accent); background: var(--accent-soft);
-          border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-          padding: 2px 6px; border-radius: 999px;
+        .chat-header-right { justify-self: end; }
+        .quota-text {
+          font-size: 10px; color: rgba(255,255,255,0.4);
+          font-family: var(--font-mono);
         }
-        .chat-header-right {
-          display: flex; align-items: center; gap: 10px; justify-self: end;
-        }
-        .ai-status { display: flex; align-items: center; gap: 6px; }
-        .status-dot {
-          width: 7px; height: 7px; border-radius: 50%; background: var(--long);
-          animation: pulse 2s infinite;
-        }
-        .status-text { font-size: 12px; color: var(--text-tertiary); }
-        .quota-text { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
 
-        .chat-toolbar {
-          padding: 12px 18px; flex-shrink: 0;
-          border-bottom: 1px solid color-mix(in srgb, #fff 6%, var(--border));
-          background: color-mix(in srgb, var(--surface) 40%, transparent);
-        }
-        .chat-header-left { display: flex; align-items: center; gap: 12px; }
-        .ai-avatar {
-          width: 36px; height: 36px; border-radius: 10px;
-          background: linear-gradient(145deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #0a1f18));
-          display: flex; align-items: center; justify-content: center;
-          color: #fff; font-size: 11px; font-weight: 800;
-          font-family: var(--font-display); flex-shrink: 0;
-          box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 35%, transparent);
-        }
-        .chat-sub-title {
-          display: block; font-size: 14px; font-weight: 700; color: var(--text);
-          font-family: var(--font-display); letter-spacing: -0.02em;
-        }
-        .chat-sub { display: block; font-size: 12px; color: var(--text-tertiary); margin-top: 1px; }
-
-        .chat-messages {
+        .term-body {
           flex: 1; overflow-y: auto; min-height: 0;
-          padding: 22px 20px;
-          display: flex; flex-direction: column; gap: 16px;
-          background:
-            radial-gradient(ellipse 60% 40% at 50% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 70%);
+          padding: 14px 16px 18px;
+          background: #0c0c0c;
+          color: #d4d4d4;
+          display: flex; flex-direction: column; gap: 14px;
         }
-        .message { display: flex; gap: 10px; align-items: flex-start; }
-        .message.user { flex-direction: row-reverse; }
-        .msg-avatar {
-          width: 30px; height: 30px; border-radius: 9px;
-          background: linear-gradient(145deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #0a1f18));
-          display: flex; align-items: center; justify-content: center;
-          color: #fff; font-size: 10px; font-weight: 800; flex-shrink: 0;
-          font-family: var(--font-display);
-        }
-        .msg-bubble {
-          max-width: min(720px, 78%); padding: 12px 16px;
-          border-radius: 18px; font-size: 13.5px; line-height: 1.6; word-break: break-word;
-        }
-        .message.assistant .msg-bubble {
-          background: color-mix(in srgb, var(--surface-hover) 88%, transparent);
-          color: var(--text);
-          border: 1px solid color-mix(in srgb, #fff 6%, var(--border));
-          border-radius: 6px 18px 18px 18px;
-          box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-        }
-        .message.user .msg-bubble {
-          background: var(--accent); color: #fff;
-          border-radius: 18px 6px 18px 18px;
-          box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 28%, transparent);
-        }
-        .msg-bubble .md-p { margin: 0 0 8px; }
-        .msg-bubble .md-p:last-child { margin-bottom: 0; }
-        .msg-bubble .md-list { margin: 0 0 8px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
-        .msg-bubble .md-list:last-child { margin-bottom: 0; }
-        .msg-bubble .md-list li { line-height: 1.5; }
-        .msg-bubble strong { font-weight: 700; }
-        .msg-bubble .md-code {
-          font-family: var(--font-mono); font-size: 12px;
-          background: color-mix(in srgb, var(--surface) 80%, transparent);
-          border: 1px solid var(--border);
-          border-radius: 6px; padding: 1px 5px;
-        }
-        .typing { display: flex; gap: 5px; align-items: center; padding: 14px 18px; }
-        .typing span {
-          width: 7px; height: 7px; border-radius: 50%;
-          background: var(--text-tertiary); animation: bounce 1.2s infinite;
-        }
-        .typing span:nth-child(2) { animation-delay: 0.2s; }
-        .typing span:nth-child(3) { animation-delay: 0.4s; }
-        @keyframes bounce {
-          0%,60%,100% { transform: translateY(0); }
-          30% { transform: translateY(-6px); }
-        }
-        @keyframes pulse {
-          0%   { box-shadow: 0 0 0 0 rgba(0,201,150,0.4); }
-          70%  { box-shadow: 0 0 0 6px rgba(0,201,150,0); }
-          100% { box-shadow: 0 0 0 0 rgba(0,201,150,0); }
+        .term-boot {
+          margin: 0; white-space: pre-wrap;
+          color: #6a9955; font-size: 12px; line-height: 1.45;
+          font-family: inherit;
         }
 
-        .suggestions {
-          padding: 0 16px 12px; display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0;
+        .term-block { display: flex; flex-direction: column; gap: 2px; }
+        .term-line {
+          display: grid;
+          grid-template-columns: 16ch 1fr;
+          align-items: start;
+          font-size: 13px; line-height: 1.55; word-break: break-word;
         }
-        .suggestion-btn {
-          border: 1px solid color-mix(in srgb, #fff 8%, var(--border));
-          background: color-mix(in srgb, var(--surface-hover) 70%, transparent);
-          color: var(--text-secondary); font-size: 12px;
-          padding: 8px 13px; border-radius: 14px; transition: all 0.15s; text-align: left;
-          backdrop-filter: blur(8px);
+        .term-block.asst .term-line { grid-template-columns: 14ch 1fr; }
+        .term-gutter { flex-shrink: 0; white-space: pre; }
+        .term-prompt {
+          font-weight: 600; white-space: pre;
         }
-        .suggestion-btn:hover {
-          border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-          color: var(--accent); background: var(--accent-soft);
+        .term-block.user .term-prompt { color: #4ec9b0; }
+        .term-block.asst .term-prompt { color: #569cd6; }
+        .term-text { color: #d4d4d4; white-space: pre-wrap; }
+        .term-block.user .term-text { color: #ce9178; }
+        .term-block.asst .term-text { color: #dcdcaa; }
+
+        .term-cursor {
+          display: inline-block; color: #4ec9b0;
+          font-weight: 400; line-height: 1.55; font-size: 13px;
+        }
+        .term-cursor.ghost {
+          position: absolute; pointer-events: none; margin-left: 2px;
+          color: rgba(78, 201, 176, 0.7);
+        }
+        .term-cursor.blink { animation: termBlink 1.05s step-end infinite; }
+        @keyframes termBlink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
         }
 
-        .chat-input-wrap {
-          padding: 14px 16px 16px;
-          border-top: 1px solid color-mix(in srgb, #fff 8%, var(--border));
-          display: flex; gap: 10px; align-items: center; flex-shrink: 0;
-          background: color-mix(in srgb, var(--surface-hover) 45%, transparent);
+        .term-input-row {
+          display: flex; align-items: center; position: relative;
+          font-size: 13px; line-height: 1.55; margin-top: 4px;
         }
-        .chat-input {
-          flex: 1; padding: 12px 16px;
-          background: color-mix(in srgb, var(--bg) 55%, var(--surface));
-          border: 1px solid color-mix(in srgb, #fff 10%, var(--border));
-          border-radius: 14px; color: var(--text);
-          font-family: var(--font-ui); font-size: 14px; outline: none;
-          transition: border-color 0.15s, box-shadow 0.15s;
-          box-shadow: inset 0 1px 2px rgba(0,0,0,0.12);
+        .term-input-row .term-prompt { color: #4ec9b0; }
+        .term-input {
+          flex: 1; min-width: 0;
+          background: transparent; border: none; outline: none;
+          color: #ce9178; font-family: inherit; font-size: 13px;
+          line-height: 1.55; padding: 0; caret-color: #4ec9b0;
         }
-        .chat-input:focus {
-          border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-          box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+        .term-input::placeholder { color: rgba(255,255,255,0.22); }
+        .term-input:disabled { opacity: 0.5; }
+
+        .term-body::-webkit-scrollbar { width: 8px; }
+        .term-body::-webkit-scrollbar-thumb {
+          background: rgba(255,255,255,0.12); border-radius: 4px;
         }
-        .chat-input::placeholder { color: var(--text-tertiary); }
-        .send-btn {
-          width: 40px; height: 40px; border-radius: 12px;
-          background: var(--accent); border: none; color: #fff;
-          font-size: 18px; display: flex; align-items: center; justify-content: center;
-          transition: opacity 0.15s, transform 0.15s; flex-shrink: 0;
-          box-shadow: 0 6px 14px color-mix(in srgb, var(--accent) 30%, transparent);
-        }
-        .send-btn:hover:not(:disabled) { opacity: 0.9; transform: scale(1.04); }
-        .send-btn:disabled { opacity: 0.4; box-shadow: none; }
+        .term-body::-webkit-scrollbar-track { background: transparent; }
 
         @media (max-width: 720px) {
-          .chat-titlebar { grid-template-columns: auto 1fr auto; }
-          .chat-sub { display: none; }
-          .msg-bubble { max-width: 88%; }
           .quota-text { display: none; }
+          .term-body { padding: 12px; }
+          .term-line, .term-input-row, .term-input { font-size: 12px; }
+          .term-line, .term-block.asst .term-line { grid-template-columns: 1fr; }
+          .term-gutter:empty { display: none; }
         }
       `}</style>
     </div>
