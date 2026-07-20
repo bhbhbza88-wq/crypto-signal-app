@@ -36,6 +36,7 @@ from nfi_strategy import (
 from signal_ingest import normalize_symbol, open_signal
 import telegram_ingest
 import chat_engage
+import ai_client
 
 
 @asynccontextmanager
@@ -618,12 +619,10 @@ def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTas
     return {"ok": True, "symbol": symbol, "signal": signal, "trader": trader['name']}
 
 
-# ── AI Ассистент (серверный ключ) ────────────────────────────────
-# Ключ живёт в env GROQ_API_KEY (как и телеграм-токен — никогда в коде).
-# Лимиты в памяти процесса: при рестарте сбрасываются — для Этапа 1 достаточно.
+# ── AI Ассистент (CometAPI) ────────────────────────────────────────
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-AI_MODEL = os.getenv("AI_MODEL", "llama-3.3-70b-versatile").strip() or "llama-3.3-70b-versatile"
+GROQ_API_KEY = ai_client.api_key()  # legacy alias
+AI_MODEL = ai_client.MODEL_CHAT
 AI_DAILY_LIMITS = {'free': 5, 'premium': 50, 'vip': 200}
 _ai_usage: dict[int, dict] = {}   # user_id -> {'date': 'YYYY-MM-DD', 'count': int}
 
@@ -792,7 +791,7 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
     user = auth.user_from_token(_token_from_header(authorization))
     if not user:
         raise HTTPException(status_code=401, detail="Войди в аккаунт, чтобы пользоваться AI-ассистентом")
-    if not GROQ_API_KEY:
+    if not ai_client.configured():
         raise HTTPException(status_code=503, detail="AI-ассистент временно недоступен")
 
     tier = auth.effective_tier(user)
@@ -824,9 +823,9 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
         'messages': msgs,
     }).encode()
     request = urllib.request.Request(
-        'https://api.groq.com/openai/v1/chat/completions',
+        ai_client.openai_chat_url(),
         data=payload,
-        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {GROQ_API_KEY}'},
+        headers=ai_client.openai_auth_headers(),
     )
     try:
         with urllib.request.urlopen(request, timeout=90) as resp:
