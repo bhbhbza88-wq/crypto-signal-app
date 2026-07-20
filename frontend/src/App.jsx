@@ -49,7 +49,7 @@ const NAV_SECTIONS = [
   { titleKey: 'nav.main', items: [
     { key: 'overview',      labelKey: 'nav.dashboard', icon: '◈' },
     { key: 'chart_analyze', labelKey: 'nav.chart',     icon: '▣', badge: 'NEW' },
-    { key: 'history',       labelKey: 'nav.history',   icon: '📋' },
+    { key: 'history',       labelKey: 'nav.history',   icon: '≡' },
     { key: 'ai_assistant',  labelKey: 'nav.ai',        icon: '✦', badge: 'BETA' },
   ]},
   { titleKey: 'nav.account', items: [
@@ -63,12 +63,15 @@ function onSpot(e) {
   e.currentTarget.style.setProperty('--my', `${((e.clientY - r.top) / r.height) * 100}%`)
 }
 
-function KPI({ label, value, suffix, sub, accent }) {
+function KPI({ keyName, label, value, suffix, sub, accent }) {
   return (
     <div className={`kpi-card spot ${accent ? 'accent' : ''}`} onMouseMove={onSpot}>
-      <div className="kpi-label">{label}</div>
+      <div className="kpi-key mono">{keyName}</div>
       <div className="kpi-val"><CountUp value={value} suffix={suffix} /></div>
-      <div className="kpi-sub">{sub}</div>
+      <div className="kpi-meta">
+        <span className="kpi-label">{label}</span>
+        <span className="kpi-sub">{sub}</span>
+      </div>
     </div>
   )
 }
@@ -81,18 +84,22 @@ function RecentSignals({ history, isPremium, onUpgrade, onSeeAll, t }) {
   if (!rows.length) return null
   return (
     <div className="rs-card">
-      {isPremium && (
-        <div className="rs-head">
+      <div className="rs-chrome">
+        <span className="rs-prompt mono">tail -n 8 ./history.log</span>
+        {isPremium && (
           <button className="rs-more" onClick={onSeeAll}>{t('recent.all')}</button>
-        </div>
-      )}
+        )}
+      </div>
       <div className="rs-list-wrap">
         <div className={`rs-list ${!isPremium ? 'rs-blur' : ''}`}>
+          <div className="rs-cols mono">
+            <span>symbol</span><span>side</span><span>result</span><span>pnl</span>
+          </div>
           {rows.map((row) => (
             <div className="rs-row" key={row.id}>
               <span className="rs-sym mono">{row.symbol.replace('/USDT', '')}</span>
               <span className={`rs-dir ${row.signal === 'LONG' ? 'long' : 'short'}`}>{row.signal}</span>
-              <span className="rs-res">{resultLabel(t, row.result)}</span>
+              <span className="rs-res mono">{resultLabel(t, row.result)}</span>
               <span className={`rs-pnl mono ${row.pnl > 0 ? 'pos' : row.pnl < 0 ? 'neg' : ''}`}>
                 {row.pnl > 0 ? '+' : ''}{row.pnl}%
               </span>
@@ -101,7 +108,7 @@ function RecentSignals({ history, isPremium, onUpgrade, onSeeAll, t }) {
         </div>
         {!isPremium && (
           <div className="rs-lock">
-            <span className="rs-lock-icon">🔒</span>
+            <span className="rs-lock-icon mono">#</span>
             <span className="rs-lock-text">{t('recent.lock')}</span>
             <button className="rs-lock-btn" onClick={onUpgrade}>{t('recent.unlock')}</button>
           </div>
@@ -296,7 +303,7 @@ export default function App() {
               <><div className="logo-icon"><span className="logo-n">N</span></div>
               <div className="logo-text-wrap">
                 <span className="logo-name gradient-text">NOWICKI</span>
-                <span className="logo-sub">Signal Relay</span>
+                <span className="logo-sub">~/signal-relay</span>
               </div></>
             )}
             {sidebarCollapsed && <div className="logo-icon"><span className="logo-n">N</span></div>}
@@ -449,62 +456,72 @@ export default function App() {
           {tab === 'channel_analyzer' && user?.is_admin && <section className="section animate-in"><ChannelAnalyzer /></section>}
           </Suspense>
           {tab === 'overview' && (
-            <div className="animate-in dash">
-              <div className="dash-hero">
-                <div className="dash-hero-text">
-                  <span className="live-chip">{t('dash.live')}</span>
-                  <h1 className="page-title">{t('dash.title')}</h1>
-                  <p className="page-subtitle">{t('dash.sub')}</p>
+            <div className="animate-in dash dash-console">
+              <div className="dash-window">
+                <div className="dash-titlebar">
+                  <span className="dash-dot r" /><span className="dash-dot a" /><span className="dash-dot g" />
+                  <span className="dash-path mono">{t('dash.path')}</span>
+                  <span className="dash-live-pill"><i />{t('dash.live')}</span>
                 </div>
-                {prices && (
-                  <div className="dash-ticker app-panel">
-                    <div className="dt-row">
-                      <span>BTC</span>
-                      <b>${prices.btc.price}</b>
-                      <i className={prices.btc.positive ? 'pos' : 'neg'}>{prices.btc.positive ? '+' : ''}{prices.btc.change}%</i>
+                <div className="dash-body">
+                  <div className="dash-hero">
+                    <div className="dash-hero-text">
+                      <pre className="dash-boot mono">{t('dash.boot')}</pre>
+                      <h1 className="page-title">{t('dash.title')}</h1>
+                      <p className="page-subtitle">{t('dash.sub')}</p>
                     </div>
-                    <div className="dt-row">
-                      <span>ETH</span>
-                      <b>${prices.eth.price}</b>
-                      <i className={prices.eth.positive ? 'pos' : 'neg'}>{prices.eth.positive ? '+' : ''}{prices.eth.change}%</i>
-                    </div>
+                    {prices && (
+                      <div className="dash-ticker">
+                        <div className="dt-head mono">$ quote.watch</div>
+                        <div className="dt-row">
+                          <span className="mono">BTC</span>
+                          <b className="mono">${prices.btc.price}</b>
+                          <i className={`mono ${prices.btc.positive ? 'pos' : 'neg'}`}>{prices.btc.positive ? '+' : ''}{prices.btc.change}%</i>
+                        </div>
+                        <div className="dt-row">
+                          <span className="mono">ETH</span>
+                          <b className="mono">${prices.eth.price}</b>
+                          <i className={`mono ${prices.eth.positive ? 'pos' : 'neg'}`}>{prices.eth.positive ? '+' : ''}{prices.eth.change}%</i>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
 
-              <div className="kpi-grid">
-                <KPI label={t('kpi.active')} value={signals.length} sub={signals.length ? t('kpi.activeSub') : t('kpi.wait')} accent />
-                <KPI label={t('kpi.closed')} value={displayStats.total} sub={t('kpi.closedSub')} />
-                <KPI label={t('kpi.winrate')} value={displayStats.winrate} suffix="%" sub={t('kpi.winrateSub')} />
-                <KPI label={t('kpi.avgPnl')} value={displayStats.avgPnl} suffix="%" sub={t('kpi.avgPnlSub')} />
-              </div>
+                  <div className="kpi-grid">
+                    <KPI keyName="active_signals" label={t('kpi.active')} value={signals.length} sub={signals.length ? t('kpi.activeSub') : t('kpi.wait')} accent />
+                    <KPI keyName="closed_30d" label={t('kpi.closed')} value={displayStats.total} sub={t('kpi.closedSub')} />
+                    <KPI keyName="winrate" label={t('kpi.winrate')} value={displayStats.winrate} suffix="%" sub={t('kpi.winrateSub')} />
+                    <KPI keyName="avg_pnl" label={t('kpi.avgPnl')} value={displayStats.avgPnl} suffix="%" sub={t('kpi.avgPnlSub')} />
+                  </div>
 
-              <section className="section dash-section">
-                <div className="app-panel-head" style={{ paddingLeft: 0, paddingRight: 0, border: 'none' }}>
-                  <h2 className="section-title" style={{ margin: 0, flex: 1 }}>{t('sec.active')}</h2>
-                  <span className="sec-count">{signals.length}</span>
+                  <section className="section dash-section">
+                    <div className="dash-sec-head">
+                      <h2 className="dash-sec-title mono">{t('sec.active')}</h2>
+                      <span className="sec-count mono">{signals.length}</span>
+                    </div>
+                    {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal t={t} /> : (
+                      <div className="signals-grid">
+                        {signals.map(s => <SignalCard key={s.id ?? s.symbol} signal={s} />)}
+                      </div>
+                    )}
+                  </section>
+
+                  {history.length > 0 && (
+                    <section className="section dash-section">
+                      <div className="dash-sec-head">
+                        <h2 className="dash-sec-title mono">{t('sec.recent')}</h2>
+                      </div>
+                      <RecentSignals
+                        history={history}
+                        isPremium={isPremium}
+                        t={t}
+                        onSeeAll={() => setTab('history')}
+                        onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))}
+                      />
+                    </section>
+                  )}
                 </div>
-                {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal t={t} /> : (
-                  <div className="signals-grid">
-                    {signals.map(s => <SignalCard key={s.id ?? s.symbol} signal={s} />)}
-                  </div>
-                )}
-              </section>
-
-              {history.length > 0 && (
-                <section className="section dash-section">
-                  <div className="app-panel-head" style={{ paddingLeft: 0, paddingRight: 0, border: 'none' }}>
-                    <h2 className="section-title" style={{ margin: 0, flex: 1 }}>{t('sec.recent')}</h2>
-                  </div>
-                  <RecentSignals
-                    history={history}
-                    isPremium={isPremium}
-                    t={t}
-                    onSeeAll={() => setTab('history')}
-                    onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))}
-                  />
-                </section>
-              )}
+              </div>
             </div>
           )}
           </ErrorBoundary>
@@ -532,10 +549,13 @@ function SignalSkeleton() {
 function EmptySignal({ t }) {
   return (
     <div className="empty-signal animate-in">
-      <div className="empty-icon">🔍</div>
+      <pre className="empty-boot mono">{t('empty.boot')}</pre>
       <div className="empty-title">{t('empty.title')}</div>
       <div className="empty-desc">{t('empty.desc')}</div>
-      <div className="empty-pulse"><span style={{width:7,height:7,borderRadius:'50%',background:'var(--long)',animation:'pulse 2s infinite',display:'inline-block'}} />{t('empty.pulse')}</div>
+      <div className="empty-pulse">
+        <span className="empty-pulse-dot" />
+        <span className="mono">{t('empty.pulse')}</span>
+      </div>
     </div>
   )
 }

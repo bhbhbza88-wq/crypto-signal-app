@@ -353,7 +353,7 @@ export default function SignalCard({ signal }) {
       )}
 
       <div className="reasons-block">
-        <span className="reasons-title">{t('signal.reasonsTitle')}</span>
+        <span className="reasons-title mono">{'// '}{t('signal.reasonsTitle')}</span>
         {isAggregated ? (
           <ul className="reasons-list">
             <li>{t('signal.aggReason1')}</li>
@@ -375,17 +375,17 @@ export default function SignalCard({ signal }) {
 
       <style>{`
         .signal-card {
-          background: var(--surface);
+          background: color-mix(in srgb, var(--bg) 35%, var(--surface));
           border: 1px solid var(--border);
-          border-radius: var(--radius-lg);
-          box-shadow: var(--shadow-card), var(--inset-highlight);
-          backdrop-filter: saturate(160%) blur(16px);
+          border-radius: 12px;
+          box-shadow: var(--inset-highlight);
+          backdrop-filter: saturate(160%) blur(14px);
           overflow: hidden;
           transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
         }
         .signal-card:hover {
           border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-          box-shadow: var(--shadow-lg);
+          box-shadow: var(--shadow-card);
         }
         .signal-confidence-stripe { height: 3px; width: 100%; }
         .signal-header {
@@ -459,8 +459,8 @@ export default function SignalCard({ signal }) {
           border-top: 1px solid var(--border);
         }
         .reasons-title {
-          font-size: 11px; font-weight: 650; color: var(--text-tertiary);
-          text-transform: uppercase; letter-spacing: 0.06em;
+          font-size: 11px; font-weight: 600; color: var(--text-tertiary);
+          letter-spacing: -0.01em; text-transform: none;
         }
         .reasons-list {
           margin: 10px 0 0; padding-left: 18px;
@@ -495,8 +495,8 @@ function MetaTag({ label, value, highlight }) {
       <span className="meta-value" style={{ color: highlight ? 'var(--amber)' : 'var(--text)' }}>{value}</span>
       <style>{`
         .meta-tag { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
-        .meta-label { font-size: 10px; color: var(--text-tertiary); }
-        .meta-value { font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
+        .meta-label { font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); }
+        .meta-value { font-size: 12px; font-weight: 600; font-family: var(--font-mono); }
       `}</style>
     </div>
   )
