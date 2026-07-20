@@ -255,19 +255,27 @@ async def fetch_chat_history(client, chat: str, limit: int = _FETCH_PER_CHAT) ->
     return uniq
 
 
-async def ingest_style_chats(client, chats: list[str] | None = None) -> dict:
-    """Загрузить историю из чатов-учителей + локальный backup в БД."""
+async def ingest_style_chats(client, chats: list[str] | None = None, *, force: bool = False) -> dict:
+    """Загрузить историю из чатов-учителей + локальный backup в БД (один раз)."""
     targets = chats or STYLE_SOURCE_CHATS
     total = 0
     per: dict[str, int] = {}
+    min_per_chat = int(os.getenv("CHAT_STYLE_MIN_PER_CHAT", "10") or "10")
     for chat in targets:
+        ref = chat.lstrip("@").strip()
+        existing = db.count_chat_style_samples(ref)
+        if not force and existing >= min_per_chat:
+            per[chat] = existing
+            print(f"[chat_style] @{chat}: уже в БД ({existing}), skip")
+            total += existing
+            continue
         samples = await fetch_chat_history(client, chat)
         n = db.replace_chat_style_samples(chat, samples)
         per[chat] = n
         total += n
         print(f"[chat_style] @{chat}: сохранено {n} фраз")
         await asyncio_sleep_brief()
-    backup_n = seed_from_local_backup(force=True)
+    backup_n = seed_from_local_backup(force=False)
     per[_BACKUP_CHAT_REF] = backup_n
     total += backup_n
     db.trim_chat_style_samples(_MAX_SAMPLES_TOTAL)

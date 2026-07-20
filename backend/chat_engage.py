@@ -69,8 +69,7 @@ _whitelist_ids: set[int] = set()
 _whitelist_usernames: set[str] = set()
 _last_reply_mono: float = 0.0
 _recent_casual: list[str] = []
-_style_refresh_task: asyncio.Task | None = None
-_STYLE_REFRESH_SEC = float(os.getenv("CHAT_STYLE_REFRESH_HOURS", "8") or "8") * 3600
+_style_seed_task: asyncio.Task | None = None
 
 ASK_RE = re.compile(
     r"(где\s+(бер|наход|смотр|берёшь|берешь|нашел|нашёл)|"
@@ -212,35 +211,38 @@ def _mark_replied(chat_key: str) -> None:
     db.record_chat_engage_event(chat_key, "reply")
 
 
+async def _seed_style_once(client) -> None:
+    """Один раз при старте: локальный backup + Telegram только если чата ещё нет в БД."""
+    import chat_style
+    chat_style.seed_from_local_backup(force=False)
+    await asyncio.sleep(30)
+    min_per_chat = int(os.getenv("CHAT_STYLE_MIN_PER_CHAT", "10") or "10")
+    missing = [
+        c for c in chat_style.STYLE_SOURCE_CHATS
+        if db.count_chat_style_samples(c.lstrip("@")) < min_per_chat
+    ]
+    if not missing:
+        n = db.count_chat_style_samples()
+        print(f"[chat_engage] style samples уже загружены ({n}), telegram больше не качаем")
+        return
+    try:
+        stats = await chat_style.ingest_style_chats(client, force=False)
+        print(f"[chat_engage] style one-time ingest: {stats}")
+    except Exception as e:
+        print(f"[chat_engage] style ingest fail: {e}")
+
+
 async def _refresh_style_samples(client, *, force: bool = False) -> dict:
-    """Скачать живые реплики из чатов + подтянуть локальный tg backup."""
+    """Ручное обновление (admin API). force=True — перекачать всё."""
     import chat_style
     try:
-        # Локальный бэкап можно засеять даже без Telegram-fetch
-        backup_n = chat_style.seed_from_local_backup(force=force)
-        n = db.count_chat_style_samples()
-        if not force and n >= 80:
-            print(f"[chat_engage] style samples уже есть ({n}), skip telegram fetch")
-            return {"ok": True, "skipped": True, "total": n, "backup": backup_n}
-        stats = await chat_style.ingest_style_chats(client)
-        print(f"[chat_engage] style ingest: {stats}")
+        chat_style.seed_from_local_backup(force=force)
+        stats = await chat_style.ingest_style_chats(client, force=force)
+        print(f"[chat_engage] style manual refresh: {stats}")
         return stats
     except Exception as e:
         print(f"[chat_engage] style ingest fail: {e}")
         return {"ok": False, "error": str(e)}
-
-
-async def _style_refresh_loop(client) -> None:
-    """Периодически обновляем примеры речи из крипто-чатов."""
-    import chat_style
-    # Локальный backup — сразу, без Telegram API
-    chat_style.seed_from_local_backup(force=False)
-    # Telegram-fetch откладываем — иначе flood и бот «молчит» после старта
-    await asyncio.sleep(120)
-    await _refresh_style_samples(client, force=False)
-    while True:
-        await asyncio.sleep(_STYLE_REFRESH_SEC)
-        await _refresh_style_samples(client, force=True)
 
 
 async def _warm_whitelist(client) -> None:
@@ -941,13 +943,13 @@ async def attach_to_client(client) -> asyncio.Task | None:
     _main_loop = asyncio.get_running_loop()
     _queue = asyncio.Queue()
     me = await client.get_me()
-    global _live_client, _style_refresh_task
+    global _live_client, _style_seed_task
     _live_client = client
     await _warm_whitelist(client)
     _register_ask_handler(client, me)
     task = asyncio.create_task(_worker_loop(client))
-    if _style_refresh_task is None or _style_refresh_task.done():
-        _style_refresh_task = asyncio.create_task(_style_refresh_loop(client))
+    if _style_seed_task is None or _style_seed_task.done():
+        _style_seed_task = asyncio.create_task(_seed_style_once(client))
     _attached = True
     print(
         f"[chat_engage] shared с ingest: @{me.username or me.id}, "
@@ -965,7 +967,7 @@ def detach():
 
 
 async def run():
-    global _queue, _main_loop, _live_client, _style_refresh_task
+    global _queue, _main_loop, _live_client, _style_seed_task
     if not needs_own_client():
         if is_configured() and uses_ingest_session():
             print("[chat_engage] режим shared — ждём attach от telegram_ingest")
@@ -998,8 +1000,8 @@ async def run():
             await _warm_whitelist(client)
             _register_ask_handler(client, me)
             worker_task = asyncio.create_task(_worker_loop(client))
-            if _style_refresh_task is None or _style_refresh_task.done():
-                _style_refresh_task = asyncio.create_task(_style_refresh_loop(client))
+            if _style_seed_task is None or _style_seed_task.done():
+                _style_seed_task = asyncio.create_task(_seed_style_once(client))
             await client.run_until_disconnected()
         except asyncio.CancelledError:
             if client:

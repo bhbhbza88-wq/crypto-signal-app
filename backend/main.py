@@ -456,7 +456,7 @@ def admin_chat_style_stats(admin=Depends(require_admin)):
     return {
         "total": db.count_chat_style_samples(),
         "sources": ["BinanceRussianSpeaking", "cryptoinside_chat", "tg_chat_backup"],
-        "note": "Сэмплы: живые чаты + локальный backup из Desktop/tg/chat_backup.json.",
+        "note": "Сэмплы качаются один раз при старте (если пусто). Повторно — только через /api/admin/chat-style-refresh.",
     }
 
 

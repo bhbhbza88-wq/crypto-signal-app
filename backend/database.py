@@ -396,9 +396,15 @@ def list_chat_style_samples(limit: int = 80, chat_ref: str | None = None) -> lis
         return [dict(r) for r in rows]
 
 
-def count_chat_style_samples() -> int:
+def count_chat_style_samples(chat_ref: str | None = None) -> int:
     with get_conn() as conn:
-        row = conn.execute("SELECT COUNT(*) AS n FROM chat_style_samples").fetchone()
+        if chat_ref:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM chat_style_samples WHERE chat_ref=?",
+                (chat_ref.lstrip("@"),),
+            ).fetchone()
+        else:
+            row = conn.execute("SELECT COUNT(*) AS n FROM chat_style_samples").fetchone()
         return int(row["n"] if row else 0)
 
 
