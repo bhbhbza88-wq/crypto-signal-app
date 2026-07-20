@@ -298,12 +298,16 @@ export default function SignalCard({ signal }) {
         .signal-card {
           background: var(--surface);
           border: 1px solid var(--border);
-          border-radius: 16px;
-          box-shadow: var(--shadow-card);
+          border-radius: var(--radius-lg);
+          box-shadow: var(--shadow-card), var(--inset-highlight);
+          backdrop-filter: saturate(160%) blur(16px);
           overflow: hidden;
-          transition: border-color 0.2s, transform 0.2s;
+          transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
         }
-        .signal-card:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+        .signal-card:hover {
+          border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+          box-shadow: var(--shadow-lg);
+        }
         .signal-confidence-stripe { height: 3px; width: 100%; }
         .signal-header {
           display: flex; justify-content: space-between; align-items: flex-start;
@@ -318,7 +322,7 @@ export default function SignalCard({ signal }) {
           flex-shrink: 0;
         }
         .signal-sym-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
-        .symbol { font-size: 22px; font-weight: 800; color: var(--text); font-family: var(--font-mono); letter-spacing: -0.02em; }
+        .symbol { font-size: 22px; font-weight: 700; color: var(--text); font-family: var(--font-mono); letter-spacing: -0.02em; }
         .signal-pair { font-size: 11px; color: var(--text-tertiary); }
         .signal-venues {
           margin-top: 2px;
@@ -329,7 +333,7 @@ export default function SignalCard({ signal }) {
         }
         .badge {
           font-size: 11px; font-weight: 700;
-          padding: 4px 10px; border-radius: 7px;
+          padding: 4px 10px; border-radius: 8px;
           letter-spacing: 0.04em; font-family: var(--font-mono);
         }
         .signal-meta { display: flex; gap: 16px; }
@@ -340,36 +344,43 @@ export default function SignalCard({ signal }) {
           margin-bottom: 4px;
         }
 
-        .tv-card { margin: 14px 22px 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
-        .tv-chrome { display: flex; align-items: center; gap: 7px; padding: 9px 12px; background: var(--surface-hover); border-bottom: 1px solid var(--border); }
-        .tv-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        .tv-dot.r { background: var(--short); } .tv-dot.a { background: var(--amber); } .tv-dot.g { background: var(--long); }
-        .tv-pair { font-size: 11px; font-family: var(--font-mono); font-weight: 700; color: var(--text-secondary); margin-left: 4px; }
-        .tv-live { display: flex; align-items: center; gap: 4px; font-size: 9px; font-weight: 800; color: var(--long); text-transform: uppercase; letter-spacing: 0.06em; margin-left: 10px; }
+        .tv-card {
+          margin: 14px 22px 0; border: 1px solid var(--border); border-radius: var(--radius-md);
+          overflow: hidden; background: color-mix(in srgb, var(--bg) 70%, transparent);
+          box-shadow: var(--inset-highlight);
+        }
+        .tv-chrome {
+          display: flex; align-items: center; gap: 7px; padding: 10px 12px;
+          background: color-mix(in srgb, var(--surface-hover) 80%, transparent); border-bottom: 1px solid var(--border);
+        }
+        .tv-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.15); }
+        .tv-dot.r { background: #ff5f57; } .tv-dot.a { background: #febc2e; } .tv-dot.g { background: #28c840; }
+        .tv-pair { font-size: 11px; font-family: var(--font-mono); font-weight: 650; color: var(--text-secondary); margin-left: 4px; }
+        .tv-live { display: flex; align-items: center; gap: 4px; font-size: 9px; font-weight: 700; color: var(--long); text-transform: uppercase; letter-spacing: 0.06em; margin-left: 10px; }
         .tv-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--long); animation: pulse 2s infinite; }
-        .tv-price { margin-left: auto; font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 7px; }
-        .tv-pnl { font-size: 11px; font-weight: 700; }
+        .tv-price { margin-left: auto; font-family: var(--font-mono); font-size: 12px; font-weight: 650; color: var(--text); display: flex; align-items: center; gap: 7px; }
+        .tv-pnl { font-size: 11px; font-weight: 650; }
         .tv-pnl.pos { color: var(--long); } .tv-pnl.neg { color: var(--short); }
         .tv-chart-canvas { width: 100%; height: 280px; }
         .tv-empty { height: 280px; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); font-size: 12px; }
-        .tv-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-hover); }
+        .tv-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-hover) 70%, transparent); }
 
         .position-row {
           display: flex; justify-content: space-between; align-items: center;
           margin: 14px 22px 0;
           padding: 12px 14px;
-          background: var(--accent-soft); border-radius: 10px;
+          background: var(--accent-soft); border-radius: var(--radius-md);
           border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
         }
         .position-label { font-size: 12px; color: var(--text-secondary); }
-        .position-value { font-family: var(--font-mono); font-weight: 700; color: var(--accent); font-size: 14px; }
+        .position-value { font-family: var(--font-mono); font-weight: 650; color: var(--accent); font-size: 14px; }
         .reasons-block {
           margin: 16px 22px 20px;
           padding-top: 14px;
           border-top: 1px solid var(--border);
         }
         .reasons-title {
-          font-size: 11px; font-weight: 700; color: var(--text-tertiary);
+          font-size: 11px; font-weight: 650; color: var(--text-tertiary);
           text-transform: uppercase; letter-spacing: 0.06em;
         }
         .reasons-list {
@@ -379,7 +390,7 @@ export default function SignalCard({ signal }) {
         .reasons-list li { font-size: 13px; color: var(--text); line-height: 1.45; }
         .source-attribution { margin: 10px 0 0; font-size: 13px; color: var(--text); font-weight: 600; }
 
-        @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(13,159,120,0.4)} 70%{box-shadow:0 0 0 5px rgba(13,159,120,0)} 100%{box-shadow:0 0 0 0 rgba(13,159,120,0)} }
+        @keyframes pulse { 0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--long) 40%, transparent)} 70%{box-shadow:0 0 0 5px transparent} 100%{box-shadow:0 0 0 0 transparent} }
 
         @media (max-width: 480px) {
           .signal-header { padding: 16px 16px 0; }

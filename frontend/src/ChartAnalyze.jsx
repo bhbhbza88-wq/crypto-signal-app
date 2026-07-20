@@ -310,11 +310,13 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
         @media (max-width: 900px) { .ca-grid { grid-template-columns: 1fr; } }
         .ca-panel {
           background: var(--surface); border: 1px solid var(--border);
-          border-radius: 16px; padding: 16px; box-shadow: var(--shadow-card);
+          border-radius: var(--radius-lg); padding: 18px;
+          box-shadow: var(--shadow-card), var(--inset-highlight);
+          backdrop-filter: saturate(160%) blur(16px);
         }
         .ca-drop {
           border: 1px dashed color-mix(in srgb, var(--accent) 35%, var(--border));
-          border-radius: 14px; min-height: 220px; cursor: pointer;
+          border-radius: var(--radius-md); min-height: 220px; cursor: pointer;
           display: grid; place-items: center; overflow: hidden;
           background: color-mix(in srgb, var(--surface-2) 70%, transparent);
           transition: border-color .15s, background .15s;
@@ -334,7 +336,7 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
         }
         .ca-fields input, .ca-q textarea {
           border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
-          border-radius: 10px; padding: 10px 12px; font-size: 13px; font-weight: 500;
+          border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; font-weight: 500;
           text-transform: none; letter-spacing: 0; font-family: inherit;
         }
         .ca-q { margin-top: 10px; }
@@ -343,7 +345,7 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
         .ca-run { min-width: 140px; }
         .ca-clear {
           border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
-          border-radius: 10px; padding: 10px 14px; cursor: pointer; font-size: 13px; font-weight: 600;
+          border-radius: 980px; padding: 10px 16px; cursor: pointer; font-size: 13px; font-weight: 600;
         }
         .ca-quota { margin-left: auto; font-size: 12px; color: var(--text-tertiary); }
         .ca-error {
@@ -364,17 +366,17 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
         @keyframes ca-spin { to { transform: rotate(360deg); } }
         .ca-out-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
         .ca-take {
-          margin: 0 0 14px; padding: 14px 16px; border-radius: 14px;
+          margin: 0 0 14px; padding: 14px 16px; border-radius: var(--radius-md);
           border: 1px solid var(--border);
           background: color-mix(in srgb, var(--surface-2) 80%, transparent);
         }
         .ca-take.long {
-          border-color: color-mix(in srgb, var(--green, #3dcc8a) 40%, var(--border));
-          background: color-mix(in srgb, var(--green, #3dcc8a) 10%, var(--surface));
+          border-color: color-mix(in srgb, var(--long) 40%, var(--border));
+          background: color-mix(in srgb, var(--long) 10%, var(--surface));
         }
         .ca-take.short {
-          border-color: color-mix(in srgb, var(--danger, #e25) 40%, var(--border));
-          background: color-mix(in srgb, var(--danger, #e25) 10%, var(--surface));
+          border-color: color-mix(in srgb, var(--short) 40%, var(--border));
+          background: color-mix(in srgb, var(--short) 10%, var(--surface));
         }
         .ca-take-label {
           display: block; margin-bottom: 6px;
@@ -388,8 +390,8 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
           font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
           padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border);
         }
-        .ca-bias.long { color: var(--green, #3dcc8a); border-color: color-mix(in srgb, var(--green, #3dcc8a) 40%, var(--border)); }
-        .ca-bias.short { color: var(--danger, #e25); border-color: color-mix(in srgb, var(--danger, #e25) 40%, var(--border)); }
+        .ca-bias.long { color: var(--long); border-color: color-mix(in srgb, var(--long) 40%, var(--border)); }
+        .ca-bias.short { color: var(--short); border-color: color-mix(in srgb, var(--short) 40%, var(--border)); }
         .ca-bias.flat { color: var(--text-secondary); }
         .ca-conf {
           font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;

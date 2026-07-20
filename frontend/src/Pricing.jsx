@@ -165,34 +165,34 @@ export default function Pricing({ user }) {
       </div>
 
       <style>{`
-        .pr-banner { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: var(--radius-md); padding: 10px 14px; font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; }
-        .pr-tg-connect { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 18px; }
-        .pr-tg-title { font-size: 14px; font-weight: 700; color: var(--text); }
+        .pr-banner { background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: var(--radius-md); padding: 10px 14px; font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; }
+        .pr-tg-connect { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 18px; box-shadow: var(--shadow-card), var(--inset-highlight); backdrop-filter: blur(12px); }
+        .pr-tg-title { font-size: 14px; font-weight: 650; color: var(--text); }
         .pr-tg-hint { font-size: 12px; color: var(--text-secondary); margin-top: 4px; max-width: 480px; }
-        .pr-tg-btn { flex-shrink: 0; border: none; border-radius: var(--radius-sm); padding: 10px 18px; font-size: 13px; font-weight: 700; cursor: pointer; background: var(--accent); color: #fff; }
-        .pr-tg-btn:disabled { opacity: 0.6; cursor: default; }
+        .pr-tg-btn { flex-shrink: 0; border: none; border-radius: 980px; padding: 10px 18px; font-size: 13px; font-weight: 650; cursor: pointer; background: var(--accent); color: #fff; box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 28%, transparent); }
+        .pr-tg-btn:disabled { opacity: 0.6; cursor: default; box-shadow: none; }
         .pr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; max-width: 640px; }
-        .pr-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; box-shadow: var(--shadow-card); display: flex; flex-direction: column; transition: border-color 0.2s, transform 0.2s; }
-        .pr-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
-        .pr-card.popular { box-shadow: var(--shadow-lg); border-color: var(--accent); }
-        .pr-badge { position: absolute; top: -10px; left: 24px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
-        .pr-name { font-size: 16px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; font-family: var(--font-display); }
-        .pr-price { font-size: 34px; font-weight: 800; font-family: var(--font-mono); color: var(--text); margin: 8px 0 16px; }
+        .pr-card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 28px; box-shadow: var(--shadow-card), var(--inset-highlight); backdrop-filter: blur(16px); display: flex; flex-direction: column; transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s; }
+        .pr-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); box-shadow: var(--shadow-lg); }
+        .pr-card.popular { box-shadow: var(--shadow-lg); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+        .pr-badge { position: absolute; top: -10px; left: 24px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; padding: 4px 12px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.06em; }
+        .pr-name { font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; font-family: var(--font-display); }
+        .pr-price { font-size: 34px; font-weight: 700; font-family: var(--font-mono); color: var(--text); margin: 8px 0 16px; letter-spacing: -0.03em; }
         .pr-price span { font-size: 14px; color: var(--text-tertiary); font-weight: 400; }
         .pr-features { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; flex: 1; }
         .pr-features li { font-size: 13px; color: var(--text-secondary); }
-        .pr-soon { font-size: 9px; font-weight: 800; letter-spacing: 0.08em; color: var(--text-tertiary); border: 1px solid var(--border); border-radius: 8px; padding: 1px 6px; margin-left: 6px; vertical-align: 1px; }
-        .pr-cta { border: none; border-radius: var(--radius-sm); padding: 12px; font-size: 14px; font-weight: 700; cursor: pointer; }
+        .pr-soon { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-tertiary); border: 1px solid var(--border); border-radius: 8px; padding: 1px 6px; margin-left: 6px; vertical-align: 1px; }
+        .pr-cta { border: none; border-radius: 980px; padding: 12px; font-size: 14px; font-weight: 650; cursor: pointer; }
         .pr-cta:disabled { cursor: default; }
 
-        .pr-period-switch { display: inline-flex; gap: 2px; background: var(--surface-2); border-radius: 10px; padding: 3px; margin-bottom: 18px; }
-        .pr-period-btn { border: none; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: 8px; display: flex; align-items: center; gap: 6px; }
-        .pr-period-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+        .pr-period-switch { display: inline-flex; gap: 2px; background: var(--surface-2); border-radius: 980px; padding: 3px; margin-bottom: 18px; }
+        .pr-period-btn { border: none; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: 980px; display: flex; align-items: center; gap: 6px; }
+        .pr-period-btn.active { background: var(--surface-solid); color: var(--text); box-shadow: var(--shadow-card); }
         .pr-period-off { font-size: 10px; color: var(--long); font-weight: 700; }
 
         .pr-exchange-note { text-align: center; font-size: 12px; color: var(--text-tertiary); margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
 
-        .pr-faq-title { font-size: 20px; font-weight: 800; color: var(--text); margin: 40px 0 8px; text-align: center; }
+        .pr-faq-title { font-size: 20px; font-weight: 700; color: var(--text); margin: 40px 0 8px; text-align: center; font-family: var(--font-display); letter-spacing: -0.02em; }
         .pr-faq-list { max-width: 700px; margin: 16px auto 0; }
         .pr-faq-item { border-bottom: 1px solid var(--border); }
         .pr-faq-q { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 0; background: transparent; border: none; color: var(--text); font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }

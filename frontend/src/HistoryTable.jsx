@@ -257,7 +257,8 @@ function HistoryStyles() {
         .history-wrap { display: flex; flex-direction: column; gap: 14px; }
         .hist-month {
           background: var(--surface); border: 1px solid var(--border);
-          border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+          border-radius: var(--radius-lg); box-shadow: var(--shadow-card), var(--inset-highlight);
+          backdrop-filter: blur(16px);
           padding: 22px; display: flex; flex-direction: column; gap: 18px;
           background-image:
             radial-gradient(ellipse 80% 60% at 100% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 55%);
@@ -294,7 +295,8 @@ function HistoryStyles() {
         .hist-equity-head strong { font-family: var(--font-mono); font-size: 14px; }
         .pnl-chart-card {
           background: var(--surface); border: 1px solid var(--border);
-          border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+          border-radius: var(--radius-lg); box-shadow: var(--shadow-card), var(--inset-highlight);
+          backdrop-filter: blur(16px);
           padding: 20px 20px 12px; display: flex; flex-direction: column; gap: 14px;
         }
         .pnl-chart-header { display: flex; justify-content: space-between; align-items: flex-start; }
@@ -307,7 +309,8 @@ function HistoryStyles() {
         .pnl-total-label { font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; }
         .hist-lock-card {
           background: var(--surface); border: 1px solid var(--border);
-          border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+          border-radius: var(--radius-lg); box-shadow: var(--shadow-card), var(--inset-highlight);
+          backdrop-filter: blur(16px);
           padding: 28px 24px; display: flex; flex-direction: column; align-items: center;
           gap: 12px; text-align: center;
         }
@@ -326,7 +329,8 @@ function HistoryStyles() {
         }
         .history-table-wrap {
           background: var(--surface); border: 1px solid var(--border);
-          border-radius: var(--radius-lg); box-shadow: var(--shadow-card); overflow: hidden;
+          border-radius: var(--radius-lg); box-shadow: var(--shadow-card), var(--inset-highlight);
+          backdrop-filter: blur(16px); overflow: hidden;
         }
         .history-table { width: 100%; border-collapse: collapse; font-size: 13px; display: table; }
         .history-table th {

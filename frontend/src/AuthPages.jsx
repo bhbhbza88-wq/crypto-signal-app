@@ -131,27 +131,34 @@ function AuthShell({ title, children }) {
       </div>
       <style>{`
         .as-page { min-height: 100vh; display: grid; place-items: center; padding: 24px;
-          background: radial-gradient(ellipse at 20% 0%, rgba(0,180,160,0.12), transparent 50%),
-                      radial-gradient(ellipse at 80% 100%, rgba(20,40,60,0.4), transparent 45%),
-                      var(--bg, #0b1118); }
-        .as-card { width: 100%; max-width: 400px; background: var(--surface, #121a24);
-          border: 1px solid var(--border, #243041); border-radius: 16px; padding: 28px; }
-        .as-brand { font-family: var(--font-display, Syne, sans-serif); font-weight: 800;
-          font-size: 18px; color: var(--accent, #00c9a7); letter-spacing: -0.03em; }
-        .as-title { font-family: var(--font-display, Syne, sans-serif); font-size: 24px;
-          font-weight: 800; margin: 16px 0 12px; color: var(--text, #e8eef5); }
+          background:
+            radial-gradient(ellipse 80% 50% at 20% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 55%),
+            radial-gradient(ellipse 60% 40% at 90% 100%, color-mix(in srgb, var(--long) 8%, transparent), transparent 50%),
+            var(--bg); }
+        .as-card {
+          width: 100%; max-width: 400px; background: var(--glass);
+          border: 1px solid var(--glass-border); border-radius: var(--radius-lg); padding: 28px;
+          box-shadow: var(--shadow-lg), var(--inset-highlight);
+          backdrop-filter: saturate(180%) blur(28px);
+          -webkit-backdrop-filter: saturate(180%) blur(28px);
+        }
+        .as-brand { font-family: var(--font-display); font-weight: 700;
+          font-size: 18px; color: var(--accent); letter-spacing: -0.03em; }
+        .as-title { font-family: var(--font-display); font-size: 24px;
+          font-weight: 700; margin: 16px 0 12px; color: var(--text); letter-spacing: -0.02em; }
         .as-form { display: flex; flex-direction: column; gap: 8px; }
-        .as-label { font-size: 11px; font-weight: 600; color: var(--text-tertiary, #8a9bb0);
+        .as-label { font-size: 11px; font-weight: 600; color: var(--text-tertiary);
           text-transform: uppercase; letter-spacing: 0.04em; }
-        .as-input { background: var(--surface-2, #0f1620); border: 1px solid var(--border, #243041);
-          border-radius: 8px; padding: 11px 14px; font-size: 14px; color: var(--text, #e8eef5); }
-        .as-btn { margin-top: 8px; background: var(--accent, #00c9a7); color: #fff; border: none;
-          border-radius: 8px; padding: 12px; font-weight: 700; cursor: pointer; }
-        .as-btn:disabled { opacity: 0.6; }
-        .as-muted { color: var(--text-secondary, #a8b6c8); font-size: 14px; }
-        .as-ok { color: var(--accent, #00c9a7); font-size: 14px; }
-        .as-err { color: #ff6b7a; font-size: 14px; }
-        .as-link { display: inline-block; margin-top: 12px; color: var(--accent, #00c9a7);
+        .as-input { background: var(--surface-2); border: 1px solid var(--border);
+          border-radius: var(--radius-sm); padding: 11px 14px; font-size: 14px; color: var(--text); font-family: var(--font-ui); }
+        .as-btn { margin-top: 8px; background: var(--accent); color: #fff; border: none;
+          border-radius: 980px; padding: 12px; font-weight: 650; cursor: pointer;
+          box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent); }
+        .as-btn:disabled { opacity: 0.6; box-shadow: none; }
+        .as-muted { color: var(--text-secondary); font-size: 14px; }
+        .as-ok { color: var(--accent); font-size: 14px; }
+        .as-err { color: var(--short); font-size: 14px; }
+        .as-link { display: inline-block; margin-top: 12px; color: var(--accent);
           font-weight: 600; font-size: 14px; }
       `}</style>
     </div>
