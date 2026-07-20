@@ -494,32 +494,34 @@ export default function App() {
                     <KPI keyName="avg_pnl" label={t('kpi.avgPnl')} value={displayStats.avgPnl} suffix="%" sub={t('kpi.avgPnlSub')} />
                   </div>
 
-                  <section className="section dash-section">
-                    <div className="dash-sec-head">
-                      <h2 className="dash-sec-title mono">{t('sec.active')}</h2>
-                      <span className="sec-count mono">{signals.length}</span>
-                    </div>
-                    {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal t={t} /> : (
-                      <div className="signals-grid">
-                        {signals.map(s => <SignalCard key={s.id ?? s.symbol} signal={s} />)}
-                      </div>
-                    )}
-                  </section>
-
-                  {history.length > 0 && (
-                    <section className="section dash-section">
+                  <div className={`dash-split${history.length > 0 ? ' has-rail' : ''}`}>
+                    <section className="section dash-section dash-main-col">
                       <div className="dash-sec-head">
-                        <h2 className="dash-sec-title mono">{t('sec.recent')}</h2>
+                        <h2 className="dash-sec-title mono">{t('sec.active')}</h2>
+                        <span className="sec-count mono">{signals.length}</span>
                       </div>
-                      <RecentSignals
-                        history={history}
-                        isPremium={isPremium}
-                        t={t}
-                        onSeeAll={() => setTab('history')}
-                        onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))}
-                      />
+                      {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal t={t} /> : (
+                        <div className="signals-grid">
+                          {signals.map(s => <SignalCard key={s.id ?? s.symbol} signal={s} />)}
+                        </div>
+                      )}
                     </section>
-                  )}
+
+                    {history.length > 0 && (
+                      <section className="section dash-section dash-rail">
+                        <div className="dash-sec-head">
+                          <h2 className="dash-sec-title mono">{t('sec.recent')}</h2>
+                        </div>
+                        <RecentSignals
+                          history={history}
+                          isPremium={isPremium}
+                          t={t}
+                          onSeeAll={() => setTab('history')}
+                          onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))}
+                        />
+                      </section>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

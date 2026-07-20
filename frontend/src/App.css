@@ -198,10 +198,18 @@
 .main-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .content { flex: 1; max-width: 1280px; width: 100%; margin: 0 auto; padding: 28px 32px 88px; display: flex; flex-direction: column; gap: 0; }
 .section { display: flex; flex-direction: column; gap: 14px; }
-.content:has(.section-ai-desk) {
+.content:has(.section-ai-desk),
+.content:has(.dash-console) {
   max-width: none;
+  width: 100%;
+  margin: 0;
+}
+.content:has(.section-ai-desk) {
   padding: 16px 18px 18px;
   min-height: 0;
+}
+.content:has(.dash-console) {
+  padding: 18px 20px 40px;
 }
 .section-ai-desk {
   flex: 1;
@@ -221,11 +229,11 @@
 .beta-tag { background: var(--amber); color: #1d1d1f; }
 .hot-tag { background: var(--short); }
 .error-banner { padding: 12px 16px; background: var(--short-soft); color: var(--short); border: 1px solid color-mix(in srgb, var(--short) 30%, transparent); border-radius: var(--radius-md); font-size: 13px; margin-bottom: 20px; }
-.signals-grid { display: grid; gap: 18px; }
+.signals-grid { display: grid; gap: 18px; grid-template-columns: 1fr; }
 .pos { color: var(--long) !important; } .neg { color: var(--short) !important; }
 
 /* ─── Dashboard console (Apple + IDE) ───────────────────────── */
-.dash-console { margin-top: 0; }
+.dash-console { margin-top: 0; width: 100%; }
 .dash-window {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -233,6 +241,7 @@
   overflow: hidden;
   box-shadow: var(--shadow-card), var(--inset-highlight);
   backdrop-filter: saturate(160%) blur(18px);
+  width: 100%;
 }
 .dash-titlebar {
   display: flex; align-items: center; gap: 8px;
@@ -295,6 +304,10 @@
 .kpi-meta { display: flex; flex-direction: column; gap: 2px; }
 .kpi-label { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
 .kpi-sub { font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); }
+
+.dash-split { display: flex; flex-direction: column; gap: 0; }
+.dash-split .dash-section { margin-top: 28px; }
+.dash-rail { min-width: 0; }
 
 .dash-sec-head {
   display: flex; align-items: center; gap: 12px;
@@ -386,6 +399,35 @@
 @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 .animate-in { animation: fadeIn 0.35s ease forwards; }
 
+/* Wide: fill side gutters — signals + history side by side */
+@media (min-width: 1200px) {
+  .dash-split.has-rail {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+    gap: 20px;
+    align-items: start;
+    margin-top: 8px;
+  }
+  .dash-split.has-rail .dash-section { margin-top: 20px; }
+  .dash-rail {
+    position: sticky;
+    top: 72px;
+  }
+  .dash-rail .rs-card { max-height: calc(100vh - 120px); overflow: auto; }
+}
+
+@media (min-width: 1500px) {
+  .dash-split.has-rail {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  }
+  .dash-split:not(.has-rail) .signals-grid,
+  .dash-main-col .signals-grid {
+    grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+  }
+  .content:has(.dash-console) { padding: 18px 24px 48px; }
+  .dash-body { padding: 24px 28px 30px; }
+}
+
 @media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(2,1fr); } }
 @media (max-width: 768px) {
   .sidebar { position: fixed; left: -260px; top: 0; height: 100vh; transition: left 0.3s ease; z-index: 100; }
@@ -393,6 +435,7 @@
   .burger { display: flex; }
   .content { padding: 18px 14px 80px; }
   .content:has(.section-ai-desk) { padding: 10px 10px 12px; }
+  .content:has(.dash-console) { padding: 12px 10px 32px; }
   .section-ai-desk {
     height: calc(100vh - 56px - 22px);
     max-height: calc(100dvh - 56px - 22px);
@@ -410,7 +453,7 @@
   .dash-body { padding: 16px 14px 20px; }
   .dash-hero { align-items: stretch; }
   .dash-ticker { width: 100%; }
-  .dash-path { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42vw; }
+  .dash-path { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 48vw; }
   .rs-cols { display: none; }
 }
 @media (max-width: 480px) {
