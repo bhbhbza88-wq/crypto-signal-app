@@ -619,7 +619,7 @@ def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTas
     return {"ok": True, "symbol": symbol, "signal": signal, "trader": trader['name']}
 
 
-# ── AI Ассистент (Groq бесплатно; парсинг сигналов — Anthropic Haiku) ──
+# ── AI (OpenRouter главный; Groq/Anthropic — fallback) ───────────────
 
 GROQ_API_KEY = ai_client.GROQ_API_KEY  # legacy alias
 AI_MODEL = ai_client.MODEL_CHAT

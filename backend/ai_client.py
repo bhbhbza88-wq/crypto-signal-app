@@ -1,14 +1,18 @@
 """
 Единая точка доступа к LLM.
 
-Бюджетный режим (рекомендуется):
-  GROQ_API_KEY       — AI «Ник» на сайте (бесплатный tier)
-  ANTHROPIC_API_KEY  — парсинг сигналов / vision (Haiku 4.5, дёшево)
+Главный провайдер: OpenRouter (один ключ → много моделей).
+  OPENROUTER_API_KEY     — основной ключ
 
-Опционально:
-  COMETAPI_KEY       — прокси Claude (если нет прямого Anthropic)
-  OLLAMA_URL         — локальный chat_engage
-  INGEST_VISION      — 0/1, читать скрины сигналов (дорого по токенам)
+Модели по сложности (переопределяются env):
+  OPENROUTER_MODEL_FAST   — дешёвая: парсинг сигналов, JSON
+  OPENROUTER_MODEL_CHAT   — средняя: AI «Ник» на сайте
+  OPENROUTER_MODEL_VISION — средняя+vision: разбор скринов графика
+
+Fallback (если OpenRouter нет):
+  GROQ_API_KEY / ANTHROPIC_API_KEY / COMETAPI_KEY / OPENAI_API_KEY
+  OLLAMA_URL — локальный chat_engage
+  INGEST_VISION — 0/1, vision для TG-ingest
 """
 
 from __future__ import annotations
@@ -28,6 +32,17 @@ load_dotenv(_backend / ".env")
 import anthropic
 import httpx
 
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OPENROUTER_BASE = (
+    os.getenv("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
+).strip().rstrip("/")
+OPENROUTER_CHAT_URL = f"{OPENROUTER_BASE}/chat/completions"
+
+# Дешёвая / средняя / vision (OpenRouter slugs)
+OR_FAST_DEFAULT = "google/gemini-2.5-flash-lite"
+OR_CHAT_DEFAULT = "google/gemini-2.5-flash"
+OR_VISION_DEFAULT = "openai/gpt-4o-mini"  # дешевле Haiku, хорошо читает скрины
+
 COMETAPI_KEY = os.getenv("COMETAPI_KEY", "").strip()
 COMETAPI_BASE = (
     os.getenv("COMETAPI_BASE_URL") or os.getenv("CLAUDE_BASE_URL") or "https://api.cometapi.com"
@@ -43,21 +58,23 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
-# Vision по умолчанию выкл — скрины жрут токены; включить INGEST_VISION=1
 INGEST_VISION = os.getenv("INGEST_VISION", "0").strip().lower() in ("1", "true", "yes", "on")
 
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 GROQ_CHAT_MODEL = "llama-3.3-70b-versatile"
 
 
+def openrouter_configured() -> bool:
+    return bool(OPENROUTER_API_KEY)
+
+
 def claude_api_key() -> str:
-    """Anthropic напрямую предпочтительнее CometAPI (у Comet часто 403/баланс)."""
     return ANTHROPIC_API_KEY or COMETAPI_KEY
 
 
 def claude_base_url() -> str | None:
     if ANTHROPIC_API_KEY:
-        return None  # официальный api.anthropic.com
+        return None
     if COMETAPI_KEY:
         return COMETAPI_BASE
     custom = (os.getenv("CLAUDE_BASE_URL") or "").strip()
@@ -65,27 +82,32 @@ def claude_base_url() -> str | None:
 
 
 def fast_configured() -> bool:
-    """Парсинг сигналов (Haiku)."""
-    return bool(claude_api_key())
+    """Парсинг сигналов / JSON."""
+    return openrouter_configured() or bool(claude_api_key()) or bool(GROQ_API_KEY)
 
 
 def chat_configured() -> bool:
-    """AI «Ник» на сайте — сначала Groq (бесплатно)."""
-    return bool(GROQ_API_KEY or COMETAPI_KEY or OPENAI_API_KEY)
+    """AI «Ник» на сайте."""
+    return openrouter_configured() or bool(GROQ_API_KEY or COMETAPI_KEY or OPENAI_API_KEY)
 
 
 def configured() -> bool:
-    """Хоть какой-то LLM доступен."""
     return fast_configured() or chat_configured()
 
 
 def api_key() -> str:
-    """Legacy: ключ «для чего угодно». Предпочитаем Groq для OpenAI-совместимых вызовов."""
-    return GROQ_API_KEY or COMETAPI_KEY or ANTHROPIC_API_KEY or OPENAI_API_KEY
+    return (
+        OPENROUTER_API_KEY
+        or GROQ_API_KEY
+        or COMETAPI_KEY
+        or ANTHROPIC_API_KEY
+        or OPENAI_API_KEY
+    )
 
 
 def openai_chat_url() -> str:
-    """URL для веб-чата (Ник)."""
+    if openrouter_configured():
+        return OPENROUTER_CHAT_URL
     if GROQ_API_KEY:
         return "https://api.groq.com/openai/v1/chat/completions"
     if COMETAPI_KEY:
@@ -94,6 +116,16 @@ def openai_chat_url() -> str:
 
 
 def openai_auth_headers() -> dict[str, str]:
+    if openrouter_configured():
+        key = OPENROUTER_API_KEY
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            # OpenRouter extras (рекомендуются в доке)
+            "HTTP-Referer": os.getenv("FRONTEND_URL", "https://nowicki.trade"),
+            "X-Title": "NOWICKI",
+        }
+        return headers
     if GROQ_API_KEY:
         key = GROQ_API_KEY
     elif COMETAPI_KEY:
@@ -107,6 +139,8 @@ def openai_auth_headers() -> dict[str, str]:
 
 
 def _default_chat_model() -> str:
+    if openrouter_configured():
+        return OR_CHAT_DEFAULT
     if GROQ_API_KEY:
         return GROQ_CHAT_MODEL
     if COMETAPI_KEY:
@@ -115,6 +149,8 @@ def _default_chat_model() -> str:
 
 
 def _default_fast_model() -> str:
+    if openrouter_configured():
+        return OR_FAST_DEFAULT
     if claude_api_key():
         return HAIKU_MODEL
     if GROQ_API_KEY:
@@ -123,22 +159,38 @@ def _default_fast_model() -> str:
 
 
 def _default_vision_model() -> str:
+    if openrouter_configured():
+        return OR_VISION_DEFAULT
     if claude_api_key():
-        return HAIKU_MODEL  # Haiku 4.5 умеет vision
+        return HAIKU_MODEL
     if GROQ_API_KEY:
         return "llama-3.2-90b-vision-preview"
     return "gpt-4o-mini"
 
 
-MODEL_CHAT = (os.getenv("COMETAPI_MODEL_CHAT") or os.getenv("AI_MODEL") or _default_chat_model()).strip()
+MODEL_CHAT = (
+    os.getenv("OPENROUTER_MODEL_CHAT")
+    or os.getenv("COMETAPI_MODEL_CHAT")
+    or os.getenv("AI_MODEL")
+    or _default_chat_model()
+).strip()
 MODEL_FAST = (
-    os.getenv("ANTHROPIC_MODEL_FAST")
+    os.getenv("OPENROUTER_MODEL_FAST")
+    or os.getenv("ANTHROPIC_MODEL_FAST")
     or os.getenv("COMETAPI_MODEL_FAST")
     or os.getenv("AI_MODEL_CHAT")
     or _default_fast_model()
 ).strip()
-MODEL_VISION = (os.getenv("COMETAPI_MODEL_VISION") or _default_vision_model()).strip()
-MODEL_CHAT_ENGAGE = (os.getenv("COMETAPI_MODEL_CHAT_ENGAGE") or MODEL_FAST).strip()
+MODEL_VISION = (
+    os.getenv("OPENROUTER_MODEL_VISION")
+    or os.getenv("COMETAPI_MODEL_VISION")
+    or _default_vision_model()
+).strip()
+MODEL_CHAT_ENGAGE = (
+    os.getenv("OPENROUTER_MODEL_ENGAGE")
+    or os.getenv("COMETAPI_MODEL_CHAT_ENGAGE")
+    or MODEL_FAST
+).strip()
 CLAUDE_MODEL = (os.getenv("CLAUDE_MODEL") or MODEL_CHAT).strip()
 
 
@@ -149,6 +201,8 @@ def ollama_configured() -> bool:
 def chat_engage_provider() -> str:
     if ollama_configured():
         return "ollama"
+    if openrouter_configured():
+        return "openrouter"
     if claude_api_key():
         return "anthropic"
     return ""
@@ -202,6 +256,42 @@ def parse_json_content(raw: str) -> dict:
         raise
 
 
+async def openai_compatible_completion(
+    *,
+    model: str,
+    messages: list[dict],
+    max_tokens: int = 400,
+    temperature: float = 0.0,
+    timeout: float = 45,
+    response_format: dict | None = None,
+) -> str:
+    """OpenRouter / Groq / Comet / OpenAI chat completions → текст ответа."""
+    if not (openrouter_configured() or GROQ_API_KEY or COMETAPI_KEY or OPENAI_API_KEY):
+        raise RuntimeError("AI not configured (set OPENROUTER_API_KEY)")
+    body: dict = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    if response_format:
+        body["response_format"] = response_format
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(
+            openai_chat_url(),
+            json=body,
+            headers=openai_auth_headers(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    return (
+        data.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+        .strip()
+    )
+
+
 async def anthropic_completion(
     *,
     system: str,
@@ -211,11 +301,9 @@ async def anthropic_completion(
     temperature: float = 0.0,
     timeout: float = 30,
 ) -> str:
-    """Прямой вызов Anthropic Messages API (Haiku для парсинга)."""
     if not claude_api_key():
         raise RuntimeError("Anthropic not configured (set ANTHROPIC_API_KEY)")
     client = async_claude_client(max_retries=1)
-    # httpx timeout через клиент по умолчанию; timeout параметр — для единообразия API
     _ = timeout
     resp = await client.messages.create(
         model=model or MODEL_FAST,
@@ -233,8 +321,23 @@ async def fast_json_completion(
     user_text: str,
     max_tokens: int = 180,
 ) -> dict:
-    """Дешёвый JSON-парсинг через Haiku."""
+    """Дешёвый JSON (парсинг сигналов)."""
     sys = system.rstrip() + "\n\nОтветь ТОЛЬКО валидным JSON-объектом. Без markdown и пояснений."
+
+    if openrouter_configured() or (GROQ_API_KEY and not claude_api_key()):
+        # OpenRouter (или Groq) — OpenAI-совместимый путь
+        raw = await openai_compatible_completion(
+            model=MODEL_FAST,
+            messages=[
+                {"role": "system", "content": sys},
+                {"role": "user", "content": user_text},
+            ],
+            max_tokens=max_tokens,
+            temperature=0.0,
+            timeout=40,
+        )
+        return parse_json_content(raw)
+
     raw = await anthropic_completion(
         system=sys,
         user_content=user_text,
@@ -254,20 +357,13 @@ async def vision_json_completion(
     media_type: str = "image/jpeg",
     require_ingest_flag: bool = True,
 ) -> dict:
-    """Vision через Haiku.
-    require_ingest_flag=True — только если INGEST_VISION=1 (парсинг каналов).
-    Для разбора графика пользователем передавайте require_ingest_flag=False.
-    """
+    """Vision JSON: OpenRouter (gpt-4o-mini) или Anthropic Haiku."""
     import base64
 
     if require_ingest_flag and not INGEST_VISION:
         raise RuntimeError("INGEST_VISION=0")
-    if not claude_api_key():
-        raise RuntimeError("Anthropic not configured (set ANTHROPIC_API_KEY)")
 
-    # Нормализуем в JPEG — iPhone/HEIC/PNG с альфой иначе иногда дают пустой ответ
     image_bytes, media_type = normalize_image_bytes(image_bytes, media_type)
-
     b64 = base64.b64encode(image_bytes).decode()
     caption_text = (
         caption[:800].strip()
@@ -287,22 +383,43 @@ async def vision_json_completion(
                 "\n\nPREVIOUS REPLY WAS INVALID. Return ONLY raw JSON matching the schema. "
                 "bias must be exactly long|short|flat."
             )
-        user_content = [
-            {
-                "type": "image",
-                "source": {"type": "base64", "media_type": media_type, "data": b64},
-            },
-            {"type": "text", "text": caption_text + hint},
-        ]
         try:
-            raw = await anthropic_completion(
-                system=sys,
-                user_content=user_content,
-                model=MODEL_VISION,
-                max_tokens=max(max_tokens, 900),
-                temperature=0.0,
-                timeout=75,
-            )
+            if openrouter_configured() or (not claude_api_key() and (GROQ_API_KEY or OPENAI_API_KEY)):
+                if not (openrouter_configured() or OPENAI_API_KEY or GROQ_API_KEY or COMETAPI_KEY):
+                    raise RuntimeError("No OpenAI-compatible vision provider")
+                user_content = [
+                    {"type": "text", "text": caption_text + hint},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{b64}"},
+                    },
+                ]
+                raw = await openai_compatible_completion(
+                    model=MODEL_VISION,
+                    messages=[
+                        {"role": "system", "content": sys},
+                        {"role": "user", "content": user_content},
+                    ],
+                    max_tokens=max(max_tokens, 900),
+                    temperature=0.0,
+                    timeout=75,
+                )
+            else:
+                user_content = [
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": media_type, "data": b64},
+                    },
+                    {"type": "text", "text": caption_text + hint},
+                ]
+                raw = await anthropic_completion(
+                    system=sys,
+                    user_content=user_content,
+                    model=MODEL_VISION,
+                    max_tokens=max(max_tokens, 900),
+                    temperature=0.0,
+                    timeout=75,
+                )
             if not (raw or "").strip():
                 raise ValueError("empty model response")
             return parse_json_content(raw)
@@ -313,7 +430,6 @@ async def vision_json_completion(
 
 
 def normalize_image_bytes(image_bytes: bytes, media_type: str = "image/jpeg") -> tuple[bytes, str]:
-    """Приводит любой понятный Pillow формат к JPEG RGB (надёжнее для vision API)."""
     from io import BytesIO
 
     try:
@@ -332,7 +448,6 @@ def normalize_image_bytes(image_bytes: bytes, media_type: str = "image/jpeg") ->
             im = bg
         elif im.mode != "RGB":
             im = im.convert("RGB")
-        # Мобильные скрины бывают огромными — режем длинную сторону
         max_edge = 1400
         w, h = im.size
         scale = min(1.0, max_edge / max(w, h))
@@ -350,10 +465,9 @@ def normalize_image_bytes(image_bytes: bytes, media_type: str = "image/jpeg") ->
 
 
 async def openai_chat_completion(payload: dict, *, timeout: float = 30) -> dict:
-    """OpenAI-совместимый чат — для «Ника» (Groq)."""
+    """OpenAI-совместимый чат — для «Ника» (OpenRouter → …)."""
     if not chat_configured():
-        raise RuntimeError("Chat AI not configured (set GROQ_API_KEY)")
-    # Всегда подставляем модель чата, если вызывающий передал устаревшую
+        raise RuntimeError("Chat AI not configured (set OPENROUTER_API_KEY)")
     body = dict(payload)
     body.setdefault("model", MODEL_CHAT)
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -402,6 +516,20 @@ async def chat_engage_completion(
             .get("message", {})
             .get("content", "")
             .strip()
+        ) or None
+
+    if openrouter_configured():
+        return (
+            await openai_compatible_completion(
+                model=MODEL_CHAT_ENGAGE,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                timeout=timeout,
+            )
         ) or None
 
     if not claude_api_key():
