@@ -8,9 +8,9 @@ export const LOCALES = [
 
 const MESSAGES = {
   ru: {
-    'nav.main': 'Главное',
-    'nav.account': 'Аккаунт',
-    'nav.admin': 'Админ',
+    'nav.main': '// main',
+    'nav.account': '// account',
+    'nav.admin': '// admin',
     'nav.dashboard': 'Дашборд',
     'nav.history': 'История',
     'nav.ai': 'AI Ассистент',
@@ -348,9 +348,9 @@ const MESSAGES = {
     'chart.errGeneric': 'Ошибка разбора',
   },
   en: {
-    'nav.main': 'Main',
-    'nav.account': 'Account',
-    'nav.admin': 'Admin',
+    'nav.main': '// main',
+    'nav.account': '// account',
+    'nav.admin': '// admin',
     'nav.dashboard': 'Dashboard',
     'nav.history': 'History',
     'nav.ai': 'AI Assistant',
@@ -689,9 +689,9 @@ const MESSAGES = {
     'chart.errGeneric': 'Analysis failed',
   },
   pl: {
-    'nav.main': 'Główne',
-    'nav.account': 'Konto',
-    'nav.admin': 'Admin',
+    'nav.main': '// main',
+    'nav.account': '// account',
+    'nav.admin': '// admin',
     'nav.dashboard': 'Panel',
     'nav.history': 'Historia',
     'nav.ai': 'Asystent AI',
