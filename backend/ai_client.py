@@ -264,27 +264,89 @@ async def vision_json_completion(
         raise RuntimeError("INGEST_VISION=0")
     if not claude_api_key():
         raise RuntimeError("Anthropic not configured (set ANTHROPIC_API_KEY)")
+
+    # Нормализуем в JPEG — iPhone/HEIC/PNG с альфой иначе иногда дают пустой ответ
+    image_bytes, media_type = normalize_image_bytes(image_bytes, media_type)
+
     b64 = base64.b64encode(image_bytes).decode()
-    user_content = [
-        {
-            "type": "image",
-            "source": {"type": "base64", "media_type": media_type, "data": b64},
-        },
-        {
-            "type": "text",
-            "text": (caption[:800] if caption.strip() else "Извлеки параметры сигнала со скриншота."),
-        },
-    ]
-    sys = system.rstrip() + "\n\nОтветь ТОЛЬКО валидным JSON-объектом. Без markdown и пояснений."
-    raw = await anthropic_completion(
-        system=sys,
-        user_content=user_content,
-        model=MODEL_VISION,
-        max_tokens=max_tokens,
-        temperature=0.0,
-        timeout=60,
+    caption_text = (
+        caption[:800].strip()
+        if caption and caption.strip()
+        else "Извлеки параметры сигнала со скриншота."
     )
-    return parse_json_content(raw)
+    sys = (
+        system.rstrip()
+        + "\n\nCRITICAL: reply with a single JSON object only. No markdown fences, no prose."
+    )
+
+    last_err: Exception | None = None
+    for attempt in range(2):
+        hint = ""
+        if attempt == 1:
+            hint = (
+                "\n\nPREVIOUS REPLY WAS INVALID. Return ONLY raw JSON matching the schema. "
+                "bias must be exactly long|short|flat."
+            )
+        user_content = [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": b64},
+            },
+            {"type": "text", "text": caption_text + hint},
+        ]
+        try:
+            raw = await anthropic_completion(
+                system=sys,
+                user_content=user_content,
+                model=MODEL_VISION,
+                max_tokens=max(max_tokens, 900),
+                temperature=0.0,
+                timeout=75,
+            )
+            if not (raw or "").strip():
+                raise ValueError("empty model response")
+            return parse_json_content(raw)
+        except Exception as e:
+            last_err = e
+            print(f"[ai_client] vision_json attempt {attempt + 1} failed: {e}")
+    raise last_err or RuntimeError("vision_json failed")
+
+
+def normalize_image_bytes(image_bytes: bytes, media_type: str = "image/jpeg") -> tuple[bytes, str]:
+    """Приводит любой понятный Pillow формат к JPEG RGB (надёжнее для vision API)."""
+    from io import BytesIO
+
+    try:
+        from PIL import Image
+    except Exception:
+        return image_bytes, media_type or "image/jpeg"
+
+    try:
+        im = Image.open(BytesIO(image_bytes))
+        im.load()
+        if im.mode in ("RGBA", "P", "LA"):
+            bg = Image.new("RGB", im.size, (0, 0, 0))
+            if im.mode == "P":
+                im = im.convert("RGBA")
+            bg.paste(im, mask=im.split()[-1] if im.mode in ("RGBA", "LA") else None)
+            im = bg
+        elif im.mode != "RGB":
+            im = im.convert("RGB")
+        # Мобильные скрины бывают огромными — режем длинную сторону
+        max_edge = 1400
+        w, h = im.size
+        scale = min(1.0, max_edge / max(w, h))
+        if scale < 1.0:
+            im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.Resampling.LANCZOS)
+        out = BytesIO()
+        im.save(out, format="JPEG", quality=82, optimize=True)
+        return out.getvalue(), "image/jpeg"
+    except Exception as e:
+        print(f"[ai_client] normalize_image skip: {e}")
+        mt = (media_type or "image/jpeg").lower()
+        if mt in ("image/jpg", "image/heic", "image/heif"):
+            mt = "image/jpeg"
+        return image_bytes, mt
 
 
 async def openai_chat_completion(payload: dict, *, timeout: float = 30) -> dict:

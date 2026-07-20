@@ -2,11 +2,44 @@ import { useCallback, useRef, useState } from 'react'
 import { api } from './api'
 import { useI18n } from './i18n'
 
-const MAX_EDGE = 1280
-const JPEG_QUALITY = 0.78
+const MAX_EDGE = 1400
+const JPEG_QUALITY = 0.82
+
+function looksLikeImage(file) {
+  if (!file) return false
+  const t = (file.type || '').toLowerCase()
+  if (t.startsWith('image/')) return true
+  // iPhone Photos часто отдаёт пустой MIME
+  const name = (file.name || '').toLowerCase()
+  return /\.(jpe?g|png|webp|heic|heif|gif)$/i.test(name) || !t
+}
+
+async function loadBitmap(file) {
+  try {
+    return await createImageBitmap(file)
+  } catch {
+    // fallback для странных MIME с iPhone
+    const url = URL.createObjectURL(file)
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image()
+        el.onload = () => resolve(el)
+        el.onerror = reject
+        el.src = url
+      })
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth || img.width
+      canvas.height = img.naturalHeight || img.height
+      canvas.getContext('2d').drawImage(img, 0, 0)
+      return await createImageBitmap(canvas)
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
+}
 
 async function fileToCompressedPayload(file) {
-  const bitmap = await createImageBitmap(file)
+  const bitmap = await loadBitmap(file)
   const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height))
   const w = Math.max(1, Math.round(bitmap.width * scale))
   const h = Math.max(1, Math.round(bitmap.height * scale))
@@ -14,6 +47,8 @@ async function fileToCompressedPayload(file) {
   canvas.width = w
   canvas.height = h
   const ctx = canvas.getContext('2d')
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, w, h)
   ctx.drawImage(bitmap, 0, 0, w, h)
   bitmap.close()
 
@@ -72,7 +107,7 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
     setError(null)
     setResult(null)
     try {
-      if (!file.type.startsWith('image/')) {
+      if (!looksLikeImage(file)) {
         setError(t('chart.errType'))
         return
       }
@@ -130,7 +165,7 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
             <input
               ref={inputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp"
               hidden
               onChange={(e) => onPick(e.target.files?.[0])}
             />

@@ -628,17 +628,20 @@ CHART_DAILY_LIMITS = {'free': 2, 'premium': 15, 'vip': 40}
 _ai_usage: dict[int, dict] = {}   # user_id -> {'date': 'YYYY-MM-DD', 'count': int}
 _chart_usage: dict[int, dict] = {}
 
-CHART_ANALYZE_SYSTEM = """Ты — desk analyst NOWICKI. Разбираешь СКРИНШОТ графика криптопары.
+CHART_ANALYZE_SYSTEM = """Ты — desk analyst NOWICKI. Разбираешь СКРИНШОТ графика криптопары
+(в т.ч. мобильные скрины Bybit / Binance / TradingView с iPhone).
 Это НЕ торговый сигнал и НЕ рекомендация купить/продать.
 
 ЖЁСТКИЕ ПРАВИЛА:
 1. Опирайся ТОЛЬКО на то, что видно на картинке. Не выдумывай тикер, ТФ, уровни, индикаторы.
-2. Если скрин размыт, обрезан, нет графика, нет понятной структуры — bias="flat", confidence="low",
+2. Кнопки «Лонг/Шорт/Long/Short» внизу приложения — это UI биржи, НЕ сигнал и НЕ bias.
+3. Если скрин размыт, обрезан, нет графика, нет понятной структуры — bias="flat", confidence="low",
    evidence_ok=false, в reasons объясни чего не хватает.
-3. Не обещай прибыль. Не пиши «обязательно зайдёт», «гарантия», «100%».
-4. Bias long/short только если на скрине есть хотя бы 2 видимых аргумента (тренд/структура/уровень/свечной триггер).
-5. Всегда укажи invalidation: где идея ломается. Если не видишь — напиши "не видно на скрине".
-6. Язык полей reasons/invalidation/risks/watch = язык пользователя (поле language), иначе русский.
+4. Не обещай прибыль. Не пиши «обязательно зайдёт», «гарантия», «100%».
+5. Bias long/short только если на скрине есть хотя бы 2 видимых аргумента (тренд/структура/уровень/свечной триггер).
+6. Всегда укажи invalidation: где идея ломается. Если не видишь — напиши "не видно на скрине".
+7. Язык полей reasons/invalidation/risks/watch/seen = язык пользователя (поле language), иначе русский.
+8. bias ТОЛЬКО одно из: long | short | flat (не bullish/bearish).
 
 Верни JSON строго такой схемы:
 {
@@ -655,8 +658,6 @@ CHART_ANALYZE_SYSTEM = """Ты — desk analyst NOWICKI. Разбираешь С
   "watch": [string],
   "disclaimer": string
 }
-seen — что реально видно; reasons — почему bias; risks — что может пойти не так; watch — на что смотреть дальше.
-disclaimer — коротко: разбор картинки, не инвестсовет.
 """
 
 
@@ -680,9 +681,19 @@ def _chart_quota(user_id: int, tier: str) -> tuple[dict, int]:
 
 def _normalize_chart_result(raw: dict) -> dict:
     bias = str(raw.get('bias') or 'flat').lower().strip()
-    if bias not in ('long', 'short', 'flat'):
+    if bias in ('bullish', 'buy', 'long'):
+        bias = 'long'
+    elif bias in ('bearish', 'sell', 'short'):
+        bias = 'short'
+    elif bias not in ('long', 'short', 'flat'):
         bias = 'flat'
     conf = str(raw.get('confidence') or 'low').lower().strip()
+    # модель иногда отдаёт 0.72 вместо low/medium/high
+    try:
+        cnum = float(conf)
+        conf = 'high' if cnum >= 0.75 else 'medium' if cnum >= 0.45 else 'low'
+    except Exception:
+        pass
     if conf not in ('low', 'medium', 'high'):
         conf = 'low'
     evidence_ok = bool(raw.get('evidence_ok'))
@@ -737,13 +748,16 @@ async def ai_chart_analyze(req: ChartAnalyzeRequest, authorization: str | None =
         )
 
     media = (req.media_type or "image/jpeg").split(";")[0].strip().lower()
-    if media not in ("image/jpeg", "image/jpg", "image/png", "image/webp"):
-        raise HTTPException(status_code=400, detail="Нужен JPEG, PNG или WebP")
-    if media == "image/jpg":
+    # iPhone часто шлёт пустой type / heic / image/jpg
+    if media in ("", "application/octet-stream", "image/heic", "image/heif", "image/jpg"):
+        media = "image/jpeg"
+    if media not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
+        raise HTTPException(status_code=400, detail="Нужен JPEG, PNG, WebP или скрин из Фото")
+    if media == "image/gif":
         media = "image/jpeg"
 
     raw_b64 = (req.image_base64 or "").strip()
-    if "," in raw_b64 and raw_b64.startswith("data:"):
+    if "," in raw_b64 and raw_b64.lower().startswith("data:"):
         raw_b64 = raw_b64.split(",", 1)[1]
     raw_b64 = _re.sub(r"\s+", "", raw_b64)
     if not raw_b64:
@@ -752,15 +766,22 @@ async def ai_chart_analyze(req: ChartAnalyzeRequest, authorization: str | None =
         image_bytes = base64.b64decode(raw_b64, validate=False)
     except Exception:
         raise HTTPException(status_code=400, detail="Некорректный base64 изображения")
-    if len(image_bytes) < 800:
+    if len(image_bytes) < 400:
         raise HTTPException(status_code=400, detail="Файл слишком маленький")
-    if len(image_bytes) > 2_500_000:
-        raise HTTPException(status_code=400, detail="Файл слишком большой (сжми скрин до ~1–2 МБ)")
+    if len(image_bytes) > 6_000_000:
+        raise HTTPException(status_code=400, detail="Файл слишком большой (сжми скрин)")
+
+    # Всегда в JPEG через Pillow — стабильнее для Haiku на мобильных скринах
+    image_bytes, media = ai_client.normalize_image_bytes(image_bytes, media)
+    if len(image_bytes) > 2_800_000:
+        raise HTTPException(status_code=400, detail="После сжатия файл всё ещё слишком большой")
 
     lang = (req.language or "ru").strip().lower()[:5]
     caption_parts = [
         f"language={lang}",
         "Разбери скриншот графика по схеме. Не угадывай.",
+        "Это может быть мобильный скрин Bybit/Binance/TradingView с iPhone.",
+        "Кнопки Лонг/Шорт внизу экрана — UI, не сигнал.",
     ]
     if req.symbol_hint:
         caption_parts.append(f"user_symbol_hint={req.symbol_hint.strip()[:32]}")
@@ -774,13 +795,16 @@ async def ai_chart_analyze(req: ChartAnalyzeRequest, authorization: str | None =
             system=CHART_ANALYZE_SYSTEM,
             image_bytes=image_bytes,
             caption="\n".join(caption_parts),
-            max_tokens=700,
+            max_tokens=1100,
             media_type=media,
             require_ingest_flag=False,
         )
     except Exception as e:
         print(f"[chart_analyze] error: {e}")
-        raise HTTPException(status_code=502, detail="Не удалось разобрать скрин, попробуй другое фото")
+        raise HTTPException(
+            status_code=502,
+            detail="Не удалось разобрать этот скрин. Попробуй ещё раз или сохрани как JPEG из Фото.",
+        )
 
     result = _normalize_chart_result(raw if isinstance(raw, dict) else {})
     if req.symbol_hint and not result.get("symbol"):
