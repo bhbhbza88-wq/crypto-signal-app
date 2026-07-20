@@ -268,13 +268,9 @@
   width: 6px; height: 6px; border-radius: 50%; background: var(--long);
   animation: pulse 2s infinite; display: block;
 }
-.dash-body { padding: 22px 22px 26px; }
-.dash-boot {
-  margin: 0 0 10px; padding: 0;
-  font-size: 11px; line-height: 1.55; color: var(--text-tertiary);
-  white-space: pre-wrap; background: none; border: none;
-}
-.dash-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 20px; flex-wrap: wrap; }
+.dash-body { padding: 18px 22px 22px; }
+.dash-boot { display: none; }
+.dash-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 16px; flex-wrap: wrap; }
 .dash-hero-text { display: flex; flex-direction: column; gap: 6px; max-width: 560px; }
 .dash-hero .page-title { margin: 0; font-size: 26px; }
 .dash-hero .page-subtitle { margin: 0; }

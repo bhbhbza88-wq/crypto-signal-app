@@ -466,7 +466,6 @@ export default function App() {
                 <div className="dash-body">
                   <div className="dash-hero">
                     <div className="dash-hero-text">
-                      <pre className="dash-boot mono">{t('dash.boot')}</pre>
                       <h1 className="page-title">{t('dash.title')}</h1>
                       <p className="page-subtitle">{t('dash.sub')}</p>
                     </div>

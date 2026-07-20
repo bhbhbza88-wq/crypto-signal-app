@@ -352,27 +352,6 @@ export default function SignalCard({ signal }) {
         </div>
       )}
 
-      <div className="reasons-block">
-        <span className="reasons-title mono">{'// '}{t('signal.reasonsTitle')}</span>
-        {isAggregated ? (
-          <ul className="reasons-list">
-            <li>{t('signal.aggReason1')}</li>
-            <li>{t('signal.aggReason2')}</li>
-            <li>{t('signal.aggReason3')} · {venuesNote}</li>
-          </ul>
-        ) : signal.entry_reasons?.length > 0 ? (
-          <ul className="reasons-list">
-            {signal.entry_reasons.map((r, i) => (
-              <li key={i}>{r}</li>
-            ))}
-          </ul>
-        ) : (
-          <ul className="reasons-list">
-            <li>{t('signal.defaultReason')}</li>
-          </ul>
-        )}
-      </div>
-
       <style>{`
         .signal-card {
           background: color-mix(in srgb, var(--bg) 35%, var(--surface));
@@ -424,7 +403,7 @@ export default function SignalCard({ signal }) {
         }
 
         .tv-card {
-          margin: 14px 22px 0; border: 1px solid var(--border); border-radius: var(--radius-md);
+          margin: 14px 22px 18px; border: 1px solid var(--border); border-radius: var(--radius-md);
           overflow: hidden; background: color-mix(in srgb, var(--bg) 70%, transparent);
           box-shadow: var(--inset-highlight);
         }
@@ -440,33 +419,19 @@ export default function SignalCard({ signal }) {
         .tv-price { margin-left: auto; font-family: var(--font-mono); font-size: 12px; font-weight: 650; color: var(--text); display: flex; align-items: center; gap: 7px; }
         .tv-pnl { font-size: 11px; font-weight: 650; }
         .tv-pnl.pos { color: var(--long); } .tv-pnl.neg { color: var(--short); }
-        .tv-chart-canvas { width: 100%; height: 280px; }
-        .tv-empty { height: 280px; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); font-size: 12px; }
+        .tv-chart-canvas { width: 100%; height: 240px; }
+        .tv-empty { height: 240px; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); font-size: 12px; }
         .tv-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-hover) 70%, transparent); }
 
         .position-row {
           display: flex; justify-content: space-between; align-items: center;
-          margin: 14px 22px 0;
+          margin: 0 22px 18px;
           padding: 12px 14px;
           background: var(--accent-soft); border-radius: var(--radius-md);
           border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
         }
         .position-label { font-size: 12px; color: var(--text-secondary); }
         .position-value { font-family: var(--font-mono); font-weight: 650; color: var(--accent); font-size: 14px; }
-        .reasons-block {
-          margin: 16px 22px 20px;
-          padding-top: 14px;
-          border-top: 1px solid var(--border);
-        }
-        .reasons-title {
-          font-size: 11px; font-weight: 600; color: var(--text-tertiary);
-          letter-spacing: -0.01em; text-transform: none;
-        }
-        .reasons-list {
-          margin: 10px 0 0; padding-left: 18px;
-          display: flex; flex-direction: column; gap: 6px;
-        }
-        .reasons-list li { font-size: 13px; color: var(--text); line-height: 1.45; }
         .source-attribution { margin: 10px 0 0; font-size: 13px; color: var(--text); font-weight: 600; }
 
         @keyframes pulse { 0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--long) 40%, transparent)} 70%{box-shadow:0 0 0 5px transparent} 100%{box-shadow:0 0 0 0 transparent} }
@@ -476,12 +441,11 @@ export default function SignalCard({ signal }) {
           .signal-meta { gap: 12px; }
           .symbol { font-size: 20px; }
           .confidence-section { padding: 0 16px 14px; }
-          .tv-card { margin: 12px 14px 0; }
-          .tv-chart-canvas { height: 240px; }
+          .tv-card { margin: 12px 14px 14px; }
+          .tv-chart-canvas { height: 210px; }
           .tv-legend { gap: 8px 12px; padding: 10px 12px; }
-          .position-row { margin: 12px 14px 0; padding: 11px 12px; }
+          .position-row { margin: 0 14px 14px; padding: 11px 12px; }
           .position-label { font-size: 11px; }
-          .reasons-block { margin: 14px 16px 18px; }
         }
       `}</style>
     </div>
