@@ -297,14 +297,6 @@ export default function App() {
     <div className={`layout ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
 
       <aside className="sidebar">
-        <div className="sb-chrome">
-          <span className="sb-dot r" /><span className="sb-dot a" /><span className="sb-dot g" />
-          {!sidebarCollapsed && <span className="sb-chrome-path mono">~/nowicki</span>}
-          <button className="sidebar-collapse-btn" onClick={() => setSidebarCollapsed(c => !c)} aria-label="Collapse">
-            {sidebarCollapsed ? '›' : '‹'}
-          </button>
-        </div>
-
         <div className="sidebar-top">
           <div className="sidebar-logo" onClick={() => navigate('/')}>
             <div className="logo-icon"><span className="logo-n">N</span></div>
@@ -315,23 +307,10 @@ export default function App() {
               </div>
             )}
           </div>
+          <button className="sidebar-collapse-btn" onClick={() => setSidebarCollapsed(c => !c)} aria-label="Collapse">
+            {sidebarCollapsed ? '›' : '‹'}
+          </button>
         </div>
-
-        {prices && !sidebarCollapsed && (
-          <div className="sidebar-prices mono">
-            <div className="sp-head">$ quote.watch</div>
-            <div className="sp-row">
-              <span className="sp-sym">BTC</span>
-              <span className="sp-val">${prices.btc.price}</span>
-              <span className={`sp-chg ${prices.btc.positive ? 'pos' : 'neg'}`}>{prices.btc.positive ? '+' : ''}{prices.btc.change}%</span>
-            </div>
-            <div className="sp-row">
-              <span className="sp-sym">ETH</span>
-              <span className="sp-val">${prices.eth.price}</span>
-              <span className={`sp-chg ${prices.eth.positive ? 'pos' : 'neg'}`}>{prices.eth.positive ? '+' : ''}{prices.eth.change}%</span>
-            </div>
-          </div>
-        )}
 
         <nav className="sidebar-nav">
           {navSections.map((sec) => (

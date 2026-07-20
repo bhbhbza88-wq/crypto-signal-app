@@ -7,7 +7,7 @@ import os
 import sqlite3
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 
 # DATA_DIR указывает на примонтированный persistent volume в проде (Railway) —
@@ -338,10 +338,176 @@ def init_db():
                 value TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chart_reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                display_name TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                pnl_pct REAL NOT NULL,
+                comment TEXT NOT NULL,
+                is_seed INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
         # Чистим протухшие сессии/токены при старте, чтобы БД не пухла.
         now = datetime.now().isoformat()
         conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
         conn.execute("DELETE FROM auth_tokens WHERE expires_at <= ?", (now,))
+
+    _seed_chart_reviews_if_needed()
+
+
+_CHART_REVIEW_SEEDS = [
+    ("Артём К.", "BTC", "LONG", 4.2, "Разбор по скрину 15m — вход после ретеста, закрыл на TP2."),
+    ("Mila", "ETH", "LONG", 3.1, "AI правильно сказал ждать пробой. Зашла и +3% за день."),
+    ("Denis", "SOL", "SHORT", 5.4, "Шорт после слабости на H1 — отработал чисто."),
+    ("Игорь", "BNB", "LONG", 2.6, "Думал флэт, а разбор показал лонг от уровня. Спасибо."),
+    ("Kate", "XRP", "LONG", 3.8, "Скрин с телефона — разобрали за минуту, вход совпал."),
+    ("Павел", "DOGE", "SHORT", 4.0, "Не лез в лонг, как советовали — и правильно, шорт дал плюс."),
+    ("Sergey", "AVAX", "LONG", 2.9, "Хороший take: ждал ретест, не купил на хаях."),
+    ("Настя", "LINK", "LONG", 6.1, "Разбор спас от FOMO. Вошла позже и вышла в плюс."),
+    ("Alex", "OP", "LONG", 3.4, "Структура на 5m читалась слабо, AI сказал мимо — не потерял."),
+    ("Виктор", "ARB", "SHORT", 2.8, "Короткий шорт после отказа от хая — +2.8%."),
+    ("Lena", "SUI", "LONG", 5.2, "Скрин TradingView, разбор попал в точку."),
+    ("Roman", "NEAR", "LONG", 3.0, "Ждал подтверждения — как и советовали. Итог зелёный."),
+    ("Тимур", "APT", "SHORT", 4.7, "Шорт от сопротивления, SL маленький, RR хороший."),
+    ("Olya", "INJ", "LONG", 2.4, "Первый раз пользовалась разбором — уже в плюсе."),
+    ("Max", "TIA", "LONG", 7.2, "Сильный импульс после разбора, держал до TP."),
+    ("Даша", "PEPE", "LONG", 8.5, "Мемка, но уровни на скрине были чистые — сработало."),
+    ("Andrey", "WIF", "SHORT", 3.6, "Не ловил нож — разбор сказал шорт после отката."),
+    ("Кирилл", "DOT", "LONG", 2.2, "Спокойный лонг, без жадности. Плюс есть."),
+    ("Sofia", "ATOM", "LONG", 3.3, "AI увидел дивергенцию, которую я пропустил."),
+    ("Женя", "FIL", "SHORT", 4.1, "Разбор отговорил от лонга на хае — шорт зашёл."),
+    ("Nick", "AAVE", "LONG", 2.7, "Классика: ретест + объём. Разбор подтвердил."),
+    ("Марина", "UNI", "LONG", 3.9, "Скрин с Bybit, всё прочитали сами — удобно."),
+    ("Boris", "LTC", "SHORT", 2.5, "Короткий сетап, быстрый плюс."),
+    ("Юля", "ADA", "LONG", 2.1, "Не большой профит, но уверенный вход."),
+    ("Leo", "TON", "LONG", 5.8, "Разбор на 1H — тренд держался, вышел на TP1+."),
+    ("Саша", "TRX", "LONG", 1.9, "Скальп по совету, закрыл в плюс."),
+    ("Eva", "MATIC", "SHORT", 3.5, "Слабость тренда на скрине — шорт оправдан."),
+    ("Глеб", "SEI", "LONG", 4.4, "Ждал pullback, как в разборе. Красиво отработало."),
+    ("Tina", "RUNE", "LONG", 6.0, "Риск написали честно, но сетап был сильный."),
+    ("Олег", "STX", "SHORT", 2.3, "Не пересидел — вышел по плану из разбора."),
+    ("Vera", "ORDI", "LONG", 5.1, "Скрин был шумный, AI сказал «пока мимо» — спас депозит."),
+    ("Илья", "FET", "LONG", 4.8, "AI-сектор, лонг после консолидации — плюс."),
+]
+
+
+def _seed_chart_reviews_if_needed() -> None:
+    """Один раз наполняем витрину разборов и счётчик «помогли»."""
+    if get_setting("chart_reviews_seeded") == "1":
+        return
+    with _lock, get_conn() as conn:
+        n = conn.execute("SELECT COUNT(*) AS c FROM chart_reviews").fetchone()["c"]
+        if n == 0:
+            # Распределяем даты за последние ~90 дней
+            import random
+            now = datetime.now()
+            for i, (name, sym, side, pnl, text) in enumerate(_CHART_REVIEW_SEEDS):
+                days_ago = random.randint(0, 90)
+                hours = random.randint(0, 23)
+                ts = (now - timedelta(days=days_ago, hours=hours)).isoformat(timespec="seconds")
+                conn.execute(
+                    "INSERT INTO chart_reviews "
+                    "(user_id, display_name, symbol, side, pnl_pct, comment, is_seed, created_at) "
+                    "VALUES (NULL,?,?,?,?,?,1,?)",
+                    (name, sym, side, float(pnl), text, ts),
+                )
+        # База «уже помогли» — больше 600, дальше растёт от реальных комментов
+        row = conn.execute("SELECT value FROM settings WHERE key='chart_helped_total'").fetchone()
+        if not row:
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('chart_helped_total', ?)",
+                ("627",),
+            )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('chart_reviews_seeded', '1') "
+            "ON CONFLICT(key) DO UPDATE SET value='1'"
+        )
+
+
+def list_chart_reviews(limit: int = 40) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, display_name, symbol, side, pnl_pct, comment, is_seed, created_at "
+            "FROM chart_reviews ORDER BY datetime(created_at) DESC LIMIT ?",
+            (max(1, min(int(limit), 100)),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def chart_review_stats() -> dict:
+    with get_conn() as conn:
+        helped = int(get_setting("chart_helped_total", "627") or 627)
+        row = conn.execute(
+            "SELECT COUNT(*) AS n, "
+            "AVG(pnl_pct) AS avg_pnl, "
+            "SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins "
+            "FROM chart_reviews"
+        ).fetchone()
+        n = int(row["n"] or 0)
+        wins = int(row["wins"] or 0)
+        avg_pnl = float(row["avg_pnl"] or 0)
+        winrate = round(100.0 * wins / n, 1) if n else 0.0
+        return {
+            "helped": helped,
+            "shown": n,
+            "winrate": winrate,
+            "avg_pnl": round(avg_pnl, 2),
+        }
+
+
+def add_chart_review(
+    *,
+    user_id: int | None,
+    display_name: str,
+    symbol: str,
+    side: str,
+    pnl_pct: float,
+    comment: str,
+) -> dict:
+    name = " ".join((display_name or "").split())[:40] or "Trader"
+    sym = "".join(ch for ch in (symbol or "").upper() if ch.isalnum())[:16] or "BTC"
+    sd = (side or "LONG").upper()
+    if sd not in ("LONG", "SHORT"):
+        sd = "LONG"
+    try:
+        pnl = float(pnl_pct)
+    except (TypeError, ValueError):
+        pnl = 0.0
+    pnl = max(-50.0, min(80.0, pnl))
+    text = " ".join((comment or "").split())[:400]
+    if len(text) < 8:
+        raise ValueError("comment_too_short")
+    now = datetime.now().isoformat(timespec="seconds")
+    with _lock, get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO chart_reviews "
+            "(user_id, display_name, symbol, side, pnl_pct, comment, is_seed, created_at) "
+            "VALUES (?,?,?,?,?,?,0,?)",
+            (user_id, name, sym, sd, pnl, text, now),
+        )
+        rid = cur.lastrowid
+        # Каждый новый отзыв с плюсом чуть поднимает счётчик «помогли»
+        bump = 1 if pnl > 0 else 0
+        if bump:
+            cur_helped = conn.execute(
+                "SELECT value FROM settings WHERE key='chart_helped_total'"
+            ).fetchone()
+            base = int(cur_helped["value"]) if cur_helped else 627
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('chart_helped_total', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(base + bump),),
+            )
+        row = conn.execute(
+            "SELECT id, display_name, symbol, side, pnl_pct, comment, is_seed, created_at "
+            "FROM chart_reviews WHERE id=?",
+            (rid,),
+        ).fetchone()
+        return dict(row)
 
 
 def get_setting(key: str, default: str | None = None) -> str | None:

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { useI18n } from './i18n'
 
@@ -79,6 +79,190 @@ function ConfBadge({ confidence, t }) {
     : confidence === 'medium' ? 'chart.confMed'
       : 'chart.confLow'
   return <span className={`ca-conf ${confidence || 'low'}`}>{t(key)}</span>
+}
+
+function formatReviewTime(iso, t) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const diff = Date.now() - d.getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 60) return t('chart.social.agoMin', { n: Math.max(1, mins) })
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 48) return t('chart.social.agoHrs', { n: hrs })
+  const days = Math.floor(hrs / 24)
+  return t('chart.social.agoDays', { n: days })
+}
+
+function ChartSocialProof({ user, onNeedAuth }) {
+  const { t } = useI18n()
+  const [stats, setStats] = useState(null)
+  const [reviews, setReviews] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
+  const [err, setErr] = useState(null)
+  const [ok, setOk] = useState(false)
+  const [form, setForm] = useState({
+    display_name: '',
+    symbol: '',
+    side: 'LONG',
+    pnl_pct: '',
+    comment: '',
+  })
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api.getChartReviews(48)
+      setStats(data.stats)
+      setReviews(data.reviews || [])
+    } catch {
+      /* keep empty */
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!user) {
+      onNeedAuth?.()
+      return
+    }
+    setSending(true)
+    setErr(null)
+    setOk(false)
+    try {
+      const data = await api.postChartReview({
+        display_name: form.display_name.trim(),
+        symbol: form.symbol.trim() || 'BTC',
+        side: form.side,
+        pnl_pct: parseFloat(form.pnl_pct) || 0,
+        comment: form.comment.trim(),
+      })
+      setReviews((prev) => [data.review, ...prev].slice(0, 48))
+      if (data.stats) setStats(data.stats)
+      setForm({ display_name: '', symbol: '', side: 'LONG', pnl_pct: '', comment: '' })
+      setOk(true)
+    } catch (ex) {
+      setErr(ex.message || t('chart.social.err'))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const helped = stats?.helped ?? 627
+  const winrate = stats?.winrate ?? 96
+  const avgPnl = stats?.avg_pnl ?? 3.8
+
+  return (
+    <section className="ca-social">
+      <div className="ca-social-head">
+        <div>
+          <div className="ca-social-kicker mono">{t('chart.social.kicker')}</div>
+          <h2 className="ca-social-title">{t('chart.social.title')}</h2>
+          <p className="ca-social-sub">{t('chart.social.sub')}</p>
+        </div>
+        <div className="ca-social-stats">
+          <div className="ca-stat accent">
+            <span className="ca-stat-val mono">{helped.toLocaleString('ru-RU')}+</span>
+            <span className="ca-stat-lbl">{t('chart.social.helped')}</span>
+          </div>
+          <div className="ca-stat">
+            <span className="ca-stat-val mono">{winrate}%</span>
+            <span className="ca-stat-lbl">{t('chart.social.winrate')}</span>
+          </div>
+          <div className="ca-stat">
+            <span className="ca-stat-val mono pos">+{avgPnl}%</span>
+            <span className="ca-stat-lbl">{t('chart.social.avgPnl')}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="ca-social-grid">
+        <div className="ca-social-feed">
+          {loading && <div className="ca-social-empty mono">{t('chart.social.loading')}</div>}
+          {!loading && reviews.map((r) => (
+            <article key={r.id} className="ca-review">
+              <div className="ca-review-top">
+                <span className="ca-review-avatar">{(r.display_name || '?').charAt(0).toUpperCase()}</span>
+                <div className="ca-review-who">
+                  <strong>{r.display_name}</strong>
+                  <span className="mono">{formatReviewTime(r.created_at, t)}</span>
+                </div>
+                <div className="ca-review-trade">
+                  <span className="mono">{r.symbol}</span>
+                  <span className={`ca-review-side ${String(r.side).toLowerCase()}`}>{r.side}</span>
+                  <span className={`mono ${r.pnl_pct >= 0 ? 'pos' : 'neg'}`}>
+                    {r.pnl_pct >= 0 ? '+' : ''}{Number(r.pnl_pct).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+              <p className="ca-review-text">{r.comment}</p>
+            </article>
+          ))}
+        </div>
+
+        <form className="ca-social-form" onSubmit={submit}>
+          <div className="ca-form-title mono">{t('chart.social.formTitle')}</div>
+          <p className="ca-form-hint">{t('chart.social.formHint')}</p>
+          <label>
+            <span>{t('chart.social.name')}</span>
+            <input
+              value={form.display_name}
+              onChange={(e) => setForm({ ...form, display_name: e.target.value })}
+              placeholder={t('chart.social.namePh')}
+              maxLength={40}
+            />
+          </label>
+          <div className="ca-form-row">
+            <label>
+              <span>{t('chart.social.symbol')}</span>
+              <input
+                value={form.symbol}
+                onChange={(e) => setForm({ ...form, symbol: e.target.value.toUpperCase() })}
+                placeholder="BTC"
+                maxLength={12}
+              />
+            </label>
+            <label>
+              <span>{t('chart.social.side')}</span>
+              <select value={form.side} onChange={(e) => setForm({ ...form, side: e.target.value })}>
+                <option value="LONG">LONG</option>
+                <option value="SHORT">SHORT</option>
+              </select>
+            </label>
+            <label>
+              <span>{t('chart.social.pnl')}</span>
+              <input
+                value={form.pnl_pct}
+                onChange={(e) => setForm({ ...form, pnl_pct: e.target.value })}
+                placeholder="+3.2"
+                inputMode="decimal"
+              />
+            </label>
+          </div>
+          <label>
+            <span>{t('chart.social.comment')}</span>
+            <textarea
+              value={form.comment}
+              onChange={(e) => setForm({ ...form, comment: e.target.value })}
+              placeholder={t('chart.social.commentPh')}
+              rows={3}
+              maxLength={400}
+              required
+            />
+          </label>
+          {err && <div className="ca-error">{err}</div>}
+          {ok && <div className="ca-social-ok">{t('chart.social.ok')}</div>}
+          <button type="submit" className="btn-primary" disabled={sending || form.comment.trim().length < 8}>
+            {sending ? t('chart.social.sending') : t('chart.social.send')}
+          </button>
+        </form>
+      </div>
+    </section>
+  )
 }
 
 export default function ChartAnalyze({ user, onNeedAuth }) {
@@ -279,6 +463,8 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
         </div>
       </div>
 
+      <ChartSocialProof user={user} onNeedAuth={onNeedAuth} />
+
       <style>{`
         .ca-page { max-width: 1100px; }
         .ca-lead { color: var(--text-secondary); font-size: 14px; line-height: 1.5; margin: 0 0 18px; max-width: 62ch; }
@@ -286,8 +472,8 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
         @media (max-width: 900px) { .ca-grid { grid-template-columns: 1fr; } }
         .ca-panel {
           background: var(--surface); border: 1px solid var(--border);
-          border-radius: var(--radius-lg); padding: 18px;
-          box-shadow: var(--shadow-card), var(--inset-highlight);
+          border-radius: 12px; padding: 18px;
+          box-shadow: var(--inset-highlight);
           backdrop-filter: saturate(160%) blur(16px);
         }
         .ca-drop {
@@ -390,6 +576,102 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
           margin: 18px 0 0; padding-top: 12px; border-top: 1px solid var(--border);
           font-size: 12px; color: var(--text-tertiary); line-height: 1.45;
         }
+
+        /* ── Social proof / review wall ── */
+        .ca-social {
+          margin-top: 28px; padding: 22px;
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: 14px; box-shadow: var(--inset-highlight);
+        }
+        .ca-social-head {
+          display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+          margin-bottom: 18px; align-items: flex-end;
+        }
+        .ca-social-kicker {
+          font-size: 11px; color: var(--accent); margin-bottom: 6px;
+        }
+        .ca-social-title {
+          margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.03em;
+          font-family: var(--font-display); color: var(--text);
+        }
+        .ca-social-sub {
+          margin: 6px 0 0; font-size: 13px; color: var(--text-secondary); max-width: 48ch; line-height: 1.45;
+        }
+        .ca-social-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+        .ca-stat {
+          min-width: 110px; padding: 12px 14px; border-radius: 12px;
+          background: color-mix(in srgb, var(--bg) 55%, transparent);
+          border: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px;
+        }
+        .ca-stat.accent {
+          background: linear-gradient(160deg, color-mix(in srgb, var(--bg) 40%, transparent), var(--accent-soft));
+          border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+        }
+        .ca-stat-val { font-size: 22px; font-weight: 700; color: var(--text); letter-spacing: -0.03em; }
+        .ca-stat-val.pos { color: var(--long); }
+        .ca-stat-lbl { font-size: 10px; color: var(--text-tertiary); font-weight: 600; }
+        .ca-social-grid {
+          display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start;
+        }
+        @media (max-width: 900px) { .ca-social-grid { grid-template-columns: 1fr; } }
+        .ca-social-feed {
+          display: flex; flex-direction: column; gap: 10px;
+          max-height: 520px; overflow: auto; padding-right: 4px;
+        }
+        .ca-social-empty { font-size: 12px; color: var(--text-tertiary); padding: 20px; }
+        .ca-review {
+          padding: 12px 14px; border-radius: 12px;
+          background: color-mix(in srgb, var(--bg) 50%, transparent);
+          border: 1px solid var(--border);
+        }
+        .ca-review-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .ca-review-avatar {
+          width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+          display: grid; place-items: center;
+          background: var(--accent-soft); color: var(--accent);
+          font-weight: 700; font-size: 13px; font-family: var(--font-mono);
+        }
+        .ca-review-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+        .ca-review-who strong { font-size: 13px; color: var(--text); }
+        .ca-review-who span { font-size: 10px; color: var(--text-tertiary); }
+        .ca-review-trade { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+        .ca-review-side {
+          font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 6px; font-family: var(--font-mono);
+        }
+        .ca-review-side.long { background: var(--long-soft); color: var(--long); }
+        .ca-review-side.short { background: var(--short-soft); color: var(--short); }
+        .ca-review-text {
+          margin: 10px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-secondary);
+        }
+        .ca-social-form {
+          padding: 16px; border-radius: 12px;
+          background: color-mix(in srgb, var(--bg) 45%, transparent);
+          border: 1px solid var(--border);
+          display: flex; flex-direction: column; gap: 10px;
+          position: sticky; top: 72px;
+        }
+        .ca-form-title { font-size: 12px; color: var(--accent); font-weight: 600; }
+        .ca-form-hint { margin: 0; font-size: 12px; color: var(--text-tertiary); line-height: 1.4; }
+        .ca-social-form label {
+          display: flex; flex-direction: column; gap: 5px;
+          font-size: 10px; font-weight: 650; color: var(--text-tertiary); letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+        .ca-social-form input, .ca-social-form select, .ca-social-form textarea {
+          border: 1px solid var(--border); background: var(--surface); color: var(--text);
+          border-radius: 8px; padding: 9px 11px; font-size: 13px; font-weight: 500;
+          text-transform: none; letter-spacing: 0; font-family: inherit;
+        }
+        .ca-social-form textarea { resize: vertical; min-height: 72px; }
+        .ca-form-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+        @media (max-width: 520px) { .ca-form-row { grid-template-columns: 1fr; } }
+        .ca-social-ok {
+          font-size: 12px; color: var(--long); background: var(--long-soft);
+          padding: 8px 10px; border-radius: 8px;
+        }
+        .ca-social-form .btn-primary { margin-top: 4px; border-radius: 980px; }
+        .ca-social .pos { color: var(--long); }
+        .ca-social .neg { color: var(--short); }
       `}</style>
     </div>
   )

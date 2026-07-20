@@ -861,6 +861,45 @@ async def ai_chart_analyze(req: ChartAnalyzeRequest, authorization: str | None =
     return {"analysis": result, "used": usage['count'], "limit": limit}
 
 
+class ChartReviewRequest(BaseModel):
+    display_name: str = ""
+    symbol: str = "BTC"
+    side: str = "LONG"
+    pnl_pct: float = 0.0
+    comment: str
+
+
+@app.get("/api/chart-reviews")
+def get_chart_reviews(limit: int = 40):
+    try:
+        database._seed_chart_reviews_if_needed()
+    except Exception:
+        pass
+    return {
+        "stats": database.chart_review_stats(),
+        "reviews": database.list_chart_reviews(limit=limit),
+    }
+
+
+@app.post("/api/chart-reviews")
+def post_chart_review(req: ChartReviewRequest, user=Depends(require_user)):
+    name = (req.display_name or "").strip() or (user.get("email") or "Trader").split("@")[0]
+    try:
+        row = database.add_chart_review(
+            user_id=user["id"],
+            display_name=name,
+            symbol=req.symbol,
+            side=req.side,
+            pnl_pct=req.pnl_pct,
+            comment=req.comment,
+        )
+    except ValueError as e:
+        if str(e) == "comment_too_short":
+            raise HTTPException(400, "Комментарий слишком короткий")
+        raise HTTPException(400, str(e))
+    return {"ok": True, "review": row, "stats": database.chart_review_stats()}
+
+
 class AIChatRequest(BaseModel):
     messages: list[dict]
 
