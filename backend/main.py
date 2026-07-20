@@ -744,7 +744,7 @@ def _normalize_chart_result(raw: dict, lang: str = "ru") -> dict:
     # если после нормализации ушли в flat — подмени take
     if bias == 'flat' and any(w in take.lower() for w in ('лонг', 'шорт', 'long', 'short')):
         # оставим take модели, если она сама сказала «не лез»; иначе дефолт
-        if not any(w in take.lower() for w in ('не лез', 'подожд', 'wouldn't', 'wait', 'nie wchod', 'poczek')):
+        if not any(w in take.lower() for w in ('не лез', 'подожд', "wouldn't", 'wait', 'nie wchod', 'poczek')):
             take = _default_take('flat', lang)
 
     disclaimer = (raw.get('disclaimer') or '').strip() or (
