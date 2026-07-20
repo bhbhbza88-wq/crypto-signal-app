@@ -67,6 +67,51 @@ export const api = {
   },
   getStats: () => get('/stats'),
   aiChat: (messages) => post('/ai/chat', { messages }),
+  aiChatStream: async (messages, { onToken, onDone, onError } = {}) => {
+    const res = await fetch(`${BASE_URL}/ai/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ messages }),
+    })
+    if (res.status === 401) handleUnauthorized()
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      const msg = data.detail || `Request failed: /ai/chat/stream`
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg))
+    }
+    const reader = res.body?.getReader()
+    if (!reader) throw new Error('Stream unavailable')
+    const decoder = new TextDecoder()
+    let buf = ''
+    let used = null
+    let limit = null
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const parts = buf.split('\n')
+      buf = parts.pop() || ''
+      for (const line of parts) {
+        const trimmed = line.trim()
+        if (!trimmed.startsWith('data:')) continue
+        const raw = trimmed.slice(5).trim()
+        if (!raw || raw === '[DONE]') continue
+        let ev
+        try { ev = JSON.parse(raw) } catch { continue }
+        if (ev.error) {
+          onError?.(ev.error)
+          throw new Error(ev.error)
+        }
+        if (ev.t) onToken?.(ev.t)
+        if (ev.done) {
+          used = ev.used
+          limit = ev.limit
+          onDone?.({ used, limit })
+        }
+      }
+    }
+    return { used, limit }
+  },
   chartAnalyze: (body) => post('/ai/chart-analyze', body),
   adminGetTraders: () => get('/admin/traders'),
   adminCreateTrader: (data) => post('/admin/traders', data),

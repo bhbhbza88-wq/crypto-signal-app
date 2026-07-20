@@ -864,113 +864,62 @@ class AIChatRequest(BaseModel):
 
 
 def _ai_strategy_knowledge() -> str:
-    """Стабильный блок знаний о продукте/логике — без школьного упрощения."""
     mode = getattr(nfi_strategy, "STRATEGY_MODE", "momentum")
-    return "\n".join([
-        "ПРОДУКТ NOWICKI: маркетплейс/реле сигналов. Пользователь видит открытые сетапы "
-        "(часто от Telegram-трейдеров и ручного/webhook ввода), а не «магический бот, который всегда прав».",
-        f"ВНУТРЕННИЙ СКАНЕР V8: режим STRATEGY_MODE={mode}; авто-открытие по скану сейчас ВЫКЛЮЧЕНО "
-        "(AUTO_SCAN_ENABLED=false) — живые позиции в основном от внешних авторов + трекер.",
-        "ТРЕКЕР: ведёт TP1/TP2/TP3, стоп, BE после TP1, trailing; закрытие пишет в history с result/pnl.",
-        "РЕЖИМЫ/МЕТРИКИ, которые ты можешь объяснять профессионально: ADX (сила тренда, порог ~22), "
-        "режим UPTREND/DOWNTREND/CHOP по BTC и альте, R:R до стопа/TP, инвалидация сетапа, "
-        "корреляция с BTC, ликвидность/стоп-хант как риск-гипотеза (не как факт), position sizing по риску.",
-        "НЕ путай: бумажные стратегии xsec/trend в API — отдельные эксперименты; основной UX — сигналы + история.",
-    ])
+    return (
+        f"NOWICKI: реле сигналов (часто TG/webhook), не «магический бот». "
+        f"Сканер V8 mode={mode}, авто-скан выкл. Трекер ведёт TP/стоп/BE. "
+        "Можешь кратко говорить про ADX, режим рынка, R:R, инвалидацию — без лекций."
+    )
 
 
 def _ai_market_context() -> str:
-    """Системный промпт: экспертный тон + живые данные платформы."""
+    """Короткий живой промпт + урезанные данные (быстрее и менее шаблонно)."""
     lines = [
-        "Ты — Nick, senior crypto desk analyst / risk mentor платформы NOWICKI.",
-        "Уровень: профессиональный трейдер и аналитик, не школьный репетитор и не YouTube-инфоцыган.",
+        "Ты — Nick с NOWICKI. Пишешь как живой трейдер в терминале: коротко, по-человечески, без канцелярита.",
+        "Не AI-помощник и не «desk analyst» в каждом абзаце.",
         "",
-        "КАК ДУМАТЬ:",
-        "- Разбирай рынок через: bias (направление) → setup (триггер) → invalidation → risk (R, стоп) → plan.",
-        "- Если есть открытый сигнал в данных — опирайся на КОНКРЕТНЫЕ уровни entry/stop/TP и причины входа.",
-        "- Отличай факт (цена, уровень, winrate из данных) от гипотезы (почему цена может сходить к TP).",
-        "- Для «почему вошли» объясняй confluence: тренд/режим, структура, импульс, риск до стопа — без воды.",
-        "- Если пользователь новичок и явно просит «простыми словами» — упрости. Иначе пиши на уровне трейдера.",
+        "СТИЛЬ:",
+        "- Отвечай как в чате/терминале: короткие фразы, можно «хм», «смотри», «короче».",
+        "- Никаких шаблонов Bias / Setup / Invalidation / Risk / Watch и маркированных простыней без нужды.",
+        "- Простой вопрос → 1–4 коротких строки. Разбор → живым текстом, не чеклистом.",
+        "- Не начинай одинаково («Конечно!», «Отличный вопрос», «Давай разберём»).",
+        "- Язык ответа = язык последнего сообщения пользователя.",
         "",
-        "ТОН: уверенный, точный, плотный. Можно 1 короткая метафора трейдера, но не мемы и не сюсюканье.",
-        "Язык ответа = язык последнего сообщения пользователя (RU/EN/PL).",
-        "",
-        "ЖЕЛЕЗНЫЕ ПРАВИЛА:",
-        "- Не обещай прибыль, иксы, «100% зайдёт».",
-        "- Не давай персональных инвест-советов «купи/продай весь депозит».",
-        "- Не гадай точную будущую цену; давай сценарии с условиями.",
-        "- Если данных нет — скажи прямо, предложи что смотреть дальше.",
-        "- Не выдумывай сигналы/цифры, которых нет в блоке ДАННЫЕ.",
-        "",
-        "ФОРМАТ (когда уместно): короткие абзацы или маркеры; для разбора сетапа структура "
-        "Bias / Setup / Invalidation / Risk / Watch. Без длинных лекций «что такое свеча».",
+        "ПРАВИЛА:",
+        "- Не обещай прибыль / 100%. Не «покупай всё».",
+        "- Не выдумывай цены и сигналы вне блока ДАННЫЕ.",
+        "- Нет данных — скажи прямо.",
         "",
         _ai_strategy_knowledge(),
         "",
-        "═══ ДАННЫЕ ПЛАТФОРМЫ (сейчас) ═══",
+        "═══ ДАННЫЕ ═══",
     ]
 
     try:
-        btc = api_call(exchange.fetch_ticker, 'BTC/USDT') or {}
-        eth = api_call(exchange.fetch_ticker, 'ETH/USDT') or {}
-        lines.append(
-            f"ЦЕНЫ 24ч: BTC last={btc.get('last')} chg={btc.get('percentage')}% "
-            f"high={btc.get('high')} low={btc.get('low')}; "
-            f"ETH last={eth.get('last')} chg={eth.get('percentage')}%."
-        )
-    except Exception:
-        pass
-
-    try:
         ov = data_layer.get_market_overview()
-        if ov and ov.get('symbols'):
-            syms = ov['symbols']
+        if ov:
             lines.append(
-                f"СКРИНЕР: btc_regime={ov.get('btc_regime')} | "
-                f"uptrend={ov.get('uptrend_count')} downtrend={ov.get('downtrend_count')} "
-                f"chop={ov.get('chop_count')}."
+                f"режим BTC={ov.get('btc_regime')} | "
+                f"up={ov.get('uptrend_count')} dn={ov.get('downtrend_count')} chop={ov.get('chop_count')}"
             )
-            up = sorted([s for s in syms if s['regime'] == 'UPTREND'], key=lambda s: -s['adx'])[:5]
-            dn = sorted([s for s in syms if s['regime'] == 'DOWNTREND'], key=lambda s: -s['adx'])[:5]
-            if up:
-                lines.append("Топ UPTREND: " + ", ".join(
-                    f"{s['symbol'].replace('/USDT','')} ADX={s['adx']}" for s in up))
-            if dn:
-                lines.append("Топ DOWNTREND: " + ", ".join(
-                    f"{s['symbol'].replace('/USDT','')} ADX={s['adx']}" for s in dn))
-            # Полный universe 39 пар не шлём — жрёт токены без пользы для большинства вопросов
-    except Exception:
-        pass
-
-    try:
-        import trend_strategy
-        ph = trend_strategy.get_market_phase()
-        if ph:
-            lines.append(
-                f"ФАЗА BTC (инфо, не торговый сигнал): phase={ph.get('phase')} "
-                f"momentum_60d={ph.get('momentum_60d_pct')}%."
-            )
-    except Exception:
-        pass
-
-    try:
-        risk = get_risk_status()
-        if risk:
-            lines.append(f"RISK STATUS сканера: {json.dumps(risk, ensure_ascii=False)[:800]}")
+            syms = ov.get('symbols') or []
+            hot = sorted(
+                [s for s in syms if s.get('regime') in ('UPTREND', 'DOWNTREND')],
+                key=lambda s: -float(s.get('adx') or 0),
+            )[:6]
+            if hot:
+                lines.append("горячие: " + ", ".join(
+                    f"{s['symbol'].replace('/USDT','')} {s.get('regime')} ADX={s.get('adx')}"
+                    for s in hot
+                ))
     except Exception:
         pass
 
     try:
         trades = db.load_trades()
         if trades:
-            lines.append(f"ОТКРЫТЫХ ПОЗИЦИЙ: {len(trades)}")
-            for sym, t in list(trades.items())[:10]:
-                reasons = t.get('entry_reasons_json') or "[]"
-                try:
-                    reasons_list = json.loads(reasons) if isinstance(reasons, str) else reasons
-                except Exception:
-                    reasons_list = []
-                reasons_txt = "; ".join(str(r) for r in (reasons_list or [])[:8]) or "—"
+            lines.append(f"открыто: {len(trades)}")
+            for sym, t in list(trades.items())[:6]:
                 entry = float(t.get('entry') or 0)
                 stop = float(t.get('stop') or 0)
                 tp1 = float(t.get('tp1') or 0)
@@ -978,48 +927,40 @@ def _ai_market_context() -> str:
                 reward_pct = abs(tp1 - entry) / entry * 100 if entry else 0
                 rr = (reward_pct / risk_pct) if risk_pct else 0
                 lines.append(
-                    f"• {sym} {t.get('signal')} entry={t.get('entry')} stop={t.get('stop')} "
-                    f"TP1={t.get('tp1')} TP2={t.get('tp2')} TP3={t.get('tp3')} "
-                    f"score={t.get('score')} regime={t.get('regime')} "
-                    f"tp1_hit={bool(t.get('tp1_hit'))} be={bool(t.get('be_hit'))} "
-                    f"opened={t.get('opened_at')} risk≈{risk_pct:.2f}% to_tp1≈{reward_pct:.2f}% R:R≈{rr:.2f} "
-                    f"| reasons: {reasons_txt}"
+                    f"• {sym} {t.get('signal')} e={t.get('entry')} sl={t.get('stop')} "
+                    f"tp1={t.get('tp1')} R:R≈{rr:.2f} regime={t.get('regime')}"
                 )
         else:
-            lines.append("ОТКРЫТЫХ СИГНАЛОВ СЕЙЧАС НЕТ.")
+            lines.append("открытых сигналов нет")
     except Exception:
         pass
 
     try:
         stats = db.get_stats_summaries()
+        w = stats.get('week') or {}
         lines.append(
-            "СТАТИСТИКА HISTORY: "
-            f"today={json.dumps(stats.get('today'), ensure_ascii=False)} | "
-            f"week={json.dumps(stats.get('week'), ensure_ascii=False)} | "
-            f"all_time={json.dumps(stats.get('all_time'), ensure_ascii=False)}"
+            f"неделя: wr={w.get('winrate')} trades={w.get('total')} pnl={w.get('total_pnl')}"
         )
     except Exception:
         pass
 
     try:
-        hist = db.load_history(limit=12)
+        hist = db.load_history(limit=6)
         if hist:
-            parts = []
-            for h in hist[:12]:
-                parts.append(
-                    f"{h.get('date')} {h.get('symbol')} {h.get('signal')} "
-                    f"{h.get('result')} pnl={h.get('pnl')}"
-                )
-            lines.append("ПОСЛЕДНИЕ ЗАКРЫТИЯ: " + " || ".join(parts))
+            parts = [
+                f"{h.get('symbol')} {h.get('result')} {h.get('pnl')}"
+                for h in hist[:6]
+            ]
+            lines.append("закрытия: " + " | ".join(parts))
     except Exception:
         pass
 
-    lines.append("═══ КОНЕЦ ДАННЫХ ═══")
+    lines.append("═══ END ═══")
     return "\n".join(lines)
 
 
-@app.post("/api/ai/chat")
-def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)):
+def _ai_chat_prepare(req: AIChatRequest, authorization: str | None):
+    """Общая подготовка: auth, лимит, сообщения. Возвращает (user, msgs, usage, limit)."""
     user = auth.user_from_token(_token_from_header(authorization))
     if not user:
         raise HTTPException(status_code=401, detail="Войди в аккаунт, чтобы пользоваться AI-ассистентом")
@@ -1033,34 +974,49 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
     if not usage or usage['date'] != today:
         usage = {'date': today, 'count': 0}
     if usage['count'] >= limit:
-        raise HTTPException(status_code=429,
-                            detail=f"Дневной лимит AI-запросов исчерпан ({limit}/день на тарифе {tier}). "
-                                   f"Лимит обновится завтра.")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Дневной лимит AI-запросов исчерпан ({limit}/день на тарифе {tier}). "
+                   f"Лимит обновится завтра.",
+        )
 
     msgs = []
-    for m in req.messages[-20:]:
+    for m in req.messages[-12:]:
         role = m.get('role')
         content = m.get('content')
         if role in ('user', 'assistant') and isinstance(content, str):
-            msgs.append({'role': role, 'content': content[:6000]})
+            msgs.append({'role': role, 'content': content[:4000]})
     if not msgs or msgs[-1]['role'] != 'user':
         raise HTTPException(status_code=400, detail="Некорректный формат сообщений")
 
     msgs.insert(0, {'role': 'system', 'content': _ai_market_context()})
+    return user, msgs, usage, limit
 
-    payload = json.dumps({
-        'model': AI_MODEL,
-        'max_tokens': 900,
-        'temperature': 0.45,
+
+def _ai_chat_payload(msgs: list, *, stream: bool = False) -> dict:
+    # Flash-lite быстрее; chat model если явно задан через env
+    model = os.getenv("OPENROUTER_MODEL_CHAT") or ai_client.MODEL_FAST or AI_MODEL
+    return {
+        'model': model,
+        'max_tokens': 420,
+        'temperature': 0.75,
         'messages': msgs,
-    }).encode()
+        'stream': stream,
+    }
+
+
+@app.post("/api/ai/chat")
+def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)):
+    user, msgs, usage, limit = _ai_chat_prepare(req, authorization)
+
+    payload = json.dumps(_ai_chat_payload(msgs, stream=False)).encode()
     request = urllib.request.Request(
         ai_client.openai_chat_url(),
         data=payload,
         headers=ai_client.openai_auth_headers(),
     )
     try:
-        with urllib.request.urlopen(request, timeout=90) as resp:
+        with urllib.request.urlopen(request, timeout=45) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         try:
@@ -1075,6 +1031,64 @@ def ai_chat(req: AIChatRequest, authorization: str | None = Header(default=None)
     usage['count'] += 1
     _ai_usage[user['id']] = usage
     return {"reply": reply, "used": usage['count'], "limit": limit}
+
+
+@app.post("/api/ai/chat/stream")
+async def ai_chat_stream(req: AIChatRequest, authorization: str | None = Header(default=None)):
+    """SSE: токены по мере генерации — на фронте печатается как код."""
+    from fastapi.responses import StreamingResponse
+    import httpx
+
+    user, msgs, usage, limit = _ai_chat_prepare(req, authorization)
+    body = _ai_chat_payload(msgs, stream=True)
+    url = ai_client.openai_chat_url()
+    headers = ai_client.openai_auth_headers()
+
+    async def event_gen():
+        full = []
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=15.0)) as client:
+                async with client.stream("POST", url, json=body, headers=headers) as resp:
+                    if resp.status_code >= 400:
+                        err_txt = (await resp.aread()).decode("utf-8", errors="replace")[:400]
+                        yield f"data: {json.dumps({'error': err_txt or 'provider error'}, ensure_ascii=False)}\n\n"
+                        return
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        if line.startswith(":"):
+                            continue
+                        if not line.startswith("data:"):
+                            continue
+                        raw = line[5:].strip()
+                        if raw == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(raw)
+                        except Exception:
+                            continue
+                        delta = ((chunk.get("choices") or [{}])[0].get("delta") or {})
+                        token = delta.get("content") or ""
+                        if token:
+                            full.append(token)
+                            yield f"data: {json.dumps({'t': token}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)[:200]}, ensure_ascii=False)}\n\n"
+            return
+
+        usage['count'] += 1
+        _ai_usage[user['id']] = usage
+        yield f"data: {json.dumps({'done': True, 'used': usage['count'], 'limit': limit}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 # ── API endpoints ────────────────────────────────────────────────
 

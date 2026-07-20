@@ -10,8 +10,8 @@ function stripMd(text) {
     .replace(/^\s*[-*•]\s+/gm, '  • ')
 }
 
-function TermBlock({ role, content }) {
-  const lines = stripMd(content).split('\n')
+function TermBlock({ role, content, streaming }) {
+  const lines = stripMd(content || ' ').split('\n')
   const prompt = role === 'user' ? 'you@nowicki ~ %' : 'nick@desk ~ %'
   const tone = role === 'user' ? 'user' : 'asst'
 
@@ -22,7 +22,10 @@ function TermBlock({ role, content }) {
           <span className="term-gutter">
             {i === 0 ? <span className="term-prompt">{prompt} </span> : null}
           </span>
-          <span className="term-text">{line || ' '}</span>
+          <span className="term-text">
+            {line || ' '}
+            {streaming && i === lines.length - 1 ? <span className="term-cursor blink">█</span> : null}
+          </span>
         </div>
       ))}
     </div>
@@ -36,40 +39,91 @@ export default function AIChat() {
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [streaming, setStreaming] = useState(false)
   const [quota, setQuota] = useState(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
+  }, [messages, loading, streaming])
 
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
 
+  function appendAssistant(chunk) {
+    setMessages(prev => {
+      const next = [...prev]
+      const last = next[next.length - 1]
+      if (!last || last.role !== 'assistant') {
+        return [...prev, { role: 'assistant', content: chunk }]
+      }
+      next[next.length - 1] = { ...last, content: last.content + chunk }
+      return next
+    })
+  }
+
   async function sendMessage(text) {
     if (!text.trim() || loading) return
 
     const userMsg = { role: 'user', content: text }
+    const history = [
+      ...messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
+      userMsg,
+    ]
     setMessages(prev => [...prev, userMsg])
     setInput('')
     setLoading(true)
+    setStreaming(false)
+
+    let gotToken = false
 
     try {
-      const data = await api.aiChat([
-        ...messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
-        userMsg,
-      ])
-      setQuota({ used: data.used, limit: data.limit })
-      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
+      await api.aiChatStream(history, {
+        onToken: (token) => {
+          if (!gotToken) {
+            gotToken = true
+            setStreaming(true)
+            setMessages(prev => [...prev, { role: 'assistant', content: token }])
+          } else {
+            appendAssistant(token)
+          }
+        },
+        onDone: ({ used, limit }) => {
+          if (used != null) setQuota({ used, limit })
+        },
+      })
+
+      if (!gotToken) {
+        const data = await api.aiChat(history)
+        setQuota({ used: data.used, limit: data.limit })
+        const reply = data.reply || ''
+        setStreaming(true)
+        // мягкий набор при fallback (без стрима)
+        let acc = ''
+        setMessages(prev => [...prev, { role: 'assistant', content: '' }])
+        for (const ch of reply) {
+          acc += ch
+          const snap = acc
+          setMessages(prev => {
+            const next = [...prev]
+            next[next.length - 1] = { role: 'assistant', content: snap }
+            return next
+          })
+          if (ch !== ' ') await new Promise(r => setTimeout(r, 4))
+        }
+      }
     } catch (e) {
       setMessages(prev => [...prev, { role: 'assistant', content: `error: ${e.message}` }])
     } finally {
+      setStreaming(false)
       setLoading(false)
       requestAnimationFrame(() => inputRef.current?.focus())
     }
   }
+
+  const waiting = loading && !streaming && messages[messages.length - 1]?.role === 'user'
 
   return (
     <div className="ai-chat term-window" onClick={() => inputRef.current?.focus()}>
@@ -93,14 +147,19 @@ export default function AIChat() {
 # ─────────────────────────────────────────`}</pre>
 
         {messages.map((msg, i) => (
-          <TermBlock key={i} role={msg.role} content={msg.content} />
+          <TermBlock
+            key={i}
+            role={msg.role}
+            content={msg.content}
+            streaming={streaming && i === messages.length - 1 && msg.role === 'assistant'}
+          />
         ))}
 
-        {loading && (
+        {waiting && (
           <div className="term-block asst">
             <div className="term-line">
-              <span className="term-prompt">nick@desk ~ % </span>
-              <span className="term-cursor blink">█</span>
+              <span className="term-gutter"><span className="term-prompt">nick@desk ~ % </span></span>
+              <span className="term-text"><span className="term-cursor blink">█</span></span>
             </div>
           </div>
         )}
@@ -193,9 +252,7 @@ export default function AIChat() {
         }
         .term-block.asst .term-line { grid-template-columns: 14ch 1fr; }
         .term-gutter { flex-shrink: 0; white-space: pre; }
-        .term-prompt {
-          font-weight: 600; white-space: pre;
-        }
+        .term-prompt { font-weight: 600; white-space: pre; }
         .term-block.user .term-prompt { color: #4ec9b0; }
         .term-block.asst .term-prompt { color: #569cd6; }
         .term-text { color: #d4d4d4; white-space: pre-wrap; }
