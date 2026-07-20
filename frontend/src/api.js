@@ -114,7 +114,7 @@ export const api = {
   },
   chartAnalyze: (body) => post('/ai/chart-analyze', body),
   getChartReviews: (limit = 40) => get(`/chart-reviews?limit=${limit}`),
-  postChartReview: (body) => post('/chart-reviews', body),
+  voteChartHelp: (helped) => post('/chart-reviews/vote', { helped: !!helped }),
   adminGetTraders: () => get('/admin/traders'),
   adminCreateTrader: (data) => post('/admin/traders', data),
   adminAddSignal: (data) => post('/admin/add-signal', data),

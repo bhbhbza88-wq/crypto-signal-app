@@ -858,46 +858,49 @@ async def ai_chart_analyze(req: ChartAnalyzeRequest, authorization: str | None =
 
     usage['count'] += 1
     _chart_usage[user['id']] = usage
-    return {"analysis": result, "used": usage['count'], "limit": limit}
+    try:
+        database.grant_chart_vote_pending(user['id'])
+    except Exception as e:
+        print(f"[chart_analyze] vote pending: {e}")
+    return {
+        "analysis": result,
+        "used": usage['count'],
+        "limit": limit,
+        "can_vote": True,
+    }
 
 
-class ChartReviewRequest(BaseModel):
-    display_name: str = ""
-    symbol: str = "BTC"
-    side: str = "LONG"
-    pnl_pct: float = 0.0
-    comment: str
+class ChartHelpVoteRequest(BaseModel):
+    helped: bool
 
 
 @app.get("/api/chart-reviews")
-def get_chart_reviews(limit: int = 40):
+def get_chart_reviews(limit: int = 40, authorization: str | None = Header(default=None)):
     try:
         database._seed_chart_reviews_if_needed()
+        database._ensure_chart_vote_baseline()
     except Exception:
         pass
+    user = current_user(authorization)
+    uid = user["id"] if user else None
     return {
-        "stats": database.chart_review_stats(),
+        "stats": database.chart_review_stats(user_id=uid),
         "reviews": database.list_chart_reviews(limit=limit),
     }
 
 
-@app.post("/api/chart-reviews")
-def post_chart_review(req: ChartReviewRequest, user=Depends(require_user)):
-    name = (req.display_name or "").strip() or (user.get("email") or "Trader").split("@")[0]
+@app.post("/api/chart-reviews/vote")
+def post_chart_help_vote(req: ChartHelpVoteRequest, user=Depends(require_user)):
     try:
-        row = database.add_chart_review(
-            user_id=user["id"],
-            display_name=name,
-            symbol=req.symbol,
-            side=req.side,
-            pnl_pct=req.pnl_pct,
-            comment=req.comment,
-        )
+        stats = database.cast_chart_help_vote(user["id"], bool(req.helped))
     except ValueError as e:
-        if str(e) == "comment_too_short":
-            raise HTTPException(400, "Комментарий слишком короткий")
+        if str(e) == "need_analysis":
+            raise HTTPException(
+                400,
+                "Сначала загрузи скрин и получи разбор — потом можно поставить плюс или минус",
+            )
         raise HTTPException(400, str(e))
-    return {"ok": True, "review": row, "stats": database.chart_review_stats()}
+    return {"ok": True, "stats": stats}
 
 
 class AIChatRequest(BaseModel):

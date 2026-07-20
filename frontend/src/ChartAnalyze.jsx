@@ -94,21 +94,14 @@ function formatReviewTime(iso, t) {
   return t('chart.social.agoDays', { n: days })
 }
 
-function ChartSocialProof({ user, onNeedAuth }) {
+function ChartSocialProof({ user, onNeedAuth, analysisDone }) {
   const { t } = useI18n()
   const [stats, setStats] = useState(null)
   const [reviews, setReviews] = useState([])
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState(null)
-  const [ok, setOk] = useState(false)
-  const [form, setForm] = useState({
-    display_name: '',
-    symbol: '',
-    side: 'LONG',
-    pnl_pct: '',
-    comment: '',
-  })
+  const [justVoted, setJustVoted] = useState(null)
 
   const load = useCallback(async () => {
     try {
@@ -123,38 +116,39 @@ function ChartSocialProof({ user, onNeedAuth }) {
   }, [])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (analysisDone) {
+      setJustVoted(null)
+      load()
+    }
+  }, [analysisDone, load])
 
-  async function submit(e) {
-    e.preventDefault()
+  async function vote(helped) {
     if (!user) {
       onNeedAuth?.()
       return
     }
+    if (!canVote || sending) return
     setSending(true)
     setErr(null)
-    setOk(false)
     try {
-      const data = await api.postChartReview({
-        display_name: form.display_name.trim(),
-        symbol: form.symbol.trim() || 'BTC',
-        side: form.side,
-        pnl_pct: parseFloat(form.pnl_pct) || 0,
-        comment: form.comment.trim(),
-      })
-      setReviews((prev) => [data.review, ...prev].slice(0, 48))
+      const data = await api.voteChartHelp(helped)
       if (data.stats) setStats(data.stats)
-      setForm({ display_name: '', symbol: '', side: 'LONG', pnl_pct: '', comment: '' })
-      setOk(true)
+      setJustVoted(helped)
     } catch (ex) {
       setErr(ex.message || t('chart.social.err'))
+      load()
     } finally {
       setSending(false)
     }
   }
 
   const helped = stats?.helped ?? 627
-  const winrate = stats?.winrate ?? 96
-  const avgPnl = stats?.avg_pnl ?? 3.8
+  const notHelped = stats?.not_helped ?? 244
+  const winrate = stats?.winrate ?? 72
+  const canVote = !!(analysisDone && stats?.can_vote)
+  const votedLocked = analysisDone && !stats?.can_vote && (justVoted != null || stats?.my_vote != null)
+  const showVotePanel = !!user
 
   return (
     <section className="ca-social">
@@ -174,8 +168,8 @@ function ChartSocialProof({ user, onNeedAuth }) {
             <span className="ca-stat-lbl">{t('chart.social.winrate')}</span>
           </div>
           <div className="ca-stat">
-            <span className="ca-stat-val mono pos">+{avgPnl}%</span>
-            <span className="ca-stat-lbl">{t('chart.social.avgPnl')}</span>
+            <span className="ca-stat-val mono">{notHelped.toLocaleString('ru-RU')}</span>
+            <span className="ca-stat-lbl">{t('chart.social.notHelped')}</span>
           </div>
         </div>
       </div>
@@ -204,62 +198,48 @@ function ChartSocialProof({ user, onNeedAuth }) {
           ))}
         </div>
 
-        <form className="ca-social-form" onSubmit={submit}>
-          <div className="ca-form-title mono">{t('chart.social.formTitle')}</div>
-          <p className="ca-form-hint">{t('chart.social.formHint')}</p>
-          <label>
-            <span>{t('chart.social.name')}</span>
-            <input
-              value={form.display_name}
-              onChange={(e) => setForm({ ...form, display_name: e.target.value })}
-              placeholder={t('chart.social.namePh')}
-              maxLength={40}
-            />
-          </label>
-          <div className="ca-form-row">
-            <label>
-              <span>{t('chart.social.symbol')}</span>
-              <input
-                value={form.symbol}
-                onChange={(e) => setForm({ ...form, symbol: e.target.value.toUpperCase() })}
-                placeholder="BTC"
-                maxLength={12}
-              />
-            </label>
-            <label>
-              <span>{t('chart.social.side')}</span>
-              <select value={form.side} onChange={(e) => setForm({ ...form, side: e.target.value })}>
-                <option value="LONG">LONG</option>
-                <option value="SHORT">SHORT</option>
-              </select>
-            </label>
-            <label>
-              <span>{t('chart.social.pnl')}</span>
-              <input
-                value={form.pnl_pct}
-                onChange={(e) => setForm({ ...form, pnl_pct: e.target.value })}
-                placeholder="+3.2"
-                inputMode="decimal"
-              />
-            </label>
-          </div>
-          <label>
-            <span>{t('chart.social.comment')}</span>
-            <textarea
-              value={form.comment}
-              onChange={(e) => setForm({ ...form, comment: e.target.value })}
-              placeholder={t('chart.social.commentPh')}
-              rows={3}
-              maxLength={400}
-              required
-            />
-          </label>
+        <div className={`ca-social-vote ${canVote ? 'open' : 'locked'}`}>
+          <div className="ca-form-title mono">{t('chart.social.voteTitle')}</div>
+          {!showVotePanel ? (
+            <p className="ca-form-hint">{t('chart.social.voteNeedAuth')}</p>
+          ) : !analysisDone ? (
+            <p className="ca-form-hint">{t('chart.social.voteNeedAnalyze')}</p>
+          ) : canVote ? (
+            <>
+              <p className="ca-form-hint">{t('chart.social.voteHint')}</p>
+              <div className="ca-vote-row">
+                <button
+                  type="button"
+                  className="ca-vote-btn up"
+                  disabled={sending}
+                  onClick={() => vote(true)}
+                >
+                  <span className="ca-vote-ico">+</span>
+                  <span>{t('chart.social.voteYes')}</span>
+                </button>
+                <button
+                  type="button"
+                  className="ca-vote-btn down"
+                  disabled={sending}
+                  onClick={() => vote(false)}
+                >
+                  <span className="ca-vote-ico">−</span>
+                  <span>{t('chart.social.voteNo')}</span>
+                </button>
+              </div>
+            </>
+          ) : votedLocked ? (
+            <div className="ca-social-ok">
+              {(justVoted ?? stats?.my_vote)
+                ? t('chart.social.votedYes')
+                : t('chart.social.votedNo')}
+              <div className="ca-form-hint" style={{ marginTop: 8 }}>{t('chart.social.voteAgain')}</div>
+            </div>
+          ) : (
+            <p className="ca-form-hint">{t('chart.social.voteNeedAnalyze')}</p>
+          )}
           {err && <div className="ca-error">{err}</div>}
-          {ok && <div className="ca-social-ok">{t('chart.social.ok')}</div>}
-          <button type="submit" className="btn-primary" disabled={sending || form.comment.trim().length < 8}>
-            {sending ? t('chart.social.sending') : t('chart.social.send')}
-          </button>
-        </form>
+        </div>
       </div>
     </section>
   )
@@ -327,146 +307,315 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
   }
 
   const a = result
+  const urlLabel = a?.symbol
+    ? `nowicki.trade/chart/${String(a.symbol).replace('/', '')}`
+    : 'nowicki.trade/app/chart'
 
   return (
-    <div className="ca-page">
-      <p className="ca-lead">{t('chart.lead')}</p>
-
-      <div className="ca-grid">
-        <div className="ca-panel">
-          <div
-            className={`ca-drop ${preview ? 'has' : ''}`}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault()
-              onPick(e.dataTransfer.files?.[0])
-            }}
-            onClick={() => inputRef.current?.click()}
-          >
-            <input
-              ref={inputRef}
-              type="file"
-              accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp"
-              hidden
-              onChange={(e) => onPick(e.target.files?.[0])}
-            />
-            {preview ? (
-              <img src={preview} alt="" className="ca-preview" />
-            ) : (
-              <div className="ca-drop-empty">
-                <span className="ca-drop-ico">▣</span>
-                <strong>{t('chart.dropTitle')}</strong>
-                <span>{t('chart.dropHint')}</span>
-              </div>
-            )}
+    <div className="ca-safari">
+      <div className="sf-chrome">
+        <div className="sf-titlebar">
+          <div className="sf-lights" aria-hidden="true">
+            <span className="sf-dot close" />
+            <span className="sf-dot min" />
+            <span className="sf-dot max" />
           </div>
-
-          <label className="ca-q">
-            <span>{t('chart.question')}</span>
-            <textarea
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder={t('chart.questionPh')}
-              rows={2}
-              maxLength={300}
-            />
-          </label>
-
-          <div className="ca-actions">
-            <button className="btn-primary ca-run" disabled={!payload || loading} onClick={analyze}>
-              {loading ? t('chart.analyzing') : t('chart.run')}
-            </button>
-            {(preview || result) && (
-              <button type="button" className="ca-clear" onClick={clear}>{t('chart.clear')}</button>
-            )}
-            {quota && (
-              <span className="ca-quota">{t('chart.quota', { used: quota.used, limit: quota.limit })}</span>
-            )}
+          <div className="sf-tabs">
+            <div className="sf-tab active">
+              <span className="sf-tab-label">{t('chart.title')}</span>
+              <span className="sf-beta">BETA</span>
+            </div>
           </div>
-
-          {error && <div className="ca-error">{error}</div>}
         </div>
 
-        <div className="ca-panel ca-result">
-          {!a && !loading && (
-            <div className="ca-empty">
-              <h3>{t('chart.emptyTitle')}</h3>
-              <p>{t('chart.emptyBody')}</p>
-              <ul>
-                <li>{t('chart.rule1')}</li>
-                <li>{t('chart.rule2')}</li>
-                <li>{t('chart.rule3')}</li>
-              </ul>
-            </div>
-          )}
-
-          {loading && (
-            <div className="ca-empty">
-              <div className="ca-spinner" />
-              <p>{t('chart.analyzing')}</p>
-            </div>
-          )}
-
-          {a && !loading && (
-            <div className="ca-out">
-              <div className={`ca-take ${a.bias || 'flat'}`}>
-                <span className="ca-take-label">{t('chart.myTake')}</span>
-                <p>{a.take || t('chart.noReasons')}</p>
-              </div>
-
-              <div className="ca-out-head">
-                <BiasBadge bias={a.bias} t={t} />
-                <ConfBadge confidence={a.confidence} t={t} />
-                {!a.evidence_ok && <span className="ca-warn">{t('chart.weakEvidence')}</span>}
-              </div>
-
-              <div className="ca-meta">
-                {a.symbol && <span className="mono">{a.symbol}</span>}
-                {a.timeframe && <span>{a.timeframe}</span>}
-                {a.price_hint && <span className="mono">{a.price_hint}</span>}
-              </div>
-
-              {!!a.seen?.length && (
-                <section>
-                  <h4>{t('chart.seen')}</h4>
-                  <ul>{a.seen.map((x, i) => <li key={i}>{x}</li>)}</ul>
-                </section>
-              )}
-
-              <section>
-                <h4>{t('chart.reasons')}</h4>
-                <ul>{(a.reasons?.length ? a.reasons : [t('chart.noReasons')]).map((x, i) => <li key={i}>{x}</li>)}</ul>
-              </section>
-
-              <section className="ca-inv">
-                <h4>{t('chart.invalidation')}</h4>
-                <p>{a.invalidation}</p>
-              </section>
-
-              {!!a.risks?.length && (
-                <section>
-                  <h4>{t('chart.risks')}</h4>
-                  <ul>{a.risks.map((x, i) => <li key={i}>{x}</li>)}</ul>
-                </section>
-              )}
-
-              {!!a.watch?.length && (
-                <section>
-                  <h4>{t('chart.watch')}</h4>
-                  <ul>{a.watch.map((x, i) => <li key={i}>{x}</li>)}</ul>
-                </section>
-              )}
-
-              <p className="ca-disc">{a.disclaimer || t('chart.disclaimer')}</p>
-            </div>
-          )}
+        <div className="sf-toolbar">
+          <div className="sf-nav">
+            <button type="button" className="sf-nav-btn" disabled aria-label="Back">‹</button>
+            <button type="button" className="sf-nav-btn" disabled aria-label="Forward">›</button>
+            <button type="button" className="sf-nav-btn" onClick={clear} aria-label="Refresh">↻</button>
+          </div>
+          <div className="sf-urlbar">
+            <span className="sf-lock" aria-hidden="true" />
+            <span className="sf-url mono">{urlLabel}</span>
+            {loading && <span className="sf-pip" aria-hidden="true" />}
+          </div>
+          <div className="sf-toolbar-right">
+            {quota && (
+              <span className="sf-quota mono">{t('chart.quota', { used: quota.used, limit: quota.limit })}</span>
+            )}
+          </div>
         </div>
       </div>
 
-      <ChartSocialProof user={user} onNeedAuth={onNeedAuth} />
+      <div className="sf-page">
+        <p className="ca-lead">{t('chart.lead')}</p>
+
+        <div className="ca-grid">
+          <div className="ca-panel">
+            <div
+              className={`ca-drop ${preview ? 'has' : ''}`}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault()
+                onPick(e.dataTransfer.files?.[0])
+              }}
+              onClick={() => inputRef.current?.click()}
+            >
+              <input
+                ref={inputRef}
+                type="file"
+                accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp"
+                hidden
+                onChange={(e) => onPick(e.target.files?.[0])}
+              />
+              {preview ? (
+                <img src={preview} alt="" className="ca-preview" />
+              ) : (
+                <div className="ca-drop-empty">
+                  <span className="ca-drop-ico">▣</span>
+                  <strong>{t('chart.dropTitle')}</strong>
+                  <span>{t('chart.dropHint')}</span>
+                </div>
+              )}
+            </div>
+
+            <label className="ca-q">
+              <span>{t('chart.question')}</span>
+              <textarea
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                placeholder={t('chart.questionPh')}
+                rows={2}
+                maxLength={300}
+              />
+            </label>
+
+            <div className="ca-actions">
+              <button className="btn-primary ca-run" disabled={!payload || loading} onClick={analyze}>
+                {loading ? t('chart.analyzing') : t('chart.run')}
+              </button>
+              {(preview || result) && (
+                <button type="button" className="ca-clear" onClick={clear}>{t('chart.clear')}</button>
+              )}
+            </div>
+
+            {error && <div className="ca-error">{error}</div>}
+          </div>
+
+          <div className="ca-panel ca-result">
+            {!a && !loading && (
+              <div className="ca-empty">
+                <h3>{t('chart.emptyTitle')}</h3>
+                <p>{t('chart.emptyBody')}</p>
+                <ul>
+                  <li>{t('chart.rule1')}</li>
+                  <li>{t('chart.rule2')}</li>
+                  <li>{t('chart.rule3')}</li>
+                </ul>
+              </div>
+            )}
+
+            {loading && (
+              <div className="ca-empty">
+                <div className="ca-spinner" />
+                <p>{t('chart.analyzing')}</p>
+              </div>
+            )}
+
+            {a && !loading && (
+              <div className="ca-out">
+                <div className={`ca-take ${a.bias || 'flat'}`}>
+                  <span className="ca-take-label">{t('chart.myTake')}</span>
+                  <p>{a.take || t('chart.noReasons')}</p>
+                </div>
+
+                <div className="ca-out-head">
+                  <BiasBadge bias={a.bias} t={t} />
+                  <ConfBadge confidence={a.confidence} t={t} />
+                  {!a.evidence_ok && <span className="ca-warn">{t('chart.weakEvidence')}</span>}
+                </div>
+
+                <div className="ca-meta">
+                  {a.symbol && <span className="mono">{a.symbol}</span>}
+                  {a.timeframe && <span>{a.timeframe}</span>}
+                  {a.price_hint && <span className="mono">{a.price_hint}</span>}
+                </div>
+
+                {!!a.seen?.length && (
+                  <section>
+                    <h4>{t('chart.seen')}</h4>
+                    <ul>{a.seen.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                  </section>
+                )}
+
+                <section>
+                  <h4>{t('chart.reasons')}</h4>
+                  <ul>{(a.reasons?.length ? a.reasons : [t('chart.noReasons')]).map((x, i) => <li key={i}>{x}</li>)}</ul>
+                </section>
+
+                <section className="ca-inv">
+                  <h4>{t('chart.invalidation')}</h4>
+                  <p>{a.invalidation}</p>
+                </section>
+
+                {!!a.risks?.length && (
+                  <section>
+                    <h4>{t('chart.risks')}</h4>
+                    <ul>{a.risks.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                  </section>
+                )}
+
+                {!!a.watch?.length && (
+                  <section>
+                    <h4>{t('chart.watch')}</h4>
+                    <ul>{a.watch.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                  </section>
+                )}
+
+                <p className="ca-disc">{a.disclaimer || t('chart.disclaimer')}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <ChartSocialProof user={user} onNeedAuth={onNeedAuth} analysisDone={!!result} />
+      </div>
 
       <style>{`
-        .ca-page { max-width: 1100px; }
+        .ca-safari {
+          --sf-chrome: color-mix(in srgb, var(--surface) 88%, #8a8a90);
+          --sf-chrome-2: color-mix(in srgb, var(--surface-2) 70%, #6e6e73);
+          --sf-line: color-mix(in srgb, var(--border) 80%, #000);
+          display: flex; flex-direction: column;
+          min-height: calc(100vh - 56px - 50px);
+          border-radius: 12px; overflow: hidden;
+          background: var(--bg);
+          border: 1px solid var(--border);
+          box-shadow:
+            0 0 0 0.5px color-mix(in srgb, var(--border) 60%, transparent),
+            0 18px 48px color-mix(in srgb, #000 28%, transparent),
+            inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
+        }
+
+        .sf-chrome { flex-shrink: 0; }
+        .sf-titlebar {
+          display: flex; align-items: flex-end; gap: 10px;
+          padding: 10px 12px 0;
+          background: linear-gradient(180deg, var(--sf-chrome) 0%, var(--sf-chrome-2) 100%);
+          border-bottom: 1px solid var(--sf-line);
+          min-height: 44px;
+        }
+        .sf-lights {
+          display: flex; align-items: center; gap: 7px;
+          padding: 0 4px 12px; flex-shrink: 0;
+        }
+        .sf-dot {
+          width: 12px; height: 12px; border-radius: 50%;
+          box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.22);
+        }
+        .sf-dot.close { background: #ff5f57; }
+        .sf-dot.min { background: #febc2e; }
+        .sf-dot.max { background: #28c840; }
+
+        .sf-tabs {
+          display: flex; align-items: flex-end; gap: 2px;
+          flex: 1; min-width: 0; overflow: hidden;
+        }
+        .sf-tab {
+          display: flex; align-items: center; gap: 8px;
+          max-width: 240px; min-width: 120px;
+          padding: 8px 14px 9px;
+          border-radius: 9px 9px 0 0;
+          background: color-mix(in srgb, var(--bg) 55%, transparent);
+          border: 1px solid transparent;
+          border-bottom: none;
+          color: var(--text-secondary);
+          font-size: 12px; font-weight: 600;
+        }
+        .sf-tab.active {
+          background: var(--bg);
+          color: var(--text);
+          border-color: var(--sf-line);
+          box-shadow: 0 -1px 0 color-mix(in srgb, #fff 6%, transparent);
+          position: relative; z-index: 1;
+          margin-bottom: -1px; padding-bottom: 10px;
+        }
+        .sf-tab-label {
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          font-family: var(--font-ui);
+          letter-spacing: -0.01em;
+        }
+        .sf-beta {
+          flex-shrink: 0;
+          font-size: 9px; font-weight: 800; letter-spacing: 0.06em;
+          padding: 2px 6px; border-radius: 5px;
+          background: var(--accent-soft); color: var(--accent);
+          font-family: var(--font-mono);
+        }
+
+        .sf-toolbar {
+          display: grid; grid-template-columns: auto 1fr auto;
+          align-items: center; gap: 10px;
+          padding: 8px 12px;
+          background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+          border-bottom: 1px solid var(--border);
+        }
+        .sf-nav { display: flex; align-items: center; gap: 2px; }
+        .sf-nav-btn {
+          width: 28px; height: 28px; border-radius: 7px;
+          border: none; background: transparent;
+          color: var(--text-secondary); font-size: 16px; line-height: 1;
+          cursor: pointer; display: grid; place-items: center;
+        }
+        .sf-nav-btn:hover:not(:disabled) {
+          background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+          color: var(--text);
+        }
+        .sf-nav-btn:disabled { opacity: 0.35; cursor: default; }
+
+        .sf-urlbar {
+          display: flex; align-items: center; justify-content: center; gap: 8px;
+          min-height: 30px; padding: 0 14px;
+          border-radius: 9px;
+          background: color-mix(in srgb, var(--bg) 70%, var(--surface-2));
+          border: 1px solid var(--border);
+          box-shadow: inset 0 1px 2px color-mix(in srgb, #000 8%, transparent);
+          max-width: 520px; width: 100%; margin: 0 auto;
+        }
+        .sf-lock {
+          width: 14px; height: 14px; flex-shrink: 0;
+          display: grid; place-items: center;
+          font-size: 11px; line-height: 1; opacity: 0.75;
+        }
+        .sf-lock::before { content: '🔒'; }
+        .sf-url {
+          font-size: 12px; color: var(--text-secondary);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          letter-spacing: -0.01em;
+        }
+        .sf-pip {
+          width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+          background: var(--accent);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+          animation: sf-pulse 1s ease-in-out infinite;
+        }
+        @keyframes sf-pulse {
+          0%, 100% { opacity: 0.45; transform: scale(0.9); }
+          50% { opacity: 1; transform: scale(1); }
+        }
+        .sf-toolbar-right {
+          min-width: 72px; display: flex; justify-content: flex-end;
+        }
+        .sf-quota {
+          font-size: 11px; color: var(--text-tertiary); white-space: nowrap;
+        }
+
+        .sf-page {
+          flex: 1; min-height: 0; overflow: auto;
+          padding: 18px 18px 24px;
+          background: var(--bg);
+        }
+
         .ca-lead { color: var(--text-secondary); font-size: 14px; line-height: 1.5; margin: 0 0 18px; max-width: 62ch; }
         .ca-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         @media (max-width: 900px) { .ca-grid { grid-template-columns: 1fr; } }
@@ -507,7 +656,6 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
           border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
           border-radius: 980px; padding: 10px 16px; cursor: pointer; font-size: 13px; font-weight: 600;
         }
-        .ca-quota { margin-left: auto; font-size: 12px; color: var(--text-tertiary); }
         .ca-error {
           margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 13px;
           background: color-mix(in srgb, var(--danger, #e25) 12%, transparent);
@@ -650,28 +798,54 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
           display: flex; flex-direction: column; gap: 10px;
           position: sticky; top: 72px;
         }
+        .ca-social-vote {
+          padding: 18px 16px; border-radius: 12px;
+          background: color-mix(in srgb, var(--bg) 45%, transparent);
+          border: 1px solid var(--border);
+          display: flex; flex-direction: column; gap: 12px;
+          position: sticky; top: 72px;
+        }
+        .ca-social-vote.locked { opacity: 0.92; }
+        .ca-social-vote.open {
+          border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+          box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+        }
         .ca-form-title { font-size: 12px; color: var(--accent); font-weight: 600; }
         .ca-form-hint { margin: 0; font-size: 12px; color: var(--text-tertiary); line-height: 1.4; }
-        .ca-social-form label {
-          display: flex; flex-direction: column; gap: 5px;
-          font-size: 10px; font-weight: 650; color: var(--text-tertiary); letter-spacing: 0.04em;
-          text-transform: uppercase;
+        .ca-vote-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .ca-vote-btn {
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          gap: 6px; min-height: 96px; border-radius: 12px; cursor: pointer;
+          border: 1px solid var(--border); background: var(--surface);
+          color: var(--text); font-size: 13px; font-weight: 650;
+          transition: border-color .15s, background .15s, transform .12s;
         }
-        .ca-social-form input, .ca-social-form select, .ca-social-form textarea {
-          border: 1px solid var(--border); background: var(--surface); color: var(--text);
-          border-radius: 8px; padding: 9px 11px; font-size: 13px; font-weight: 500;
-          text-transform: none; letter-spacing: 0; font-family: inherit;
+        .ca-vote-btn:hover:not(:disabled) { transform: translateY(-1px); }
+        .ca-vote-btn:disabled { opacity: 0.6; cursor: wait; }
+        .ca-vote-btn.up:hover:not(:disabled), .ca-vote-btn.up.active {
+          border-color: color-mix(in srgb, var(--long) 45%, var(--border));
+          background: var(--long-soft); color: var(--long);
         }
-        .ca-social-form textarea { resize: vertical; min-height: 72px; }
-        .ca-form-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-        @media (max-width: 520px) { .ca-form-row { grid-template-columns: 1fr; } }
+        .ca-vote-btn.down:hover:not(:disabled), .ca-vote-btn.down.active {
+          border-color: color-mix(in srgb, var(--short) 45%, var(--border));
+          background: var(--short-soft); color: var(--short);
+        }
+        .ca-vote-ico {
+          font-size: 28px; font-weight: 700; line-height: 1;
+          font-family: var(--font-mono);
+        }
         .ca-social-ok {
           font-size: 12px; color: var(--long); background: var(--long-soft);
           padding: 8px 10px; border-radius: 8px;
         }
-        .ca-social-form .btn-primary { margin-top: 4px; border-radius: 980px; }
         .ca-social .pos { color: var(--long); }
         .ca-social .neg { color: var(--short); }
+
+        @media (max-width: 640px) {
+          .sf-toolbar { grid-template-columns: auto 1fr; }
+          .sf-toolbar-right { grid-column: 1 / -1; justify-content: flex-start; }
+          .sf-urlbar { max-width: none; }
+        }
       `}</style>
     </div>
   )

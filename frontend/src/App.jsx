@@ -420,11 +420,7 @@ export default function App() {
             </section>
           )}
           {tab === 'chart_analyze' && (
-            <section className="section animate-in">
-              <div className="page-header">
-                <h1 className="page-title">{t('chart.title')} <span className="beta-tag">BETA</span></h1>
-                <p className="page-subtitle">{t('chart.subtitle')}</p>
-              </div>
+            <section className="section section-chart-desk animate-in">
               <ChartAnalyze
                 user={user}
                 onNeedAuth={() => { setAuthMode('login'); setShowAuth(true) }}

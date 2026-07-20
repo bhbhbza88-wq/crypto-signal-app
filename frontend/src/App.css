@@ -223,7 +223,8 @@
 .content { flex: 1; max-width: 1280px; width: 100%; margin: 0 auto; padding: 28px 32px 88px; display: flex; flex-direction: column; gap: 0; }
 .section { display: flex; flex-direction: column; gap: 14px; }
 .content:has(.section-ai-desk),
-.content:has(.dash-console) {
+.content:has(.dash-console),
+.content:has(.section-chart-desk) {
   max-width: none;
   width: 100%;
   margin: 0;
@@ -233,7 +234,17 @@
   min-height: 0;
 }
 .content:has(.dash-console) {
-  padding: 18px 20px 40px;
+  padding: 16px 18px 18px;
+  min-height: 0;
+}
+.content:has(.section-chart-desk) {
+  padding: 16px 18px 28px;
+  min-height: 0;
+}
+.section-chart-desk {
+  flex: 1;
+  min-height: 0;
+  gap: 0;
 }
 .section-ai-desk {
   flex: 1;
@@ -257,7 +268,16 @@
 .pos { color: var(--long) !important; } .neg { color: var(--short) !important; }
 
 /* ─── Dashboard console (Apple + IDE) ───────────────────────── */
-.dash-console { margin-top: 0; width: 100%; }
+.dash-console {
+  margin-top: 0;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  height: calc(100vh - 56px - 34px);
+  max-height: calc(100dvh - 56px - 34px);
+  display: flex;
+  flex-direction: column;
+}
 .dash-window {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -266,6 +286,11 @@
   box-shadow: var(--shadow-card), var(--inset-highlight);
   backdrop-filter: saturate(160%) blur(18px);
   width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 .dash-titlebar {
   display: grid;
@@ -306,7 +331,12 @@
   width: 6px; height: 6px; border-radius: 50%; background: var(--long);
   animation: pulse 2s infinite; display: block;
 }
-.dash-body { padding: 16px 22px 22px; }
+.dash-body {
+  padding: 16px 22px 22px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
 .dash-boot { display: none; }
 .dash-hero { display: none; }
 .dash-hero-text { display: none; }
@@ -446,7 +476,7 @@
   .dash-main-col .signals-grid {
     grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
   }
-  .content:has(.dash-console) { padding: 18px 24px 48px; }
+  .content:has(.dash-console) { padding: 16px 18px 18px; }
   .dash-body { padding: 24px 28px 30px; }
 }
 
@@ -457,8 +487,12 @@
   .burger { display: flex; }
   .content { padding: 18px 14px 80px; }
   .content:has(.section-ai-desk) { padding: 10px 10px 12px; }
-  .content:has(.dash-console) { padding: 12px 10px 32px; }
+  .content:has(.dash-console) { padding: 10px 10px 12px; }
   .section-ai-desk {
+    height: calc(100vh - 56px - 22px);
+    max-height: calc(100dvh - 56px - 22px);
+  }
+  .dash-console {
     height: calc(100vh - 56px - 22px);
     max-height: calc(100dvh - 56px - 22px);
   }

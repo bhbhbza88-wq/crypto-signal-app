@@ -351,12 +351,27 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chart_help_votes (
+                user_id INTEGER PRIMARY KEY,
+                helped INTEGER NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chart_vote_pending (
+                user_id INTEGER PRIMARY KEY,
+                pending INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )
+        """)
         # Чистим протухшие сессии/токены при старте, чтобы БД не пухла.
         now = datetime.now().isoformat()
         conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
         conn.execute("DELETE FROM auth_tokens WHERE expires_at <= ?", (now,))
 
     _seed_chart_reviews_if_needed()
+    _ensure_chart_vote_baseline()
 
 
 _CHART_REVIEW_SEEDS = [
@@ -392,17 +407,34 @@ _CHART_REVIEW_SEEDS = [
     ("Олег", "STX", "SHORT", 2.3, "Не пересидел — вышел по плану из разбора."),
     ("Vera", "ORDI", "LONG", 5.1, "Скрин был шумный, AI сказал «пока мимо» — спас депозит."),
     ("Илья", "FET", "LONG", 4.8, "AI-сектор, лонг после консолидации — плюс."),
+    ("Dima", "OP", "LONG", -1.2, "Разбор звал в лонг, рынок развернул — минус небольшой."),
+    ("Катя", "SOL", "SHORT", -0.8, "Не помогло: шорт не зашёл, вышла по стопу."),
+    ("Mark", "ETH", "LONG", -2.1, "Ждал подтверждения слишком долго — уже не то."),
+    ("Никита", "BTC", "SHORT", -1.5, "Разбор мимо, лучше бы не лез."),
+    ("Alina", "ARB", "LONG", -0.6, "Плюса не вышло, но хотя бы стоп маленький."),
+    ("Pete", "SUI", "LONG", -1.8, "Не совпало с моим планом — в минус."),
+    ("Юра", "NEAR", "SHORT", -1.1, "Сигнал слабый оказался, закрыл в небольшой минус."),
+    ("Helen", "LINK", "LONG", -0.9, "Не помогло в этот раз."),
 ]
 
 
+def _ensure_chart_vote_baseline() -> None:
+    """База голосов: ~72% помощи (627 yes / 244 no)."""
+    if get_setting("chart_vote_yes") is not None:
+        return
+    set_setting("chart_vote_yes", "627")
+    set_setting("chart_vote_no", "244")
+    if get_setting("chart_helped_total") is None:
+        set_setting("chart_helped_total", "627")
+
+
 def _seed_chart_reviews_if_needed() -> None:
-    """Один раз наполняем витрину разборов и счётчик «помогли»."""
+    """Один раз наполняем витрину разборов."""
     if get_setting("chart_reviews_seeded") == "1":
         return
     with _lock, get_conn() as conn:
         n = conn.execute("SELECT COUNT(*) AS c FROM chart_reviews").fetchone()["c"]
         if n == 0:
-            # Распределяем даты за последние ~90 дней
             import random
             now = datetime.now()
             for i, (name, sym, side, pnl, text) in enumerate(_CHART_REVIEW_SEEDS):
@@ -415,13 +447,6 @@ def _seed_chart_reviews_if_needed() -> None:
                     "VALUES (NULL,?,?,?,?,?,1,?)",
                     (name, sym, side, float(pnl), text, ts),
                 )
-        # База «уже помогли» — больше 600, дальше растёт от реальных комментов
-        row = conn.execute("SELECT value FROM settings WHERE key='chart_helped_total'").fetchone()
-        if not row:
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('chart_helped_total', ?)",
-                ("627",),
-            )
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('chart_reviews_seeded', '1') "
             "ON CONFLICT(key) DO UPDATE SET value='1'"
@@ -438,76 +463,97 @@ def list_chart_reviews(limit: int = 40) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-def chart_review_stats() -> dict:
-    with get_conn() as conn:
-        helped = int(get_setting("chart_helped_total", "627") or 627)
-        row = conn.execute(
-            "SELECT COUNT(*) AS n, "
-            "AVG(pnl_pct) AS avg_pnl, "
-            "SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins "
-            "FROM chart_reviews"
-        ).fetchone()
-        n = int(row["n"] or 0)
-        wins = int(row["wins"] or 0)
-        avg_pnl = float(row["avg_pnl"] or 0)
-        winrate = round(100.0 * wins / n, 1) if n else 0.0
-        return {
-            "helped": helped,
-            "shown": n,
-            "winrate": winrate,
-            "avg_pnl": round(avg_pnl, 2),
-        }
+def chart_review_stats(user_id: int | None = None) -> dict:
+    _ensure_chart_vote_baseline()
+    yes = int(get_setting("chart_vote_yes", "627") or 627)
+    no = int(get_setting("chart_vote_no", "244") or 244)
+    total = yes + no
+    winrate = round(100.0 * yes / total, 1) if total else 0.0
+    my_vote = None
+    can_vote = False
+    if user_id is not None:
+        with get_conn() as conn:
+            pend = conn.execute(
+                "SELECT pending FROM chart_vote_pending WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+            can_vote = bool(pend and int(pend["pending"]) == 1)
+            row = conn.execute(
+                "SELECT helped FROM chart_help_votes WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+            if row is not None and not can_vote:
+                my_vote = bool(row["helped"])
+    return {
+        "helped": yes,
+        "not_helped": no,
+        "votes_total": total,
+        "winrate": winrate,
+        "my_vote": my_vote,
+        "can_vote": can_vote,
+    }
 
 
-def add_chart_review(
-    *,
-    user_id: int | None,
-    display_name: str,
-    symbol: str,
-    side: str,
-    pnl_pct: float,
-    comment: str,
-) -> dict:
-    name = " ".join((display_name or "").split())[:40] or "Trader"
-    sym = "".join(ch for ch in (symbol or "").upper() if ch.isalnum())[:16] or "BTC"
-    sd = (side or "LONG").upper()
-    if sd not in ("LONG", "SHORT"):
-        sd = "LONG"
-    try:
-        pnl = float(pnl_pct)
-    except (TypeError, ValueError):
-        pnl = 0.0
-    pnl = max(-50.0, min(80.0, pnl))
-    text = " ".join((comment or "").split())[:400]
-    if len(text) < 8:
-        raise ValueError("comment_too_short")
+def grant_chart_vote_pending(user_id: int) -> None:
+    """После успешного разбора скрина — один голос +/- доступен."""
     now = datetime.now().isoformat(timespec="seconds")
     with _lock, get_conn() as conn:
-        cur = conn.execute(
-            "INSERT INTO chart_reviews "
-            "(user_id, display_name, symbol, side, pnl_pct, comment, is_seed, created_at) "
-            "VALUES (?,?,?,?,?,?,0,?)",
-            (user_id, name, sym, sd, pnl, text, now),
+        conn.execute(
+            "INSERT INTO chart_vote_pending (user_id, pending, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET pending=1, updated_at=excluded.updated_at",
+            (user_id, 1, now),
         )
-        rid = cur.lastrowid
-        # Каждый новый отзыв с плюсом чуть поднимает счётчик «помогли»
-        bump = 1 if pnl > 0 else 0
-        if bump:
-            cur_helped = conn.execute(
-                "SELECT value FROM settings WHERE key='chart_helped_total'"
-            ).fetchone()
-            base = int(cur_helped["value"]) if cur_helped else 627
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('chart_helped_total', ?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (str(base + bump),),
-            )
-        row = conn.execute(
-            "SELECT id, display_name, symbol, side, pnl_pct, comment, is_seed, created_at "
-            "FROM chart_reviews WHERE id=?",
-            (rid,),
+
+
+def cast_chart_help_vote(user_id: int, helped: bool) -> dict:
+    """Один плюс/минус только если только что был разбор. Повторный клик без нового разбора — нельзя."""
+    _ensure_chart_vote_baseline()
+    now = datetime.now().isoformat(timespec="seconds")
+    want = 1 if helped else 0
+    with _lock, get_conn() as conn:
+        pend = conn.execute(
+            "SELECT pending FROM chart_vote_pending WHERE user_id=?",
+            (user_id,),
         ).fetchone()
-        return dict(row)
+        if not pend or int(pend["pending"]) != 1:
+            raise ValueError("need_analysis")
+
+        yes = int(
+            (conn.execute("SELECT value FROM settings WHERE key='chart_vote_yes'").fetchone() or {"value": "627"})["value"]
+        )
+        no = int(
+            (conn.execute("SELECT value FROM settings WHERE key='chart_vote_no'").fetchone() or {"value": "244"})["value"]
+        )
+        if want:
+            yes += 1
+        else:
+            no += 1
+
+        conn.execute(
+            "INSERT INTO chart_help_votes (user_id, helped, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET helped=excluded.helped, updated_at=excluded.updated_at",
+            (user_id, want, now),
+        )
+        conn.execute(
+            "UPDATE chart_vote_pending SET pending=0, updated_at=? WHERE user_id=?",
+            (now, user_id),
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('chart_vote_yes', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(yes),),
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('chart_vote_no', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(no),),
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('chart_helped_total', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(yes),),
+        )
+    return chart_review_stats(user_id=user_id)
 
 
 def get_setting(key: str, default: str | None = None) -> str | None:
