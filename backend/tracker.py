@@ -178,15 +178,14 @@ def check_trades():
     for symbol, trade in open_trades.items():
         try:
             ex = (trade.get('exchange') or 'bybit').lower().strip()
-            # Старые TG-сделки без свечей — догружаем в фоне, не на /api/signals
-            if not trade.get('candles_json'):
-                try:
-                    cj = fetch_candles_json(symbol, exchange_id=ex)
-                    if cj:
-                        trade['candles_json'] = cj
-                        db.upsert_trade(symbol, trade)
-                except Exception as e:
-                    print(f"[tracker] candles backfill {symbol}: {e}")
+            # Обновляем свечи для UI-графика (кэш 15с в data_layer)
+            try:
+                cj = fetch_candles_json(symbol, exchange_id=ex)
+                if cj and cj != trade.get('candles_json'):
+                    trade['candles_json'] = cj
+                    db.upsert_trade(symbol, trade)
+            except Exception as e:
+                print(f"[tracker] candles refresh {symbol}: {e}")
 
             ticker = fetch_ticker(symbol, ex)
             if not ticker or ticker.get('last') is None:

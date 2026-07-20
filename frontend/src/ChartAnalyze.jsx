@@ -86,8 +86,6 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
   const inputRef = useRef(null)
   const [preview, setPreview] = useState(null)
   const [payload, setPayload] = useState(null)
-  const [symbol, setSymbol] = useState('')
-  const [timeframe, setTimeframe] = useState('')
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -99,6 +97,7 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
     setPayload(null)
     setResult(null)
     setError(null)
+    setQuestion('')
     if (inputRef.current) inputRef.current.value = ''
   }, [])
 
@@ -131,8 +130,6 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
       const data = await api.chartAnalyze({
         image_base64: payload.base64,
         media_type: payload.mediaType,
-        symbol_hint: symbol.trim() || undefined,
-        timeframe_hint: timeframe.trim() || undefined,
         question: question.trim() || undefined,
         language: lang,
       })
@@ -178,27 +175,6 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
                 <span>{t('chart.dropHint')}</span>
               </div>
             )}
-          </div>
-
-          <div className="ca-fields">
-            <label>
-              <span>{t('chart.symbol')}</span>
-              <input
-                value={symbol}
-                onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                placeholder="BTCUSDT"
-                maxLength={32}
-              />
-            </label>
-            <label>
-              <span>{t('chart.tf')}</span>
-              <input
-                value={timeframe}
-                onChange={(e) => setTimeframe(e.target.value)}
-                placeholder="15m / 1h / 4h"
-                maxLength={16}
-              />
-            </label>
           </div>
 
           <label className="ca-q">
@@ -328,19 +304,17 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
         .ca-drop-empty span:last-child { font-size: 12px; color: var(--text-tertiary); }
         .ca-drop-ico { font-size: 28px; color: var(--accent); margin-bottom: 4px; }
         .ca-preview { width: 100%; max-height: 320px; object-fit: contain; display: block; background: #0a0a0a; }
-        .ca-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
-        .ca-fields label, .ca-q {
-          display: flex; flex-direction: column; gap: 6px;
+        .ca-q {
+          display: flex; flex-direction: column; gap: 6px; margin-top: 14px;
           font-size: 11px; font-weight: 700; letter-spacing: .04em;
           text-transform: uppercase; color: var(--text-tertiary);
         }
-        .ca-fields input, .ca-q textarea {
+        .ca-q textarea {
           border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
           border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; font-weight: 500;
           text-transform: none; letter-spacing: 0; font-family: inherit;
+          resize: vertical; min-height: 64px;
         }
-        .ca-q { margin-top: 10px; }
-        .ca-q textarea { resize: vertical; min-height: 64px; }
         .ca-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
         .ca-run { min-width: 140px; }
         .ca-clear {

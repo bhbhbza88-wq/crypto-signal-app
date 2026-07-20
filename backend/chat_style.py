@@ -22,9 +22,11 @@ COMETAPI_KEY = ai_client.COMETAPI_KEY
 ANTHROPIC_API_KEY = ai_client.ANTHROPIC_API_KEY
 COMETAPI_BASE_URL = ai_client.COMETAPI_BASE
 CLAUDE_MODEL = ai_client.CLAUDE_MODEL
-CHAT_ENGAGE_MODEL = ai_client.MODEL_CHAT_ENGAGE
+CHAT_ENGAGE_MODEL = ai_client.chat_engage_model()
 claude_api_key = ai_client.claude_api_key
 async_claude_client = ai_client.async_claude_client
+chat_engage_configured = ai_client.chat_engage_configured
+chat_engage_completion = ai_client.chat_engage_completion
 
 # Короткая версия личности (~400 токенов vs ~1300 у полной) — экономия на каждом сообщении
 ROMA_CORE_PROMPT = (
@@ -46,10 +48,10 @@ ROMA_SYSTEM_PROMPT = "Ты — Роман (Рома), 19 лет, день рож
 
 MOOD_OPTIONS = [
     "Ты сейчас расслаблен и в хорошем настроении, можешь пошутить чуть больше обычного.",
-    "Ты сейчас занят делами и отвечаешь короче обычного, без желания вести долгий разговор.",
-    "Ты только что словил стоп-лосс на сделке и раздражён — отвечаешь резче обычного.",
+    "Ты сейчас занят делами и отвечаешь короче обычного, без желания вести длинный разговор.",
     "Ты в ровном нейтральном настроении, ведёшь себя как обычно.",
     "Ты после смены на складе, устал, отвечаешь лениво и коротко.",
+    "Ты чуть раздражён мелочами, отвечаешь резче обычного — но без выдуманных историй про сделки.",
 ]
 
 
@@ -89,7 +91,38 @@ _AI_TELL_RE = re.compile(
 _CRYPTO_RE = re.compile(
     r"\b(btc|eth|sol|long|short|лонг|шорт|ликвидац|фьюч|леверидж|"
     r"маржа|памп|дамп|альт|биток|эфир|вход|выход|тейк|стоп|"
-    r"рынок|тренд|график|свеч)\b",
+    r"рынок|тренд|график|свеч|заход|сделк|усредн|плеч)\b",
+    re.IGNORECASE,
+)
+
+# Сигнальные посты из чатов — не тащим в few-shot (бот начинает выдумывать стопы)
+_SIGNAL_STYLE_RE = re.compile(
+    r"(заш[ёе]л\s+в|вышли\s+по\s+стоп|стоп\s*:|тейк\s*:|банк\s*:|"
+    r"плеч[еа]м\s+\d|с\s+\d+\s*плеч|рискованн|марафон|сигнал\s+на)",
+    re.IGNORECASE,
+)
+
+_THEIR_TRADE_ASK_RE = re.compile(
+    r"(ты\s+(заш|в\s+(лонг|шорт)|торгу|в\s+сделк|открыл)|"
+    r"у\s+тебя\s+(открыт|сделк|позиц|стоп)|"
+    r"твой\s+(стоп|лонг|шорт|вход)|"
+    r"тебя\s+.*(стоп|вынес|ликвид)|"
+    r"реально\s+стоп|стоп\s+(босс|лосс))",
+    re.IGNORECASE,
+)
+
+_BOT_TRADE_INVENT_RE = re.compile(
+    r"(стоп.{0,24}(словил|сработал|вынес)|"
+    r"на\s+входе\s+застрял|"
+    r"переусредн|"
+    r"заш[ёе]л\s+в\s+(лонг|шорт)|"
+    r"позици(я|ю)\s+открыт|"
+    r"закрыть\s+в\s+минус)",
+    re.IGNORECASE,
+)
+
+_THIRD_PERSON_DM_RE = re.compile(
+    r"\b(ему|его|он\s+(писал|написал|хотел|спросил|надо))\b",
     re.IGNORECASE,
 )
 
@@ -101,7 +134,7 @@ _SPAM_RE = re.compile(
 
 _CASUAL_FALLBACKS = [
     "норм, ты как?",
-    "да ничего особого",
+    "да потихоньку",
     "ку, норм",
     "пока тихо относительно",
 ]
@@ -345,14 +378,38 @@ def _few_shot_block(n: int = 18, *, crypto_bias: bool = False) -> str:
     if not rows:
         return ""
     cap = 6 if crypto_bias else 4
+    convo = [
+        r for r in rows
+        if not _SIGNAL_STYLE_RE.search(r.get("text") or "")
+    ]
     if crypto_bias:
-        crypto_rows = [r for r in rows if _CRYPTO_RE.search(r.get("text") or "")]
-        pool = crypto_rows if len(crypto_rows) >= 3 else rows
+        crypto_rows = [
+            r for r in convo
+            if _CRYPTO_RE.search(r.get("text") or "")
+        ]
+        pool = crypto_rows if len(crypto_rows) >= 3 else convo or rows
     else:
-        pool = rows
+        pool = convo if len(convo) >= 3 else rows
     picks = random.sample(pool, min(cap, len(pool)))
     lines = [f"- {r['text']}" for r in picks]
     return "\n".join(lines)
+
+
+def passes_coherence_filter(
+    text: str,
+    *,
+    incoming: str = "",
+    is_private: bool = False,
+) -> bool:
+    """Не выдумывать сделки и не говорить про собеседника в третьем лице в ЛС."""
+    if not text:
+        return False
+    inc = (incoming or "").strip()
+    if is_private and _THIRD_PERSON_DM_RE.search(text):
+        return False
+    if not _THEIR_TRADE_ASK_RE.search(inc) and _BOT_TRADE_INVENT_RE.search(text):
+        return False
+    return True
 
 
 def heuristic_intent(text: str, *, ask_re) -> str:
@@ -435,23 +492,21 @@ def _claude_response_text(resp) -> str:
 
 
 async def _generate_claude(system: str, user: str, max_tokens: int = 120) -> str | None:
-    if not claude_api_key():
+    if not chat_engage_configured():
         return None
     try:
-        client = async_claude_client(max_retries=1)
-        resp = await asyncio.wait_for(
-            client.messages.create(
-                model=CHAT_ENGAGE_MODEL,
+        raw_text = await asyncio.wait_for(
+            chat_engage_completion(
+                system=system,
+                user=user,
                 max_tokens=max_tokens,
                 temperature=0.9,
-                system=system,
-                messages=[{"role": "user", "content": user}],
+                timeout=90 if ai_client.ollama_configured() else 30,
             ),
-            timeout=30,
+            timeout=120 if ai_client.ollama_configured() else 45,
         )
-        raw_text = _claude_response_text(resp)
         if not raw_text:
-            print("[chat_style] claude: empty response (thinking-only?)")
+            print("[chat_style] llm: empty response")
             return None
 
         match = re.search(r"<reply>(.*?)</reply>", raw_text, re.DOTALL | re.IGNORECASE)
@@ -459,20 +514,21 @@ async def _generate_claude(system: str, user: str, max_tokens: int = 120) -> str
             return match.group(1).strip()
         return raw_text.strip()
     except asyncio.TimeoutError:
-        print("[chat_style] claude fail: timeout 45s")
+        print("[chat_style] llm fail: timeout")
         return None
     except Exception as e:
-        print(f"[chat_style] claude fail: {e}")
+        print(f"[chat_style] llm fail: {e}")
         return None
 
 
 async def compose_natural(kind: str, **ctx) -> str | None:
     """Сгенерировать фразу. kinds: greet|open|close_win|reply_casual|reply_crypto|oars."""
-    if not claude_api_key():
+    if not chat_engage_configured():
         return None
     crypto_bias = kind in ("reply_crypto", "open", "close_win", "oars")
     shots = _few_shot_block(crypto_bias=crypto_bias)
     incoming = (ctx.get("incoming") or "").strip()[:300]
+    is_private = bool(ctx.get("is_private"))
     mem = memory_block(ctx.get("memory"))
     keep_nl = kind in ("reply_casual", "reply_crypto", "oars")
 
@@ -535,11 +591,25 @@ async def compose_natural(kind: str, **ctx) -> str | None:
         "Если спрашивают про сделки, сканер, сигналы или откуда плюс — отвечай по-свойски: "
         "гоняешь свой сканер/поток, иногда кидают в тг, без понтов и без 'купи сейчас'. "
         "Не корчи из себя крипто-гуру. Не выдумывай конкретные цены/цифры."
+        "\n\n# СДЕЛКИ И ЛОГИКА\n"
+        "НЕ выдумывай что у тебя открыта позиция, стоп или сделка — "
+        "если собеседник сам не спрашивает про ТВОИ сделки прямо сейчас. "
+        "Стоп сработал = позиция ЗАКРЫТА, усредняться уже нельзя. "
+        "Не пиши «на входе застрял» и «переусредниться» в одном диалоге со стопом. "
+        "Если не знаешь — скажи честно «не заходил» / «пока смотрю»."
         "\n\n# ВАЖНО\n"
-        "Всегда отвечай ПО СМЫСЛУ на то, что написал собеседник. "
-        "Если спросили как зовут / тебя Рома зовут — скажи что Рома (или да). "
-        "Если спросили как жизнь/дела — ответь про себя коротко, не про сканер. "
-        "Не уводи в рекламу сайта/канала, пока прямо не спросили откуда берёшь сделки."
+        "Всегда отвечай ПО СМЫСЛУ на ПОСЛЕДНЕЕ сообщение. Держи нить из «Недавний диалог». "
+        "Если спросили лонг/шорт — дай мнение или «хз рано», не «да ничего особого». "
+        "Если спросили как зовут — Рома. Если как дела — про жизнь, не про сканер. "
+        "Не уводи в рекламу, пока прямо не спросили откуда берёшь сделки."
+    )
+    if is_private:
+        system += (
+            "\n\n# ЛИЧКА\n"
+            "Это личная переписка один на один. Обращайся на «ты», "
+            "НИКОГДА не «он/ему/его» про собеседника."
+        )
+    system += (
         "\n\n# ЦИФРЫ И ЦЕНЫ\n"
         "У тебя НЕТ памяти актуальных котировок. НИКОГДА не называй цену монеты по памяти "
         "(застрянешь на старых числах и спалишься). Если ниже дан блок «АКТУАЛЬНЫЕ ЦЕНЫ» — "
@@ -566,9 +636,8 @@ async def compose_natural(kind: str, **ctx) -> str | None:
 
     for _attempt in range(2):
         try:
-            if not claude_api_key():
+            if not chat_engage_configured():
                 return None
-            
             text = await _generate_claude(system, user, max_tokens=120)
 
             if not text:
@@ -580,12 +649,15 @@ async def compose_natural(kind: str, **ctx) -> str | None:
 
             chunks = [c.strip() for c in re.split(r"\s*\|\s*|\n+", text) if c.strip()]
             ok = True
+            joined = " | ".join(chunks)
             for part in chunks:
                 if part and not passes_human_filter(part, allow_links=allow_links):
                     ok = False
                     break
-            if ok and chunks:
-                return " | ".join(chunks)
+            if ok and chunks and passes_coherence_filter(
+                joined, incoming=incoming, is_private=is_private,
+            ):
+                return joined
         except Exception as e:
             print(f"[chat_style] compose {kind}: {e}")
             await asyncio.sleep(1.0 * (_attempt + 1))

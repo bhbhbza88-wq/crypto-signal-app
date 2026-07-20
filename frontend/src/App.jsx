@@ -15,7 +15,7 @@ const ChartAnalyze = lazy(() => import('./ChartAnalyze'))
 const Admin = lazy(() => import('./Admin'))
 const ChannelAnalyzer = lazy(() => import('./ChannelAnalyzer'))
 
-const POLL_SIGNALS_MS = 30000
+const POLL_SIGNALS_MS = 15000
 const POLL_STATS_MS = 75000
 const CORE_POLL_TABS = new Set(['overview', 'history'])
 const VALID_TABS = new Set(APP_SECTIONS)

@@ -16,6 +16,51 @@ function formatListingsNote(listedOn, t) {
   return t('signal.venuesDefault')
 }
 
+/** Живая цена с Bybit (linear → spot) или Binance futures. */
+function useLiveSignalPrice(symbol, exchange = 'bybit', fallback = null) {
+  const [price, setPrice] = useState(fallback)
+  useEffect(() => {
+    if (fallback != null) setPrice(fallback)
+  }, [fallback])
+
+  useEffect(() => {
+    if (!symbol) return
+    const raw = String(symbol).replace('/', '').toUpperCase()
+    const ex = String(exchange || 'bybit').toLowerCase()
+    let dead = false
+
+    async function pull() {
+      try {
+        let p = null
+        if (ex === 'binance') {
+          const res = await fetch(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${raw}`)
+          const data = await res.json()
+          p = parseFloat(data?.price)
+        } else {
+          for (const category of ['linear', 'spot']) {
+            const res = await fetch(
+              `https://api.bybit.com/v5/market/tickers?category=${category}&symbol=${raw}`
+            )
+            const data = await res.json()
+            p = parseFloat(data?.result?.list?.[0]?.lastPrice)
+            if (Number.isFinite(p) && p > 0) break
+            p = null
+          }
+        }
+        if (!dead && Number.isFinite(p) && p > 0) setPrice(p)
+      } catch {
+        /* keep last */
+      }
+    }
+
+    pull()
+    const id = setInterval(pull, 5000)
+    return () => { dead = true; clearInterval(id) }
+  }, [symbol, exchange])
+
+  return price
+}
+
 function ConfidenceBar({ score, maxScore = 20, t }) {
   const pct = Math.round((score / maxScore) * 100)
   const color = pct >= 80 ? 'var(--long)' : pct >= 60 ? 'var(--amber)' : 'var(--short)'
@@ -75,10 +120,11 @@ function useThemeTick() {
 }
 
 // свечной график в стиле TradingView с разметкой Вход/SL/TP1-3
-function CandleChart({ signal, t }) {
+function CandleChart({ signal, t, livePrice }) {
   const containerRef = useRef(null)
   const chartRef = useRef(null)
   const seriesRef = useRef(null)
+  const lastBarRef = useRef(null)
   const themeTick = useThemeTick()
 
   const candles = signal.candles || []
@@ -152,7 +198,18 @@ function CandleChart({ signal, t }) {
       .map(c => ({ time: Math.floor(c.timestamp / 1000), open: c.open, high: c.high, low: c.low, close: c.close }))
       .filter(d => { if (seen.has(d.time)) return false; seen.add(d.time); return true })
       .sort((a, b) => a.time - b.time)
+
+    if (livePrice != null && data.length) {
+      const last = data[data.length - 1]
+      data[data.length - 1] = {
+        ...last,
+        close: livePrice,
+        high: Math.max(last.high, livePrice),
+        low: Math.min(last.low, livePrice),
+      }
+    }
     series.setData(data)
+    lastBarRef.current = data[data.length - 1] || null
 
     const lines = []
     const addLine = (price, color, title, dashed) => {
@@ -171,9 +228,25 @@ function CandleChart({ signal, t }) {
     addLine(signal.tp3, cssVar('--long', '#00c896'), 'TP3', true)
 
     chartRef.current?.timeScale().fitContent()
-    return () => { lines.forEach(l => series.removePriceLine(l)) }
+    return () => { lines.forEach(l => { try { series.removePriceLine(l) } catch {} }) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(candles), signal.entry, signal.stop, signal.tp1, signal.tp2, signal.tp3, t])
+
+  // тик live-цены без полной перерисовки
+  useEffect(() => {
+    const series = seriesRef.current
+    const base = lastBarRef.current
+    if (!series || livePrice == null || !base) return
+    try {
+      series.update({
+        time: base.time,
+        open: base.open,
+        high: Math.max(base.high, livePrice),
+        low: Math.min(base.low, livePrice),
+        close: livePrice,
+      })
+    } catch { /* ignore */ }
+  }, [livePrice])
 
   return <div ref={containerRef} className="tv-chart-canvas" />
 }
@@ -190,8 +263,14 @@ export default function SignalCard({ signal }) {
 
   const candles = signal.candles || []
   const lastClose = candles.length ? candles[candles.length - 1].close : null
-  const livePnlPct = lastClose != null
-    ? (isLong ? (lastClose - signal.entry) / signal.entry * 100 : (signal.entry - lastClose) / signal.entry * 100)
+  const livePrice = useLiveSignalPrice(
+    signal.symbol,
+    signal.exchange || 'bybit',
+    signal.live_price ?? lastClose,
+  )
+  const displayPrice = livePrice ?? lastClose
+  const livePnlPct = displayPrice != null
+    ? (isLong ? (displayPrice - signal.entry) / signal.entry * 100 : (signal.entry - displayPrice) / signal.entry * 100)
     : null
 
   const stage = signal.tp2_hit ? t('signal.stageTp2') : signal.tp1_hit ? t('signal.stageTp1') : t('signal.stageOpen')
@@ -241,9 +320,9 @@ export default function SignalCard({ signal }) {
           <span className="tv-dot r" /><span className="tv-dot a" /><span className="tv-dot g" />
           <span className="tv-pair">{sym}/USDT</span>
           <span className="tv-live"><span className="tv-live-dot" />LIVE</span>
-          {lastClose != null && (
+          {displayPrice != null && (
             <span className="tv-price">
-              ${lastClose < 1 ? lastClose.toFixed(5) : lastClose.toFixed(2)}
+              ${displayPrice < 1 ? displayPrice.toFixed(5) : displayPrice.toFixed(2)}
               {livePnlPct != null && (
                 <span className={`tv-pnl ${livePnlPct >= 0 ? 'pos' : 'neg'}`}>
                   {livePnlPct >= 0 ? '▲' : '▼'}{Math.abs(livePnlPct).toFixed(2)}%
@@ -253,7 +332,7 @@ export default function SignalCard({ signal }) {
           )}
         </div>
         {candles.length > 0 ? (
-          <CandleChart signal={signal} t={t} />
+          <CandleChart signal={signal} t={t} livePrice={displayPrice} />
         ) : (
           <div className="tv-empty">{t('signal.chartLoading')}</div>
         )}

@@ -150,15 +150,30 @@ def fetch_data_cached(symbol, exchange_id=None):
 
 
 def fetch_ticker(symbol, exchange_id=None):
-    """Если exchange_id задан — только эта биржа. Иначе Bybit, затем Binance."""
+    """Если exchange_id задан — только эта биржа. Иначе Bybit, затем Binance.
+    Кэш 5с — чтобы /api/signals и трекер не долбили биржу."""
+    ex_key = (exchange_id or 'any').lower().strip()
+    cache_key = f"ticker:{ex_key}:{symbol}"
+    now = time.time()
+    hit = _data_cache.get(cache_key)
+    if hit and now - hit[0] < 5:
+        return hit[1]
+
+    ticker = None
     if exchange_id:
         ticker = api_call(get_exchange(exchange_id).fetch_ticker, symbol)
-        return ticker if _ticker_ok(ticker) else None
-    for ex_id in ('bybit', 'binance'):
-        ticker = api_call(get_exchange(ex_id).fetch_ticker, symbol)
-        if _ticker_ok(ticker):
-            return ticker
-    return None
+        if not _ticker_ok(ticker):
+            ticker = None
+    else:
+        for ex_id in ('bybit', 'binance'):
+            ticker = api_call(get_exchange(ex_id).fetch_ticker, symbol)
+            if _ticker_ok(ticker):
+                break
+            ticker = None
+
+    if ticker:
+        _data_cache[cache_key] = (now, ticker)
+    return ticker
 
 
 def fetch_candles_json(symbol, timeframe='1h', limit=60, exchange_id=None):
@@ -169,7 +184,8 @@ def fetch_candles_json(symbol, timeframe='1h', limit=60, exchange_id=None):
     cache_key = f"candles:{ex_id}:{symbol}:{timeframe}:{limit}"
     now = time.time()
     hit = _data_cache.get(cache_key)
-    if hit and now - hit[0] < 60:
+    # 15с — график на дашборде ближе к live, без шторма запросов
+    if hit and now - hit[0] < 15:
         return hit[1]
     raw = api_call(ex.fetch_ohlcv, symbol, timeframe, limit=limit)
     if not raw:
