@@ -628,22 +628,28 @@ CHART_DAILY_LIMITS = {'free': 2, 'premium': 15, 'vip': 40}
 _ai_usage: dict[int, dict] = {}   # user_id -> {'date': 'YYYY-MM-DD', 'count': int}
 _chart_usage: dict[int, dict] = {}
 
-CHART_ANALYZE_SYSTEM = """Ты — desk analyst NOWICKI. Разбираешь СКРИНШОТ графика криптопары
-(в т.ч. мобильные скрины Bybit / Binance / TradingView с iPhone).
-Это НЕ торговый сигнал и НЕ рекомендация купить/продать.
+CHART_ANALYZE_SYSTEM = """Ты — обычный трейдер-приятель в чате NOWICKI. Смотришь скрин графика
+(Bybit / Binance / TradingView, в т.ч. с iPhone) и коротко говоришь, как сам видишь картину.
 
-ЖЁСТКИЕ ПРАВИЛА:
-1. Опирайся ТОЛЬКО на то, что видно на картинке. Не выдумывай тикер, ТФ, уровни, индикаторы.
-2. Кнопки «Лонг/Шорт/Long/Short» внизу приложения — это UI биржи, НЕ сигнал и НЕ bias.
-3. Если скрин размыт, обрезан, нет графика, нет понятной структуры — bias="flat", confidence="low",
-   evidence_ok=false, в reasons объясни чего не хватает.
-4. Не обещай прибыль. Не пиши «обязательно зайдёт», «гарантия», «100%».
-5. Bias long/short только если на скрине есть хотя бы 2 видимых аргумента (тренд/структура/уровень/свечной триггер).
-6. Всегда укажи invalidation: где идея ломается. Если не видишь — напиши "не видно на скрине".
-7. Язык полей reasons/invalidation/risks/watch/seen = язык пользователя (поле language), иначе русский.
-8. bias ТОЛЬКО одно из: long | short | flat (не bullish/bearish).
+ТОН: просто, по-человечески, без официоза и канцелярита.
+Пиши как в Telegram: коротко, живо, можно «я бы», «тут скорее», «мне так видится».
+Не пиши «desk analyst», «конfluence», «инвалидация сетапа» — говори простыми словами.
 
-Верни JSON строго такой схемы:
+ПРАВИЛА:
+1. Только то, что видно на картинке. Не выдумывай цены/уровни/индикаторы.
+2. Кнопки «Лонг/Шорт» внизу приложения — просто UI биржи, не сигнал.
+3. Если скрин мутный / нет графика — bias=flat, evidence_ok=false, честно скажи что не разобрать.
+4. Не обещай прибыль, иксы, «100%», «обязательно зайдёт».
+5. long/short только если есть хотя бы 2 понятных аргумента с картинки.
+6. Язык ответа = language пользователя (иначе русский).
+7. bias только: long | short | flat.
+
+В поле take обязательно напиши личное мнение одной-двумя фразами, например:
+- «Я бы тут взял лонг, пока держится выше …»
+- «Я бы скорее шортнул отбой от …»
+- «Я бы пока не лез — картинка мутная / лучше подождать»
+
+Верни ТОЛЬКО JSON:
 {
   "evidence_ok": bool,
   "symbol": string|null,
@@ -651,6 +657,7 @@ CHART_ANALYZE_SYSTEM = """Ты — desk analyst NOWICKI. Разбираешь С
   "price_hint": string|null,
   "bias": "long"|"short"|"flat",
   "confidence": "low"|"medium"|"high",
+  "take": string,
   "seen": [string],
   "reasons": [string],
   "invalidation": string,
@@ -658,6 +665,10 @@ CHART_ANALYZE_SYSTEM = """Ты — desk analyst NOWICKI. Разбираешь С
   "watch": [string],
   "disclaimer": string
 }
+
+seen / reasons / risks / watch — короткие простые фразы (не отчёт).
+invalidation — где идея ломается, простыми словами.
+disclaimer — одна короткая фраза вроде: «это мой взгляд на скрин, не сигнал».
 """
 
 
@@ -679,7 +690,28 @@ def _chart_quota(user_id: int, tier: str) -> tuple[dict, int]:
     return usage, limit
 
 
-def _normalize_chart_result(raw: dict) -> dict:
+def _default_take(bias: str, lang: str = "ru") -> str:
+    lang = (lang or "ru")[:2].lower()
+    if lang == "en":
+        return {
+            "long": "I'd take a long here if the structure holds.",
+            "short": "I'd rather short this if rejection holds.",
+            "flat": "I wouldn't enter yet — wait for a clearer picture.",
+        }[bias]
+    if lang == "pl":
+        return {
+            "long": "Ja bym wziął longa, jeśli struktura się utrzyma.",
+            "short": "Ja bym raczej shortował przy odrzuceniu.",
+            "flat": "Ja bym jeszcze nie wchodził — poczekaj na czytelniejszy obraz.",
+        }[bias]
+    return {
+        "long": "Я бы тут взял лонг, если структура держится.",
+        "short": "Я бы скорее взял шорт, если отбой подтвердится.",
+        "flat": "Я бы пока не лез — лучше подождать более чистую картинку.",
+    }[bias]
+
+
+def _normalize_chart_result(raw: dict, lang: str = "ru") -> dict:
     bias = str(raw.get('bias') or 'flat').lower().strip()
     if bias in ('bullish', 'buy', 'long'):
         bias = 'long'
@@ -688,7 +720,6 @@ def _normalize_chart_result(raw: dict) -> dict:
     elif bias not in ('long', 'short', 'flat'):
         bias = 'flat'
     conf = str(raw.get('confidence') or 'low').lower().strip()
-    # модель иногда отдаёт 0.72 вместо low/medium/high
     try:
         cnum = float(conf)
         conf = 'high' if cnum >= 0.75 else 'medium' if cnum >= 0.45 else 'low'
@@ -697,20 +728,29 @@ def _normalize_chart_result(raw: dict) -> dict:
     if conf not in ('low', 'medium', 'high'):
         conf = 'low'
     evidence_ok = bool(raw.get('evidence_ok'))
-    reasons = [str(x).strip() for x in (raw.get('reasons') or []) if str(x).strip()][:6]
-    seen = [str(x).strip() for x in (raw.get('seen') or []) if str(x).strip()][:8]
-    risks = [str(x).strip() for x in (raw.get('risks') or []) if str(x).strip()][:5]
-    watch = [str(x).strip() for x in (raw.get('watch') or []) if str(x).strip()][:5]
+    reasons = [str(x).strip() for x in (raw.get('reasons') or []) if str(x).strip()][:5]
+    seen = [str(x).strip() for x in (raw.get('seen') or []) if str(x).strip()][:6]
+    risks = [str(x).strip() for x in (raw.get('risks') or []) if str(x).strip()][:4]
+    watch = [str(x).strip() for x in (raw.get('watch') or []) if str(x).strip()][:4]
 
-    # Анти-"от балды": мало доказательств → flat
-    if not evidence_ok or len(reasons) < 2 or conf == 'low':
+    if not evidence_ok or len(reasons) < 2:
         if bias in ('long', 'short') and (not evidence_ok or len(reasons) < 2):
             bias = 'flat'
             conf = 'low'
 
+    take = (raw.get('take') or '').strip()
+    if not take:
+        take = _default_take(bias, lang)
+    # если после нормализации ушли в flat — подмени take
+    if bias == 'flat' and any(w in take.lower() for w in ('лонг', 'шорт', 'long', 'short')):
+        # оставим take модели, если она сама сказала «не лез»; иначе дефолт
+        if not any(w in take.lower() for w in ('не лез', 'подожд', 'wouldn't', 'wait', 'nie wchod', 'poczek')):
+            take = _default_take('flat', lang)
+
     disclaimer = (raw.get('disclaimer') or '').strip() or (
-        "Это разбор скриншота, не торговая рекомендация и не сигнал NOWICKI."
+        "Это просто взгляд на скрин, не торговый сигнал."
     )
+    inv = (raw.get('invalidation') or '').strip() or "на скрине не видно, где идея ломается"
     return {
         "evidence_ok": evidence_ok,
         "symbol": raw.get('symbol') or None,
@@ -718,12 +758,13 @@ def _normalize_chart_result(raw: dict) -> dict:
         "price_hint": raw.get('price_hint') or None,
         "bias": bias,
         "confidence": conf,
+        "take": take[:400],
         "seen": seen,
         "reasons": reasons,
-        "invalidation": (raw.get('invalidation') or '').strip() or "не видно на скрине",
+        "invalidation": inv,
         "risks": risks,
         "watch": watch,
-        "disclaimer": disclaimer,
+        "disclaimer": disclaimer[:240],
     }
 
 
@@ -779,7 +820,8 @@ async def ai_chart_analyze(req: ChartAnalyzeRequest, authorization: str | None =
     lang = (req.language or "ru").strip().lower()[:5]
     caption_parts = [
         f"language={lang}",
-        "Разбери скриншот графика по схеме. Не угадывай.",
+        "Посмотри скрин просто и по-человечески.",
+        "В take напиши: я бы взял лонг / шорт / пока не лез — смотря по картинке.",
         "Это может быть мобильный скрин Bybit/Binance/TradingView с iPhone.",
         "Кнопки Лонг/Шорт внизу экрана — UI, не сигнал.",
     ]
@@ -806,7 +848,7 @@ async def ai_chart_analyze(req: ChartAnalyzeRequest, authorization: str | None =
             detail="Не удалось разобрать этот скрин. Попробуй ещё раз или сохрани как JPEG из Фото.",
         )
 
-    result = _normalize_chart_result(raw if isinstance(raw, dict) else {})
+    result = _normalize_chart_result(raw if isinstance(raw, dict) else {}, lang=lang)
     if req.symbol_hint and not result.get("symbol"):
         result["symbol"] = req.symbol_hint.strip()[:32]
     if req.timeframe_hint and not result.get("timeframe"):

@@ -249,6 +249,11 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
 
           {a && !loading && (
             <div className="ca-out">
+              <div className={`ca-take ${a.bias || 'flat'}`}>
+                <span className="ca-take-label">{t('chart.myTake')}</span>
+                <p>{a.take || t('chart.noReasons')}</p>
+              </div>
+
               <div className="ca-out-head">
                 <BiasBadge bias={a.bias} t={t} />
                 <ConfBadge confidence={a.confidence} t={t} />
@@ -358,6 +363,27 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
         }
         @keyframes ca-spin { to { transform: rotate(360deg); } }
         .ca-out-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+        .ca-take {
+          margin: 0 0 14px; padding: 14px 16px; border-radius: 14px;
+          border: 1px solid var(--border);
+          background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+        }
+        .ca-take.long {
+          border-color: color-mix(in srgb, var(--green, #3dcc8a) 40%, var(--border));
+          background: color-mix(in srgb, var(--green, #3dcc8a) 10%, var(--surface));
+        }
+        .ca-take.short {
+          border-color: color-mix(in srgb, var(--danger, #e25) 40%, var(--border));
+          background: color-mix(in srgb, var(--danger, #e25) 10%, var(--surface));
+        }
+        .ca-take-label {
+          display: block; margin-bottom: 6px;
+          font-size: 11px; font-weight: 800; letter-spacing: .06em;
+          text-transform: uppercase; color: var(--text-tertiary);
+        }
+        .ca-take p {
+          margin: 0; font-size: 16px; line-height: 1.45; font-weight: 650; color: var(--text);
+        }
         .ca-bias {
           font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
           padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border);
