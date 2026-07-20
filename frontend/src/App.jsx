@@ -427,7 +427,28 @@ export default function App() {
               />
             </section>
           )}
-          {tab === 'history' && <section className="section animate-in"><div className="page-header"><h1 className="page-title">{t('hist.title')}</h1><p className="page-subtitle">{t('hist.subtitle')}</p></div><HistoryTable history={history} stats={stats} isPremium={isPremium} onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))} /></section>}
+          {tab === 'history' && (
+            <div className="animate-in dash dash-console">
+              <div className="dash-window">
+                <div className="dash-titlebar">
+                  <div className="dash-titlebar-left">
+                    <span className="dash-dot r" /><span className="dash-dot a" /><span className="dash-dot g" />
+                    <span className="dash-path mono">{t('hist.path')}</span>
+                  </div>
+                  <h1 className="dash-titlebar-title">{t('hist.title')}</h1>
+                  <span className="dash-live-pill hist-period-pill"><i />{t('hist.period.badge')}</span>
+                </div>
+                <div className="dash-body">
+                  <HistoryTable
+                    history={history}
+                    stats={stats}
+                    isPremium={isPremium}
+                    onUpgrade={() => user ? setTab('pricing') : (setAuthMode('register'), setShowAuth(true))}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
           {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} /></section>}
           {tab === 'admin' && user?.is_admin && <Admin />}
           {tab === 'channel_analyzer' && user?.is_admin && <section className="section animate-in"><ChannelAnalyzer /></section>}

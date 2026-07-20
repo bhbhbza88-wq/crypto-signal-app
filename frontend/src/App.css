@@ -245,8 +245,8 @@
   flex: 1;
   min-height: 0;
   gap: 0;
-  height: calc(100vh - 56px - 52px);
-  max-height: calc(100dvh - 56px - 52px);
+  height: calc(100vh - 56px - 34px);
+  max-height: calc(100dvh - 56px - 34px);
 }
 .section-ai-desk {
   flex: 1;
@@ -333,6 +333,8 @@
   width: 6px; height: 6px; border-radius: 50%; background: var(--long);
   animation: pulse 2s infinite; display: block;
 }
+.dash-live-pill.hist-period-pill { color: var(--accent); background: var(--accent-soft); }
+.dash-live-pill.hist-period-pill i { background: var(--accent); }
 .dash-body {
   padding: 16px 22px 22px;
   flex: 1;
@@ -500,8 +502,8 @@
     max-height: calc(100dvh - 56px - 22px);
   }
   .section-chart-desk {
-    height: calc(100vh - 56px - 36px);
-    max-height: calc(100dvh - 56px - 36px);
+    height: calc(100vh - 56px - 22px);
+    max-height: calc(100dvh - 56px - 22px);
   }
   .topbar-prices { display: none; }
   .kpi-grid { grid-template-columns: 1fr 1fr; }
