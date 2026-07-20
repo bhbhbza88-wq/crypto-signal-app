@@ -487,7 +487,9 @@ export default function ChartAnalyze({ user, onNeedAuth }) {
           --sf-chrome-2: color-mix(in srgb, var(--surface-2) 70%, #6e6e73);
           --sf-line: color-mix(in srgb, var(--border) 80%, #000);
           display: flex; flex-direction: column;
-          min-height: calc(100vh - 56px - 50px);
+          height: 100%;
+          max-height: 100%;
+          min-height: 0;
           border-radius: 12px; overflow: hidden;
           background: var(--bg);
           border: 1px solid var(--border);

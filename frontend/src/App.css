@@ -238,13 +238,15 @@
   min-height: 0;
 }
 .content:has(.section-chart-desk) {
-  padding: 16px 18px 28px;
+  padding: 16px 18px 18px;
   min-height: 0;
 }
 .section-chart-desk {
   flex: 1;
   min-height: 0;
   gap: 0;
+  height: calc(100vh - 56px - 52px);
+  max-height: calc(100dvh - 56px - 52px);
 }
 .section-ai-desk {
   flex: 1;
@@ -488,6 +490,7 @@
   .content { padding: 18px 14px 80px; }
   .content:has(.section-ai-desk) { padding: 10px 10px 12px; }
   .content:has(.dash-console) { padding: 10px 10px 12px; }
+  .content:has(.section-chart-desk) { padding: 10px 10px 12px; }
   .section-ai-desk {
     height: calc(100vh - 56px - 22px);
     max-height: calc(100dvh - 56px - 22px);
@@ -495,6 +498,10 @@
   .dash-console {
     height: calc(100vh - 56px - 22px);
     max-height: calc(100dvh - 56px - 22px);
+  }
+  .section-chart-desk {
+    height: calc(100vh - 56px - 36px);
+    max-height: calc(100dvh - 56px - 36px);
   }
   .topbar-prices { display: none; }
   .kpi-grid { grid-template-columns: 1fr 1fr; }
