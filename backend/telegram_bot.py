@@ -212,10 +212,10 @@ def _menu_kb():
     ]}
 
 
-def _premium_kb(pay_url: str | None = None):
+def _premium_kb(pay_url: str | None = None, pay_label: str = "💳 Оплатить"):
     rows = []
     if pay_url:
-        rows.append([{"text": "💳 Оплатить в Crypto Bot", "url": pay_url}])
+        rows.append([{"text": pay_label, "url": pay_url}])
     rows.append([{"text": "✅ Я оплатил вручную", "callback_data": "paid"}])
     rows.append([{"text": f"✍️ Написать @{SUPPORT_USER}", "url": SUPPORT_URL}])
     rows.append([
@@ -328,14 +328,34 @@ async def send_welcome(chat_id: int, start_payload: str = "", with_dock: bool = 
 
 async def send_premium(chat_id: int):
     import crypto_pay
+    import heleket_pay
 
     pay_url = None
     auto_block = ""
+    pay_label = "💳 Оплатить"
 
-    if crypto_pay.is_configured():
-        import database as db
-        user = db.get_user_by_telegram_id(chat_id)
-        email = user["email"] if user else None
+    import database as db
+    user = db.get_user_by_telegram_id(chat_id)
+    email = user["email"] if user else None
+
+    if heleket_pay.is_configured():
+        invoice = await heleket_pay.create_invoice_for_telegram(chat_id, period="month")
+        if invoice:
+            pay_url = invoice.get("url")
+            amount = heleket_pay.plan_amount("month")
+            currency = heleket_pay.HELEKET_CURRENCY
+            pay_label = "💳 Оплатить (Heleket)"
+            auto_block = (
+                f"<b>1.</b> Нажми <b>«Оплатить (Heleket)»</b> ниже\n"
+                f"Сумма: <b>${amount} {currency}</b> · крипта или карта\n"
+                f"После оплаты Premium и invite в каналы придут сами.\n"
+            )
+            if not user:
+                auto_block += (
+                    "\n⚠️ Лучше сначала привяжи Telegram на сайте "
+                    "(Pricing → Подключить Telegram), чтобы Premium сел на нужный аккаунт.\n"
+                )
+    elif crypto_pay.is_configured():
         invoice = await crypto_pay.create_invoice(telegram_id=chat_id, email=email)
         if invoice:
             pay_url = (
@@ -343,6 +363,7 @@ async def send_premium(chat_id: int):
                 or invoice.get("pay_url")
                 or invoice.get("mini_app_invoice_url")
             )
+            pay_label = "💳 Оплатить в Crypto Bot"
             auto_block = (
                 f"<b>1.</b> Нажми <b>«Оплатить в Crypto Bot»</b> ниже\n"
                 f"Сумма: <b>{crypto_pay.CRYPTO_PAY_AMOUNT} {crypto_pay.CRYPTO_PAY_ASSET}</b>\n"
@@ -377,7 +398,7 @@ async def send_premium(chat_id: int):
         f"{HR}\n"
         f"{pay}"
     )
-    await send_message(chat_id, text, _premium_kb(pay_url))
+    await send_message(chat_id, text, _premium_kb(pay_url, pay_label))
 
 
 async def ask_paid_email(chat_id: int):

@@ -179,6 +179,21 @@ def init_db():
         """)
 
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS heleket_orders (
+                order_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                heleket_uuid TEXT,
+                period TEXT NOT NULL DEFAULT 'month',
+                amount TEXT,
+                currency TEXT,
+                pay_url TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                paid_at TEXT
+            )
+        """)
+
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS auth_tokens (
                 token TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -1123,6 +1138,53 @@ def get_pending_premium_request(email: str = None, telegram_id: int = None):
 def resolve_premium_request(req_id: int, status: str = "granted"):
     with _lock, get_conn() as conn:
         conn.execute("UPDATE premium_requests SET status=? WHERE id=?", (status, req_id))
+
+
+def create_heleket_order(
+    *,
+    order_id: str,
+    user_id: int,
+    heleket_uuid: str | None,
+    period: str,
+    amount: str,
+    currency: str,
+    pay_url: str | None,
+) -> None:
+    with _lock, get_conn() as conn:
+        conn.execute(
+            """INSERT INTO heleket_orders
+               (order_id, user_id, heleket_uuid, period, amount, currency, pay_url, status, created_at)
+               VALUES (?,?,?,?,?,?,?, 'pending', ?)""",
+            (
+                order_id,
+                int(user_id),
+                heleket_uuid,
+                period,
+                amount,
+                currency,
+                pay_url,
+                datetime.now().isoformat(),
+            ),
+        )
+
+
+def get_heleket_order(order_id: str):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM heleket_orders WHERE order_id=?",
+            (order_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def mark_heleket_order(order_id: str, status: str, heleket_uuid: str | None = None) -> None:
+    with _lock, get_conn() as conn:
+        conn.execute(
+            """UPDATE heleket_orders
+               SET status=?, paid_at=?, heleket_uuid=COALESCE(?, heleket_uuid)
+               WHERE order_id=?""",
+            (status, datetime.now().isoformat(), heleket_uuid, order_id),
+        )
 
 
 def set_user_admin(user_id, is_admin: bool):

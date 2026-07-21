@@ -449,7 +449,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} /></section>}
+          {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} onNeedAuth={() => { setAuthMode('login'); setShowAuth(true) }} /></section>}
           {tab === 'admin' && user?.is_admin && <Admin />}
           {tab === 'channel_analyzer' && user?.is_admin && <section className="section animate-in"><ChannelAnalyzer /></section>}
           </Suspense>

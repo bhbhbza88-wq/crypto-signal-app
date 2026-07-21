@@ -1,16 +1,28 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { TG_RESULTS_CHANNEL, TG_PREMIUM } from './shared'
 import { api } from './api'
 import { useI18n } from './i18n'
 
 const PREMIUM_BOT = TG_PREMIUM
 
-export default function Pricing({ user }) {
+export default function Pricing({ user, onNeedAuth }) {
   const { t } = useI18n()
   const [period, setPeriod] = useState('month')
   const [openFaq, setOpenFaq] = useState(null)
   const [tgBusy, setTgBusy] = useState(false)
   const [tgError, setTgError] = useState(null)
+  const [payBusy, setPayBusy] = useState(false)
+  const [payError, setPayError] = useState(null)
+  const [heleketEnabled, setHeleketEnabled] = useState(false)
+  const [paidNotice, setPaidNotice] = useState(false)
+
+  useEffect(() => {
+    api.paymentsConfig()
+      .then((c) => setHeleketEnabled(!!c.heleket))
+      .catch(() => setHeleketEnabled(false))
+    const qs = new URLSearchParams(window.location.search)
+    if (qs.get('paid') === '1') setPaidNotice(true)
+  }, [])
 
   const PERIODS = useMemo(() => [
     { key: 'month', label: t('price.period.month'), mult: 1, discount: 0 },
@@ -70,7 +82,30 @@ export default function Pricing({ user }) {
 
   function choose(tier) {
     if (tier === 'free') return
+    if (heleketEnabled) {
+      if (!user) {
+        onNeedAuth?.()
+        setPayError(t('price.loginRequired'))
+        return
+      }
+      startHeleketPayment()
+      return
+    }
     window.open(PREMIUM_BOT, '_blank', 'noopener,noreferrer')
+  }
+
+  async function startHeleketPayment() {
+    setPayBusy(true)
+    setPayError(null)
+    try {
+      const r = await api.createHeleketPayment(period)
+      if (r.pay_url) window.location.href = r.pay_url
+      else setPayError(t('price.payError'))
+    } catch (err) {
+      setPayError(err.message || t('price.payError'))
+    } finally {
+      setPayBusy(false)
+    }
   }
 
   return (
@@ -89,6 +124,14 @@ export default function Pricing({ user }) {
           {t('price.bannerLink')}
         </a>
       </div>
+
+      {paidNotice && (
+        <div className="pr-banner" style={{ borderColor: 'var(--long)', color: 'var(--text)' }}>
+          {t('price.paidNotice')}
+        </div>
+      )}
+
+      {payError && <div className="adm-msg-err" style={{ marginBottom: 12 }}>{payError}</div>}
 
       {user && (
         <div className="pr-tg-connect">
@@ -139,10 +182,10 @@ export default function Pricing({ user }) {
               <button
                 className="pr-cta"
                 style={{ background: current ? 'var(--surface-2)' : tier.accent, color: current ? 'var(--text-secondary)' : '#fff' }}
-                disabled={current || tier.key === 'free'}
+                disabled={current || tier.key === 'free' || payBusy}
                 onClick={() => choose(tier.key)}
               >
-                {current ? t('price.yourPlan') : tier.cta}
+                {payBusy ? '...' : current ? t('price.yourPlan') : (heleketEnabled ? t('price.tier.premium.ctaPay') : tier.cta)}
               </button>
             </div>
           )

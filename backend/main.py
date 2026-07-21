@@ -23,6 +23,7 @@ import database as db
 import auth
 import telegram_bot
 import crypto_pay
+import heleket_pay
 import public_feed
 from scanner import start_background_scanner, MAX_OPEN_TRADES
 import data_layer
@@ -133,6 +134,21 @@ async def crypto_pay_webhook(request: Request):
     return result
 
 
+@app.post("/api/heleket-webhook")
+async def heleket_webhook(request: Request):
+    """Webhook Heleket: status paid → автовыдача Premium."""
+    if not heleket_pay.is_configured():
+        raise HTTPException(status_code=503, detail="Heleket not configured")
+    ip = _client_ip(request)
+    if not heleket_pay.webhook_ip_allowed(ip):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    return await heleket_pay.handle_webhook(body)
+
+
 # ── Аутентификация / монетизация ──────────────────────────────────
 class AuthRequest(BaseModel):
     email: str
@@ -187,6 +203,41 @@ def require_user(authorization: str | None = Header(default=None)):
     if not user:
         raise HTTPException(status_code=401, detail="Требуется вход")
     return user
+
+
+class HeleketCreateRequest(BaseModel):
+    period: str = "month"  # month | 3mo | lifetime
+
+
+@app.get("/api/payments/config")
+def payments_config():
+    return {
+        "heleket": heleket_pay.is_configured(),
+        "crypto_pay": crypto_pay.is_configured(),
+    }
+
+
+@app.post("/api/payments/heleket/create")
+async def heleket_create_invoice(req: HeleketCreateRequest, user=Depends(require_user)):
+    """Создаёт счёт Heleket и возвращает ссылку на оплату."""
+    if not heleket_pay.is_configured():
+        raise HTTPException(status_code=503, detail="Heleket не настроен")
+    period = req.period if req.period in ("month", "3mo", "lifetime") else "month"
+    invoice = await heleket_pay.create_invoice(
+        user_id=user["id"],
+        email=user["email"],
+        period=period,
+        telegram_id=user.get("telegram_id"),
+    )
+    if not invoice or not invoice.get("url"):
+        raise HTTPException(status_code=502, detail="Не удалось создать счёт Heleket")
+    return {
+        "pay_url": invoice["url"],
+        "order_id": invoice.get("order_id"),
+        "amount": heleket_pay.plan_amount(period),
+        "currency": heleket_pay.HELEKET_CURRENCY,
+        "period": period,
+    }
 
 
 def require_tier(min_tier: str):
