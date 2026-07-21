@@ -4,7 +4,7 @@ import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts'
 import { api } from './api'
 import {
   useLivePrices, CountUp, useReveal, resultLabel,
-  TG_BOT, TG_RESULTS_CHANNEL, TG_PREMIUM,
+  TG_BOT, TG_RESULTS_CHANNEL, TG_PREMIUM, TG_SUPPORT, TG_SUPPORT_USER, SUPPORT_EMAIL,
   polishHistory, polishStats, buildShowcaseCurve,
 } from './shared'
 import { useI18n } from './i18n'
@@ -118,6 +118,14 @@ export default function Landing() {
       key: 'premium', name: t('land.tier.premium.name'), price: '29', unit: t('land.tier.premium.unit'),
       features: [t('land.tier.premium.f1'), t('land.tier.premium.f2'), t('land.tier.premium.f3')], popular: true,
     },
+    {
+      key: 'premium3', name: t('land.tier.premium3.name'), price: '75', unit: t('land.tier.premium3.unit'),
+      features: [t('land.tier.premium3.f1'), t('land.tier.premium3.f2'), t('land.tier.premium3.f3')],
+    },
+    {
+      key: 'lifetime', name: t('land.tier.lifetime.name'), price: '299', unit: t('land.tier.lifetime.unit'),
+      features: [t('land.tier.lifetime.f1'), t('land.tier.lifetime.f2'), t('land.tier.lifetime.f3')],
+    },
   ], [t])
   const [menuOpen, setMenuOpen] = useState(false)
   const [dark, setDark] = useState(() => {
@@ -154,6 +162,7 @@ export default function Landing() {
             <a href="#signals" onClick={e => { e.preventDefault(); go('#signals') }}>{t('land.nav.signals')}</a>
             <a href="#pricing" onClick={e => { e.preventDefault(); go('#pricing') }}>{t('land.nav.pricing')}</a>
             <a href="#about" onClick={e => { e.preventDefault(); go('#about') }}>{t('land.nav.about')}</a>
+            <a href="#support" onClick={e => { e.preventDefault(); go('#support') }}>{t('land.nav.support')}</a>
             <a href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">{t('land.nav.results')}</a>
           </div>
           <div className="nav-right">
@@ -299,6 +308,7 @@ export default function Landing() {
                   className="btn-solid"
                   onClick={() => {
                     if (tier.key === 'free') navigate('/app/overview')
+                    else if (tier.key === 'lifetime') window.open(`${TG_BOT}?start=premium`, '_blank', 'noopener,noreferrer')
                     else window.open(`${TG_BOT}?start=premium`, '_blank', 'noopener,noreferrer')
                   }}
                 >
@@ -327,19 +337,53 @@ export default function Landing() {
         </div>
       </section>
 
+      <section id="support" className="section">
+        <div className="inner">
+          <h2 className="sec-title reveal">{t('land.support.title')}</h2>
+          <p className="sec-sub reveal">{t('land.support.sub')}</p>
+          <div className="support-grid reveal">
+            <a className="support-card" href={TG_SUPPORT} target="_blank" rel="noopener noreferrer">
+              <div className="support-label">{t('land.support.tgLabel')}</div>
+              <div className="support-value">@{TG_SUPPORT_USER}</div>
+              <div className="support-hint">{t('land.support.tgHint')}</div>
+            </a>
+            <a className="support-card" href={`mailto:${SUPPORT_EMAIL}`}>
+              <div className="support-label">{t('land.support.emailLabel')}</div>
+              <div className="support-value">{SUPPORT_EMAIL}</div>
+              <div className="support-hint">{t('land.support.emailHint')}</div>
+            </a>
+            <a className="support-card" href={TG_BOT} target="_blank" rel="noopener noreferrer">
+              <div className="support-label">{t('land.support.botLabel')}</div>
+              <div className="support-value">{t('land.support.botValue')}</div>
+              <div className="support-hint">{t('land.support.botHint')}</div>
+            </a>
+          </div>
+          <p className="support-hours reveal">{t('land.support.hours')}</p>
+        </div>
+      </section>
+
       <footer className="footer">
         <div className="inner foot">
           <div>
             <div className="nav-word">NOWICKI</div>
             <p className="muted">{t('land.footer.desc')}</p>
+            <p className="muted small" style={{ marginTop: 8 }}>
+              {t('land.footer.products')}: Free · Premium $29/mo · Premium 3mo $75 · Lifetime $299
+            </p>
           </div>
           <div className="foot-links">
             <a href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">{t('land.footer.results')}</a>
-            <a href={TG_PREMIUM} target="_blank" rel="noopener noreferrer">{t('land.footer.premium')}</a>
+            <a href="#pricing" onClick={e => { e.preventDefault(); go('#pricing') }}>{t('land.footer.premium')}</a>
             <a href={TG_BOT} target="_blank" rel="noopener noreferrer">{t('land.footer.bot')}</a>
+            <a href="#support" onClick={e => { e.preventDefault(); go('#support') }}>{t('land.footer.support')}</a>
+            <a href="/support.html">{t('land.footer.contacts')}</a>
             <button type="button" onClick={() => navigate('/app/overview')}>{t('land.footer.platform')}</button>
           </div>
-          <div className="muted small">{t('land.footer.disclaimer', { year: new Date().getFullYear() })}</div>
+          <div className="muted small">
+            <div>{t('land.footer.supportLine')}: <a href={TG_SUPPORT} target="_blank" rel="noopener noreferrer">@{TG_SUPPORT_USER}</a>
+              {' · '}<a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a></div>
+            <div style={{ marginTop: 6 }}>{t('land.footer.disclaimer', { year: new Date().getFullYear() })}</div>
+          </div>
         </div>
       </footer>
 
@@ -476,7 +520,7 @@ export default function Landing() {
         .honest-list li::before { content: ''; position: absolute; left: 0; top: .55em; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
         .honest-cta { display: flex; flex-direction: column; gap: 10px; }
 
-        .price-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 320px)); gap: 16px; justify-content: center; }
+        .price-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 280px)); gap: 16px; justify-content: center; }
         .price-card {
           position: relative; border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 28px;
           background: var(--surface); display: flex; flex-direction: column; gap: 12px;
@@ -495,6 +539,19 @@ export default function Landing() {
         .faq-q { width: 100%; display: flex; justify-content: space-between; gap: 16px; padding: 18px 0; background: none; border: none; color: var(--text); font-size: 15px; font-weight: 600; text-align: left; }
         .faq-a { padding-bottom: 16px; color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
 
+        .support-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; max-width: 900px; }
+        .support-card {
+          display: block; text-decoration: none; color: inherit;
+          border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px;
+          background: var(--surface); box-shadow: var(--shadow-card), var(--inset-highlight);
+          transition: border-color .2s, transform .2s;
+        }
+        .support-card:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); transform: translateY(-2px); }
+        .support-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-tertiary); font-weight: 700; }
+        .support-value { font-size: 18px; font-weight: 700; margin: 8px 0 6px; font-family: var(--font-mono); color: var(--accent); }
+        .support-hint { font-size: 13px; color: var(--text-secondary); line-height: 1.45; }
+        .support-hours { margin-top: 16px; font-size: 13px; color: var(--text-tertiary); }
+
         .footer { padding: 48px 0 28px; border-top: 1px solid var(--border); }
         .foot { display: grid; gap: 20px; }
         .foot-links { display: flex; gap: 16px; flex-wrap: wrap; }
@@ -502,7 +559,7 @@ export default function Landing() {
         .foot-links a:hover, .foot-links button:hover { color: var(--accent); }
 
         @media (max-width: 900px) {
-          .hero-grid, .about, .price-grid { grid-template-columns: 1fr; }
+          .hero-grid, .about, .price-grid, .support-grid { grid-template-columns: 1fr; }
           .scanner-body { grid-template-columns: 1fr; }
           .scan-feed { border-left: none; border-top: 1px solid var(--border); }
         }

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { TG_RESULTS_CHANNEL, TG_PREMIUM } from './shared'
+import { TG_RESULTS_CHANNEL, TG_PREMIUM, TG_SUPPORT, TG_SUPPORT_USER, SUPPORT_EMAIL } from './shared'
 import { api } from './api'
 import { useI18n } from './i18n'
 
@@ -216,6 +216,18 @@ export default function Pricing({ user, onNeedAuth }) {
 
       <div className="pr-exchange-note">{t('price.exchangeNotePrefix')} <strong>Bybit</strong> {t('price.exchangeNoteSuffix')}</div>
 
+      <div className="pr-support">
+        <div className="pr-support-title">{t('price.supportTitle')}</div>
+        <div className="pr-support-body">
+          {t('price.supportBody')}{' '}
+          <a href={TG_SUPPORT} target="_blank" rel="noopener noreferrer">@{TG_SUPPORT_USER}</a>
+          {' · '}
+          <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
+          {' · '}
+          <a href="/support.html">{t('price.supportPage')}</a>
+        </div>
+      </div>
+
       <h2 className="pr-faq-title">{t('price.faqTitle')}</h2>
       <div className="pr-faq-list">
         {FAQ.map((f, i) => (
@@ -256,6 +268,10 @@ export default function Pricing({ user, onNeedAuth }) {
         .pr-period-off { font-size: 10px; color: var(--long); font-weight: 700; }
 
         .pr-exchange-note { text-align: center; font-size: 12px; color: var(--text-tertiary); margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+        .pr-support { max-width: 640px; margin: 20px auto 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+        .pr-support-title { font-size: 14px; font-weight: 650; margin-bottom: 6px; }
+        .pr-support-body { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+        .pr-support-body a { color: var(--accent); }
 
         .pr-faq-title { font-size: 20px; font-weight: 700; color: var(--text); margin: 40px 0 8px; text-align: center; font-family: var(--font-display); letter-spacing: -0.02em; }
         .pr-faq-list { max-width: 700px; margin: 16px auto 0; }

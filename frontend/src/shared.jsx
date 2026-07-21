@@ -8,6 +8,10 @@ export const TG_RESULTS_CHANNEL =
 /** @deprecated для ТВХ — ведём на бота Premium; алиас на результаты для старых ссылок */
 export const TG_CHANNEL = TG_RESULTS_CHANNEL
 export const TG_PREMIUM = `${TG_BOT}?start=premium`
+/** Поддержка клиентов (Heleket / сайт / бот) */
+export const TG_SUPPORT = 'https://t.me/Kupyansk_2'
+export const TG_SUPPORT_USER = 'Kupyansk_2'
+export const SUPPORT_EMAIL = 'support@nowicki.trade'
 
 /** Ключи результатов сделки — переводы лежат в i18n под result.* */
 export const RESULT_KEYS = [
