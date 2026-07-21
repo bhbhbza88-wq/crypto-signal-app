@@ -208,9 +208,9 @@ export default function HistoryTable({ history, stats = null, isPremium = true, 
                   <th>{t('hist.col.time')}</th>
                   <th>{t('hist.col.coin')}</th>
                   <th>{t('hist.col.signal')}</th>
-                  <th>{t('hist.col.entry')}</th>
+                  <th className="num-right">{t('hist.col.entry')}</th>
                   <th>{t('hist.col.result')}</th>
-                  <th>{t('hist.col.pnl')}</th>
+                  <th className="num-right">{t('hist.col.pnl')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -222,9 +222,9 @@ export default function HistoryTable({ history, stats = null, isPremium = true, 
                     <td>
                       <span className={`dir-badge ${row.signal === 'LONG' ? 'long' : 'short'}`}>{row.signal}</span>
                     </td>
-                    <td className="mono dim">{row.entry?.toFixed(4)}</td>
+                    <td className="mono dim num-right">{row.entry?.toFixed(4)}</td>
                     <td>{resultLabel(t, row.result)}</td>
-                    <td className={`mono pnl ${row.pnl > 0 ? 'pos' : row.pnl < 0 ? 'neg' : ''}`}>
+                    <td className={`mono pnl ${row.pnl > 0 ? 'pos' : row.pnl < 0 ? 'neg' : ''} num-right`}>
                       {row.pnl > 0 ? '+' : ''}{row.pnl}%
                     </td>
                   </tr>
@@ -240,7 +240,7 @@ export default function HistoryTable({ history, stats = null, isPremium = true, 
                       <span className="mono symbol-cell">{row.symbol.replace('/USDT', '')}</span>
                       <span className={`dir-badge ${row.signal === 'LONG' ? 'long' : 'short'}`}>{row.signal}</span>
                     </div>
-                    <span className={`mono pnl ${row.pnl > 0 ? 'pos' : row.pnl < 0 ? 'neg' : ''}`}>
+                    <span className={`mono pnl ${row.pnl > 0 ? 'pos' : row.pnl < 0 ? 'neg' : ''} num-right`}>
                       {row.pnl > 0 ? '+' : ''}{row.pnl}%
                     </span>
                   </div>
@@ -316,7 +316,7 @@ function HistoryStyles() {
       .hist-lock-btn:hover { opacity: 0.92; }
 
       .history-table-wrap { overflow: hidden; }
-      .history-table { width: 100%; border-collapse: collapse; font-size: 13px; display: table; }
+      .history-table { width: 100%; border-collapse: collapse; border-spacing: 0; font-size: 13px; display: table; }
       .history-table th {
         text-align: left; padding: 12px 16px;
         color: var(--text-tertiary); font-size: 10px;
@@ -327,15 +327,26 @@ function HistoryStyles() {
       .history-table td {
         padding: 11px 16px; border-bottom: 1px solid var(--border);
         color: var(--text); white-space: nowrap;
+        vertical-align: middle;
       }
       .history-table tbody tr:last-child td { border-bottom: none; }
-      .history-table tbody tr:hover { background: color-mix(in srgb, var(--bg) 40%, transparent); }
+      .history-table th.num-right,
+      .history-table td.num-right { text-align: right; }
+      .history-table tbody tr:nth-child(even) td {
+        background: color-mix(in srgb, var(--surface-hover) 22%, transparent);
+      }
+      .history-table tbody tr:hover td {
+        background: color-mix(in srgb, var(--bg) 40%, transparent);
+      }
+      .history-table tbody tr td { transition: background 0.15s ease; }
       .mono { font-family: var(--font-mono); }
       .dim { color: var(--text-secondary); }
       .symbol-cell { font-weight: 650; color: var(--text); }
       .dir-badge {
         font-size: 11px; font-weight: 650; padding: 3px 8px; border-radius: 6px;
         font-family: var(--font-mono);
+        min-width: 72px;
+        text-align: center;
       }
       .dir-badge.long { background: var(--long-soft); color: var(--long); }
       .dir-badge.short { background: var(--short-soft); color: var(--short); }
@@ -349,8 +360,13 @@ function HistoryStyles() {
       @media (max-width: 680px) {
         .history-table { display: none; }
         .history-cards { display: flex; flex-direction: column; }
-        .history-row-card { padding: 14px 16px; border-bottom: 1px solid var(--border); }
-        .history-row-card:last-child { border-bottom: none; }
+        .history-row-card {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          padding: 14px 14px;
+          margin-bottom: 10px;
+        }
         .hrc-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
         .hrc-symbol-group { display: flex; align-items: center; gap: 8px; }
         .hrc-bottom { display: flex; justify-content: space-between; font-size: 12px; }
