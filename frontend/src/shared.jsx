@@ -11,7 +11,7 @@ export const TG_PREMIUM = `${TG_BOT}?start=premium`
 /** Поддержка клиентов (Heleket / сайт / бот) */
 export const TG_SUPPORT = 'https://t.me/Kupyansk_2'
 export const TG_SUPPORT_USER = 'Kupyansk_2'
-export const SUPPORT_EMAIL = 'support@nowicki.trade'
+export const SUPPORT_EMAIL = 'bhbhbza.88@gmail.com'
 
 /** Ключи результатов сделки — переводы лежат в i18n под result.* */
 export const RESULT_KEYS = [
