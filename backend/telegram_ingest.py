@@ -21,6 +21,7 @@ import os
 import re
 import json
 import asyncio
+from datetime import datetime, timedelta
 
 import ai_client
 import database as db
@@ -28,6 +29,7 @@ import data_layer
 import tracker
 import telegram_bot
 from signal_ingest import normalize_symbol, open_signal
+from channel_parsers import parse_signal_text
 
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "")
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
@@ -41,6 +43,11 @@ AI_VISION_MODEL = ai_client.MODEL_VISION
 
 SOURCE_TYPE = "telegram_aggregate"
 AGG_MAX_OPEN = 8  # с 7 источниками лимит 5 слишком рано режет поток
+
+# Health: алерт, если канал молчит дольше N минут (при живом ingest)
+INGEST_SILENCE_MINUTES = int(os.getenv("INGEST_SILENCE_MINUTES", "120") or "120")
+INGEST_HEALTH_CHECK_SEC = int(os.getenv("INGEST_HEALTH_CHECK_SEC", "300") or "300")
+_last_silence_alert_at: dict[str, float] = {}
 
 # Предфильтр: не звать Haiku на мемы/флуд (см. channel_backtest.looks_like_signal)
 _SIGNAL_KEYWORDS_RE = re.compile(
@@ -78,8 +85,6 @@ MIN_RISK_PCT = 0.004            # стоп ближе 0.4% — шум
 MAX_RISK_PCT = 0.09             # стоп шире 9% — мусор
 MAX_ENTRY_SLIP_PCT = 0.025      # цена ушла >2.5% от entry — поздно
 MAX_PER_CHANNEL_DAY = 4         # чтобы один канал не забил слоты
-
-_channel_day_counts: dict[str, tuple[str, int]] = {}  # alias -> (YYYY-MM-DD, count)
 
 EXTRACTOR_SYSTEM_PROMPT = (
     "Ты извлекаешь параметры торгового сигнала из сообщения крипто-канала. "
@@ -125,9 +130,19 @@ def _parse_channel_config(raw: str) -> dict:
 
 
 async def _extract_signal(text: str) -> dict | None:
-    if not ai_client.fast_configured() or not text.strip():
+    if not text.strip():
         return None
     if not looks_like_signal(text):
+        return None
+
+    # 1) Regex-парсеры — дёшево и стабильно для известных форматов
+    regex_hit = parse_signal_text(text)
+    if regex_hit:
+        print(f"[telegram_ingest] regex parse: {regex_hit.get('symbol')} {regex_hit.get('side')}")
+        return regex_hit
+
+    # 2) AI fallback
+    if not ai_client.fast_configured():
         return None
     try:
         parsed = await ai_client.fast_json_completion(
@@ -137,12 +152,13 @@ async def _extract_signal(text: str) -> dict | None:
         )
     except Exception as e:
         print(f"[telegram_ingest] Ошибка извлечения сигнала: {e}")
-        return None
+        raise  # пусть caller поставит в retry queue
 
     if not parsed.get("is_signal"):
         return None
     if any(parsed.get(k) is None for k in ("symbol", "side", "entry", "stop", "tp1")):
         return None
+    parsed["parser"] = "ai"
     return parsed
 
 
@@ -175,33 +191,20 @@ async def _extract_signal_from_image(image_bytes: bytes, caption: str = "") -> d
 
 
 def _derive_tp_ladder(side: str, entry: float, tp1: float) -> tuple[float, float]:
-    """Канал почти никогда не называет TP2/TP3 отдельно — достраиваем их от TP1
-    тем же шагом, что entry->TP1. Это наша механика частичного закрытия,
-    а не слова канала — никогда не подписываем это как исходящее от источника."""
+    """Мягкие TP2/TP3 только для отображения на графике.
+    Для aggregated exit_mode=tp1_trail — tracker НЕ закрывает по ним."""
     step = tp1 - entry if side == 'LONG' else entry - tp1
     sign = 1 if side == 'LONG' else -1
     return tp1 + sign * step, tp1 + sign * 2 * step
 
 
-def _channel_day_count(display_name: str) -> int:
-    from datetime import date
-    today = date.today().isoformat()
-    day, count = _channel_day_counts.get(display_name, (today, 0))
-    return 0 if day != today else count
-
-
 def _channel_day_ok(display_name: str) -> bool:
     """Лимит сигналов с одного потока за сутки — иначе шумный канал съест квоту."""
-    return _channel_day_count(display_name) < MAX_PER_CHANNEL_DAY
+    return db.channel_day_count(display_name) < MAX_PER_CHANNEL_DAY
 
 
 def _channel_day_bump(display_name: str) -> None:
-    from datetime import date
-    today = date.today().isoformat()
-    day, count = _channel_day_counts.get(display_name, (today, 0))
-    if day != today:
-        count = 0
-    _channel_day_counts[display_name] = (today, count + 1)
+    db.channel_day_bump(display_name)
 
 
 def _score_setup(side: str, entry: float, stop: float, tp1: float,
@@ -364,14 +367,40 @@ async def _try_close_from_channel(display_name: str, text: str):
             print(f"[telegram_ingest] chat_engage close: {e}")
 
 
-async def _handle_message(display_name: str, msg):
+async def _handle_message(display_name: str, msg, channel_username: str | None = None):
     """`msg` — Telethon Message или NewMessage.Event.
-    Предфильтр → Haiku JSON; vision только при INGEST_VISION=1."""
+    Предфильтр → regex → Haiku JSON; vision только при INGEST_VISION=1."""
+    channel = (channel_username or display_name).lstrip("@")
+    msg_id = getattr(msg, "id", None)
     text = (msg.raw_text or "").strip() if hasattr(msg, "raw_text") else ""
-    parsed = await _extract_signal(text) if text else None
+
+    db.touch_ingest_health(channel, alias=display_name, message=True)
+
+    if msg_id is not None and db.is_message_processed(channel, msg_id):
+        db.clear_ingest_retry(channel, msg_id)
+        return
+
+    parsed = None
+    ai_failed = False
+    try:
+        parsed = await _extract_signal(text) if text else None
+    except Exception as e:
+        ai_failed = True
+        db.touch_ingest_health(channel, alias=display_name, error=str(e)[:200])
+        if msg_id is not None:
+            db.enqueue_ingest_retry(
+                channel=channel,
+                channel_alias=display_name,
+                message_id=msg_id,
+                text=text[:2000],
+                reason=f"ai_error:{e}",
+            )
+            print(f"[telegram_ingest] {display_name}: AI fail → retry queue msg={msg_id}")
+        return
 
     if (
         not parsed
+        and not ai_failed
         and ai_client.INGEST_VISION
         and getattr(msg, "photo", None)
         and (not text or looks_like_signal(text) or len(text) < 40)
@@ -382,41 +411,85 @@ async def _handle_message(display_name: str, msg):
             print(f"[telegram_ingest] {display_name}: не удалось скачать картинку — {e}")
             image_bytes = None
         if image_bytes:
-            parsed = await _extract_signal_from_image(image_bytes, text)
+            try:
+                parsed = await _extract_signal_from_image(image_bytes, text)
+            except Exception as e:
+                if msg_id is not None:
+                    db.enqueue_ingest_retry(
+                        channel=channel,
+                        channel_alias=display_name,
+                        message_id=msg_id,
+                        text=text[:2000],
+                        reason=f"vision_error:{e}",
+                    )
+                return
 
     if not parsed:
         await _try_close_from_channel(display_name, text)
+        if msg_id is not None:
+            db.mark_message_processed(channel, msg_id)
         return
 
     side = str(parsed["side"]).upper().strip()
     if side not in ('LONG', 'SHORT'):
+        if msg_id is not None:
+            db.mark_message_processed(channel, msg_id)
         return
 
     symbol = normalize_symbol(str(parsed["symbol"]))
-    listed, exchange_id, ticker = await asyncio.to_thread(data_layer.probe_listings, symbol)
+    try:
+        listed, exchange_id, ticker = await asyncio.to_thread(data_layer.probe_listings, symbol)
+    except Exception as e:
+        if msg_id is not None:
+            db.enqueue_ingest_retry(
+                channel=channel,
+                channel_alias=display_name,
+                message_id=msg_id,
+                text=text[:2000],
+                reason=f"exchange_error:{e}",
+            )
+        print(f"[telegram_ingest] {display_name}: exchange probe fail {symbol} → retry")
+        return
+
     if not exchange_id or not ticker:
         print(f"[telegram_ingest] {display_name}: символ {symbol} не торгуется на Bybit/Binance, пропуск")
+        if msg_id is not None:
+            db.mark_message_processed(channel, msg_id)
         return
 
     listed_csv = ','.join(listed)
-    print(f"[telegram_ingest] {display_name}: {symbol} via {exchange_id} (listed: {listed_csv})")
+    parser_tag = parsed.get("parser") or "ai"
+    print(f"[telegram_ingest] {display_name}: {symbol} via {exchange_id} [{parser_tag}] (listed: {listed_csv})")
 
     last = ticker.get("last")
     entry, stop, tp1 = float(parsed["entry"]), float(parsed["stop"]), float(parsed["tp1"])
     quality, qdetail = _score_setup(side, entry, stop, tp1, last, display_name)
     if quality is None:
         print(f"[telegram_ingest] {display_name}: {symbol} отклонён — {qdetail}")
+        if msg_id is not None:
+            db.mark_message_processed(channel, msg_id)
         return
 
     if not _channel_day_ok(display_name):
         print(f"[telegram_ingest] {display_name}: дневной лимит ({MAX_PER_CHANNEL_DAY}), пропуск {symbol}")
+        if msg_id is not None:
+            db.mark_message_processed(channel, msg_id)
         return
 
     if _count_open_aggregated() >= AGG_MAX_OPEN:
         print(f"[telegram_ingest] Лимит агрегатора ({AGG_MAX_OPEN}) достигнут, пропуск {symbol} от {display_name}")
+        if msg_id is not None:
+            db.mark_message_processed(channel, msg_id)
         return
 
-    tp2, tp3 = _derive_tp_ladder(side, entry, tp1)
+    # TP2/TP3: только если канал сам назвал; иначе soft placeholders для UI
+    if parsed.get("tp2") is not None and parsed.get("tp3") is not None:
+        tp2, tp3 = float(parsed["tp2"]), float(parsed["tp3"])
+    elif parsed.get("tp2") is not None:
+        tp2 = float(parsed["tp2"])
+        _, tp3 = _derive_tp_ladder(side, entry, tp1)
+    else:
+        tp2, tp3 = _derive_tp_ladder(side, entry, tp1)
 
     trader_id = db.get_or_create_source_trader(
         display_name, source_url=None, source_type=SOURCE_TYPE,
@@ -428,25 +501,32 @@ async def _handle_message(display_name: str, msg):
         trader_id=trader_id, regime=SOURCE_TYPE,
         reasons=[
             f"Автоимпорт из потока: {display_name}",
+            f"Parser: {parser_tag}",
             f"Quality filter: {qdetail}",
             f"Листинг: {data_layer.listings_label(listed)}",
         ],
         score=quality,
         exchange=exchange_id,
         listed_on=listed_csv,
+        exit_mode="tp1_trail",
     )
     if err:
         print(f"[telegram_ingest] {display_name}: {symbol} пропущен ({err})")
+        if msg_id is not None:
+            db.mark_message_processed(channel, msg_id)
+            db.clear_ingest_retry(channel, msg_id)
         return
 
     _channel_day_bump(display_name)
+    db.touch_ingest_health(channel, alias=display_name, signal=True)
     db.add_event(opened_symbol, "telegram_aggregate_signal",
-                 f"{display_name}: {side} {opened_symbol} @ {entry} ({qdetail}, {listed_csv})")
+                 f"{display_name}: {side} {opened_symbol} @ {entry} ({qdetail}, {listed_csv}, {parser_tag})")
     print(f"[telegram_ingest] Открыт сигнал {opened_symbol} от {display_name} ({qdetail}, via {exchange_id})")
 
-    # Публикуем в наш собственный TG-канал тем же путём, что ручные сигналы
-    # админа и TradingView-вебхук (telegram_bot.notify_manual_signal) — источник
-    # честно указан как display_name (внутренний алиас), а не реальный канал.
+    if msg_id is not None:
+        db.mark_message_processed(channel, msg_id)
+        db.clear_ingest_retry(channel, msg_id)
+
     try:
         await telegram_bot.notify_manual_signal({
             "symbol": opened_symbol, "signal": side,
@@ -472,6 +552,104 @@ def is_configured() -> bool:
 BACKFILL_INTERVAL_SEC = 180
 
 
+async def _retry_loop(channels: dict):
+    """Повторная обработка сообщений после временных сбоев AI/биржи."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            due = db.pop_due_ingest_retries(limit=15)
+            for item in due:
+                alias = item["channel_alias"]
+                ch = item["channel"]
+                text = item.get("text") or ""
+                # Синтетический msg с id — чтобы _handle_message мог mark/clear
+                class _FakeMsg:
+                    def __init__(self, mid, raw):
+                        self.id = mid
+                        self.raw_text = raw
+                        self.photo = None
+
+                try:
+                    await _handle_message(alias, _FakeMsg(item["message_id"], text), ch)
+                except Exception as e:
+                    print(f"[telegram_ingest] retry fail {ch}/{item['message_id']}: {e}")
+            db.purge_failed_ingest_retries()
+        except Exception as e:
+            print(f"[telegram_ingest] retry loop: {e}")
+
+
+async def _health_loop(channels: dict):
+    """Алерт админам, если канал молчит дольше INGEST_SILENCE_MINUTES."""
+    # Даём ingest прогреться
+    await asyncio.sleep(120)
+    while True:
+        try:
+            rows = {r["channel"]: r for r in db.list_ingest_health()}
+            now = datetime.now()
+            silent = []
+            for username, alias in channels.items():
+                row = rows.get(username)
+                last_at = row.get("last_message_at") if row else None
+                if not last_at:
+                    # ещё не было ни одного сообщения с момента старта — не орём сразу
+                    continue
+                try:
+                    age_min = (now - datetime.fromisoformat(last_at)).total_seconds() / 60
+                except (ValueError, TypeError):
+                    continue
+                if age_min >= INGEST_SILENCE_MINUTES:
+                    # не спамим чаще раза в час на канал
+                    last_alert = _last_silence_alert_at.get(username, 0)
+                    if (now.timestamp() - last_alert) >= 3600:
+                        silent.append(f"· {alias} (@{username}): тишина {age_min:.0f} мин")
+                        _last_silence_alert_at[username] = now.timestamp()
+            if silent:
+                await telegram_bot._notify_admins(
+                    "⚠️ Ingest health\n"
+                    f"Каналы молчат >{INGEST_SILENCE_MINUTES} мин:\n"
+                    + "\n".join(silent)
+                )
+        except Exception as e:
+            print(f"[telegram_ingest] health loop: {e}")
+        await asyncio.sleep(INGEST_HEALTH_CHECK_SEC)
+
+
+def ingest_health_snapshot() -> dict:
+    """Для API /api/ingest/health."""
+    channels = _parse_channel_config(TELEGRAM_SOURCE_CHANNELS) if TELEGRAM_SOURCE_CHANNELS else {}
+    rows = {r["channel"]: r for r in db.list_ingest_health()}
+    now = datetime.now()
+    items = []
+    for username, alias in channels.items():
+        row = rows.get(username) or {}
+        last_msg = row.get("last_message_at")
+        last_sig = row.get("last_signal_at")
+        age_min = None
+        if last_msg:
+            try:
+                age_min = round((now - datetime.fromisoformat(last_msg)).total_seconds() / 60, 1)
+            except (ValueError, TypeError):
+                age_min = None
+        items.append({
+            "channel": username,
+            "alias": alias,
+            "last_message_at": last_msg,
+            "last_signal_at": last_sig,
+            "silence_minutes": age_min,
+            "ok": age_min is None or age_min < INGEST_SILENCE_MINUTES,
+            "last_error": row.get("last_error"),
+            "day_count": db.channel_day_count(alias),
+            "day_limit": MAX_PER_CHANNEL_DAY,
+        })
+    return {
+        "configured": is_configured(),
+        "silence_threshold_min": INGEST_SILENCE_MINUTES,
+        "channels": items,
+        "open_aggregated": _count_open_aggregated(),
+        "agg_max_open": AGG_MAX_OPEN,
+    }
+
+
 async def _backfill_loop(client, channels: dict, last_ids: dict):
     """events.NewMessage — чисто реактивный листенер: если соединение с Telegram
     оборвётся хоть на секунды (сетевой блип, реконнект Telethon), сообщение,
@@ -482,7 +660,7 @@ async def _backfill_loop(client, channels: dict, last_ids: dict):
     возможно только если событие вообще не сработало.
     Догоняем каждые BACKFILL_INTERVAL_SEC: перечитываем историю каждого канала
     после последнего виденного message id. Безопасно дублировать с live-хендлером —
-    open_signal() отбрасывает 'already_open' по символу, а не по id сообщения."""
+    processed_messages + open_signal() отбрасывают дубли."""
     while True:
         await asyncio.sleep(BACKFILL_INTERVAL_SEC)
         for username, display_name in channels.items():
@@ -493,11 +671,12 @@ async def _backfill_loop(client, channels: dict, last_ids: dict):
                     if msg.id > last_ids.get(username, 0):
                         last_ids[username] = msg.id
                     try:
-                        await _handle_message(display_name, msg)
+                        await _handle_message(display_name, msg, username)
                     except Exception as e:
                         print(f"[telegram_ingest] Ошибка догоняющей обработки сообщения из {display_name}: {e}")
             except Exception as e:
                 print(f"[telegram_ingest] Ошибка догоняющего опроса {display_name}: {e}")
+                db.touch_ingest_health(username, alias=display_name, error=str(e)[:200])
 
 
 # Меньше lookback = меньше Haiku-вызовов на каждый рестарт Railway
@@ -518,11 +697,15 @@ async def _run_once():
         username = (getattr(chat, "username", "") or "").lstrip("@")
         display_name = channels.get(username, "Сторонний агрегированный поток данных (Провайдер)")
         try:
-            await _handle_message(display_name, event)
+            await _handle_message(display_name, event, username)
         except Exception as e:
             print(f"[telegram_ingest] Ошибка обработки сообщения из {display_name}: {e}")
 
     await client.start()
+    try:
+        db.prune_processed_messages(keep_days=14)
+    except Exception as e:
+        print(f"[telegram_ingest] prune processed: {e}")
 
     engage_task = None
     try:
@@ -546,24 +729,28 @@ async def _run_once():
                 if msg.id > last_ids.get(username, 0):
                     last_ids[username] = msg.id
                 try:
-                    await _handle_message(display_name, msg)
+                    await _handle_message(display_name, msg, username)
                 except Exception as e:
                     print(f"[telegram_ingest] Ошибка стартового догона {display_name}: {e}")
             print(f"[telegram_ingest] Стартовый догон {display_name}: {len(recent)} сообщений")
         except Exception as e:
             print(f"[telegram_ingest] Не удалось прочитать {display_name}: {e}")
             last_ids[username] = 0
+            db.touch_ingest_health(username, alias=display_name, error=str(e)[:200])
 
     backfill_task = asyncio.create_task(_backfill_loop(client, channels, last_ids))
+    retry_task = asyncio.create_task(_retry_loop(channels))
+    health_task = asyncio.create_task(_health_loop(channels))
     print(f"[telegram_ingest] Запущен, слушаю каналы: {', '.join(channels.values())}")
     try:
         await client.run_until_disconnected()
     finally:
-        backfill_task.cancel()
-        try:
-            await backfill_task
-        except asyncio.CancelledError:
-            pass
+        for task in (backfill_task, retry_task, health_task):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         if engage_task:
             engage_task.cancel()
             try:

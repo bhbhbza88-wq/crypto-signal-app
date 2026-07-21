@@ -296,6 +296,14 @@ def check_trades():
                         trade['stop'] = new_stop
                         db.upsert_trade(symbol, trade)
 
+            # Агрегированные каналы: после TP1 только trailing + timeout
+            # (не закрываем по синтетическим TP2/TP3 — они не от канала).
+            exit_mode = (trade.get('exit_mode') or (
+                'tp1_trail' if trade.get('regime') == 'telegram_aggregate' else 'ladder'
+            ))
+            if exit_mode == 'tp1_trail':
+                continue
+
             # ── TP2 ───────────────────────────────────────────────
             if not trade.get('tp2_hit') and _hit(signal, price, tp2, 'tp'):
                 trade['tp2_hit'] = True

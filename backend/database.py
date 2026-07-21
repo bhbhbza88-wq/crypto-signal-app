@@ -67,6 +67,7 @@ def init_db():
             ("trader_id", "INTEGER"),
             ("exchange", "TEXT DEFAULT 'bybit'"),
             ("listed_on", "TEXT DEFAULT 'bybit'"),
+            ("exit_mode", "TEXT DEFAULT 'ladder'"),
         ]:
             if col not in existing:
                 conn.execute(f"ALTER TABLE open_trades ADD COLUMN {col} {typedef}")
@@ -378,6 +379,53 @@ def init_db():
                 user_id INTEGER PRIMARY KEY,
                 pending INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
+            )
+        """)
+        # Ingest quality: уже обработанные TG-сообщения (не гоняем AI повторно)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS processed_messages (
+                channel TEXT NOT NULL,
+                message_id INTEGER NOT NULL,
+                processed_at TEXT NOT NULL,
+                PRIMARY KEY (channel, message_id)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_processed_msg_at ON processed_messages(processed_at)"
+        )
+        # Дневные лимиты сигналов с канала (живут между рестартами)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS channel_day_counts (
+                channel_alias TEXT NOT NULL,
+                day TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (channel_alias, day)
+            )
+        """)
+        # Health ingest: последняя активность по каналу
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ingest_channel_health (
+                channel TEXT PRIMARY KEY,
+                alias TEXT,
+                last_message_at TEXT,
+                last_signal_at TEXT,
+                last_error TEXT,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        # Retry queue: временные сбои AI/биржи
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ingest_retry_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel TEXT NOT NULL,
+                channel_alias TEXT NOT NULL,
+                message_id INTEGER NOT NULL,
+                text TEXT,
+                reason TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(channel, message_id)
             )
         """)
         # Чистим протухшие сессии/токены при старте, чтобы БД не пухла.
@@ -806,8 +854,8 @@ def insert_trade_if_not_exists(symbol, trade: dict) -> int:
                 (symbol, signal, entry, stop, tp1, tp2, tp3, score, regime,
                  tp1_hit, tp2_hit, be_hit, potential_warned, pre_tp1_trail,
                  opened_at, candles_json, entry_reasons_json, position_size, trader_id,
-                 exchange, listed_on)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 exchange, listed_on, exit_mode)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(symbol) DO NOTHING
         """, (
             symbol, trade['signal'], trade['entry'], trade['stop'],
@@ -823,6 +871,7 @@ def insert_trade_if_not_exists(symbol, trade: dict) -> int:
             trade.get('trader_id'),
             trade.get('exchange') or 'bybit',
             trade.get('listed_on') or (trade.get('exchange') or 'bybit'),
+            trade.get('exit_mode') or 'ladder',
         ))
         return cur.rowcount
 
@@ -834,8 +883,8 @@ def upsert_trade(symbol, trade: dict):
                 (symbol, signal, entry, stop, tp1, tp2, tp3, score, regime,
                  tp1_hit, tp2_hit, be_hit, potential_warned, pre_tp1_trail,
                  opened_at, candles_json, entry_reasons_json, position_size, trader_id,
-                 exchange, listed_on)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 exchange, listed_on, exit_mode)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(symbol) DO UPDATE SET
                 signal=excluded.signal, entry=excluded.entry, stop=excluded.stop,
                 tp1=excluded.tp1, tp2=excluded.tp2, tp3=excluded.tp3,
@@ -848,7 +897,8 @@ def upsert_trade(symbol, trade: dict):
                 position_size=excluded.position_size,
                 trader_id=excluded.trader_id,
                 exchange=excluded.exchange,
-                listed_on=excluded.listed_on
+                listed_on=excluded.listed_on,
+                exit_mode=excluded.exit_mode
         """, (
             symbol, trade['signal'], trade['entry'], trade['stop'],
             trade['tp1'], trade['tp2'], trade['tp3'],
@@ -863,6 +913,7 @@ def upsert_trade(symbol, trade: dict):
             trade.get('trader_id'),
             trade.get('exchange') or 'bybit',
             trade.get('listed_on') or (trade.get('exchange') or 'bybit'),
+            trade.get('exit_mode') or 'ladder',
         ))
 
 
@@ -1185,6 +1236,179 @@ def mark_heleket_order(order_id: str, status: str, heleket_uuid: str | None = No
                WHERE order_id=?""",
             (status, datetime.now().isoformat(), heleket_uuid, order_id),
         )
+
+
+# ── Ingest quality helpers ────────────────────────────────────────────
+
+def is_message_processed(channel: str, message_id: int) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM processed_messages WHERE channel=? AND message_id=?",
+            (channel, int(message_id)),
+        ).fetchone()
+        return bool(row)
+
+
+def mark_message_processed(channel: str, message_id: int) -> None:
+    with _lock, get_conn() as conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO processed_messages (channel, message_id, processed_at)
+               VALUES (?,?,?)""",
+            (channel, int(message_id), datetime.now().isoformat()),
+        )
+
+
+def prune_processed_messages(keep_days: int = 14) -> int:
+    cutoff = (datetime.now() - timedelta(days=keep_days)).isoformat()
+    with _lock, get_conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM processed_messages WHERE processed_at < ?", (cutoff,)
+        )
+        return cur.rowcount
+
+
+def channel_day_count(channel_alias: str) -> int:
+    today = datetime.now().strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT count FROM channel_day_counts WHERE channel_alias=? AND day=?",
+            (channel_alias, today),
+        ).fetchone()
+        return int(row["count"]) if row else 0
+
+
+def channel_day_bump(channel_alias: str) -> int:
+    today = datetime.now().strftime("%Y-%m-%d")
+    with _lock, get_conn() as conn:
+        conn.execute(
+            """INSERT INTO channel_day_counts (channel_alias, day, count)
+               VALUES (?,?,1)
+               ON CONFLICT(channel_alias, day) DO UPDATE SET count = count + 1""",
+            (channel_alias, today),
+        )
+        row = conn.execute(
+            "SELECT count FROM channel_day_counts WHERE channel_alias=? AND day=?",
+            (channel_alias, today),
+        ).fetchone()
+        return int(row["count"]) if row else 1
+
+
+def touch_ingest_health(
+    channel: str,
+    *,
+    alias: str | None = None,
+    message: bool = False,
+    signal: bool = False,
+    error: str | None = None,
+) -> None:
+    now = datetime.now().isoformat()
+    with _lock, get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM ingest_channel_health WHERE channel=?", (channel,)
+        ).fetchone()
+        if not row:
+            conn.execute(
+                """INSERT INTO ingest_channel_health
+                   (channel, alias, last_message_at, last_signal_at, last_error, updated_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (
+                    channel,
+                    alias,
+                    now if message else None,
+                    now if signal else None,
+                    error,
+                    now,
+                ),
+            )
+            return
+        conn.execute(
+            """UPDATE ingest_channel_health SET
+                 alias=COALESCE(?, alias),
+                 last_message_at=CASE WHEN ? THEN ? ELSE last_message_at END,
+                 last_signal_at=CASE WHEN ? THEN ? ELSE last_signal_at END,
+                 last_error=COALESCE(?, last_error),
+                 updated_at=?
+               WHERE channel=?""",
+            (
+                alias,
+                1 if message else 0, now,
+                1 if signal else 0, now,
+                error,
+                now,
+                channel,
+            ),
+        )
+
+
+def list_ingest_health() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM ingest_channel_health ORDER BY channel"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def enqueue_ingest_retry(
+    *,
+    channel: str,
+    channel_alias: str,
+    message_id: int,
+    text: str | None,
+    reason: str,
+    delay_sec: int = 45,
+) -> None:
+    next_at = (datetime.now() + timedelta(seconds=delay_sec)).isoformat()
+    now = datetime.now().isoformat()
+    with _lock, get_conn() as conn:
+        conn.execute(
+            """INSERT INTO ingest_retry_queue
+               (channel, channel_alias, message_id, text, reason, attempts, next_attempt_at, created_at)
+               VALUES (?,?,?,?,?,0,?,?)
+               ON CONFLICT(channel, message_id) DO UPDATE SET
+                 reason=excluded.reason,
+                 next_attempt_at=excluded.next_attempt_at,
+                 text=COALESCE(excluded.text, ingest_retry_queue.text)""",
+            (channel, channel_alias, int(message_id), text, reason, next_at, now),
+        )
+
+
+def pop_due_ingest_retries(limit: int = 20) -> list[dict]:
+    now = datetime.now().isoformat()
+    with _lock, get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM ingest_retry_queue
+               WHERE next_attempt_at <= ? AND attempts < 3
+               ORDER BY next_attempt_at ASC LIMIT ?""",
+            (now, limit),
+        ).fetchall()
+        out = [dict(r) for r in rows]
+        for r in out:
+            conn.execute(
+                """UPDATE ingest_retry_queue
+                   SET attempts = attempts + 1,
+                       next_attempt_at = ?
+                   WHERE id=?""",
+                (
+                    (datetime.now() + timedelta(seconds=60 * (r["attempts"] + 1))).isoformat(),
+                    r["id"],
+                ),
+            )
+        return out
+
+
+def clear_ingest_retry(channel: str, message_id: int) -> None:
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "DELETE FROM ingest_retry_queue WHERE channel=? AND message_id=?",
+            (channel, int(message_id)),
+        )
+
+
+def purge_failed_ingest_retries() -> int:
+    """Удаляет ретраи после 3 неудачных попыток."""
+    with _lock, get_conn() as conn:
+        cur = conn.execute("DELETE FROM ingest_retry_queue WHERE attempts >= 3")
+        return cur.rowcount
 
 
 def set_user_admin(user_id, is_admin: bool):

@@ -251,14 +251,16 @@ function CandleChart({ signal, t, livePrice }) {
   return <div ref={containerRef} className="tv-chart-canvas" />
 }
 
-export default function SignalCard({ signal }) {
+export default function SignalCard({ signal, onNeedPremium }) {
   const { t } = useI18n()
   const isLong = signal.signal === 'LONG'
   const tone = isLong ? 'var(--long)' : 'var(--short)'
   const toneSoft = isLong ? 'var(--long-soft)' : 'var(--short-soft)'
   const sym = signal.symbol.replace('/USDT', '')
+  const levelsLocked = !!signal.levels_locked
   // Premium Aggregator: confidence от техсканера нет; свечи с биржи трекинга
   const isAggregated = signal.trader?.source_type === 'telegram_aggregate'
+  const exitTrail = signal.exit_mode === 'tp1_trail' || isAggregated
   const venuesNote = formatListingsNote(signal.listed_on || signal.exchange, t)
 
   const candles = signal.candles || []
@@ -269,16 +271,24 @@ export default function SignalCard({ signal }) {
     signal.live_price ?? lastClose,
   )
   const displayPrice = livePrice ?? lastClose
-  const livePnlPct = displayPrice != null
+  const livePnlPct = (!levelsLocked && displayPrice != null && signal.entry != null)
     ? (isLong ? (displayPrice - signal.entry) / signal.entry * 100 : (signal.entry - displayPrice) / signal.entry * 100)
     : null
 
-  const stage = signal.tp2_hit ? t('signal.stageTp2') : signal.tp1_hit ? t('signal.stageTp1') : t('signal.stageOpen')
-  const pct = Math.round((signal.score / 20) * 100)
+  const stage = levelsLocked
+    ? t('signal.stageLocked')
+    : exitTrail && signal.tp1_hit
+      ? t('signal.stageTrail')
+      : signal.tp2_hit
+        ? t('signal.stageTp2')
+        : signal.tp1_hit
+          ? t('signal.stageTp1')
+          : t('signal.stageOpen')
+  const pct = Math.round(((signal.score || 0) / 20) * 100)
   const confColor = pct >= 80 ? 'var(--long)' : pct >= 60 ? 'var(--amber)' : 'var(--short)'
 
   return (
-    <div className="signal-card">
+    <div className={`signal-card ${levelsLocked ? 'levels-locked' : ''}`}>
       {/* Полоска уверенности сверху */}
       <div className="signal-confidence-stripe" style={{ background: `linear-gradient(90deg, ${confColor}22, transparent)`, borderTop: `3px solid ${confColor}` }} />
 
@@ -302,13 +312,13 @@ export default function SignalCard({ signal }) {
         </div>
         <div className="signal-meta">
           <MetaTag label={t('signal.mode')} value={isAggregated ? 'AI Scan' : signal.regime} />
-          <MetaTag label={t('signal.stage')} value={stage} highlight={stage !== t('signal.stageOpen')} />
+          <MetaTag label={t('signal.stage')} value={stage} highlight={stage !== t('signal.stageOpen') && stage !== t('signal.stageLocked')} />
         </div>
       </div>
 
       {/* Шкала уверенности — только для сигналов техсканера. У Premium Aggregator
           Feed score принципиально нет (не наш алгоритм это оценивал). */}
-      {!isAggregated && (
+      {!isAggregated && !levelsLocked && (
         <div className="confidence-section">
           <ConfidenceBar score={signal.score} maxScore={20} t={t} />
         </div>
@@ -336,16 +346,31 @@ export default function SignalCard({ signal }) {
         ) : (
           <div className="tv-empty">{t('signal.chartLoading')}</div>
         )}
-        <div className="tv-legend">
-          <LegendChip color="var(--accent)" label={t('signal.legend.entry')} value={signal.entry} />
-          <LegendChip color="var(--short)" label={t('signal.legend.sl')} value={signal.stop} />
-          <LegendChip color="var(--long)" label={t('signal.legend.tp1')} value={signal.tp1} />
-          <LegendChip color="var(--long)" label={t('signal.legend.tp2')} value={signal.tp2} dashed />
-          <LegendChip color="var(--long)" label={t('signal.legend.tp3')} value={signal.tp3} dashed />
-        </div>
+        {levelsLocked ? (
+          <div className="tv-locked">
+            <div className="tv-locked-title">{t('signal.levelsLockedTitle')}</div>
+            <div className="tv-locked-hint">{t('signal.levelsLockedHint')}</div>
+            <button type="button" className="tv-locked-btn" onClick={() => onNeedPremium?.()}>
+              {t('signal.levelsLockedCta')}
+            </button>
+          </div>
+        ) : (
+          <div className="tv-legend">
+            <LegendChip color="var(--accent)" label={t('signal.legend.entry')} value={signal.entry} />
+            <LegendChip color="var(--short)" label={t('signal.legend.sl')} value={signal.stop} />
+            <LegendChip color="var(--long)" label={t('signal.legend.tp1')} value={signal.tp1} />
+            {!exitTrail && (
+              <>
+                <LegendChip color="var(--long)" label={t('signal.legend.tp2')} value={signal.tp2} dashed />
+                <LegendChip color="var(--long)" label={t('signal.legend.tp3')} value={signal.tp3} dashed />
+              </>
+            )}
+            {exitTrail && <span className="tv-trail-note">{t('signal.trailNote')}</span>}
+          </div>
+        )}
       </div>
 
-      {signal.position_size != null && (
+      {signal.position_size != null && !levelsLocked && (
         <div className="position-row">
           <span className="position-label">{t('signal.positionSize')}</span>
           <span className="position-value">{signal.position_size.toFixed(0)} USDT</span>
@@ -422,6 +447,11 @@ export default function SignalCard({ signal }) {
         .tv-chart-canvas { width: 100%; height: 240px; }
         .tv-empty { height: 240px; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); font-size: 12px; }
         .tv-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-hover) 70%, transparent); }
+        .tv-trail-note { font-size: 11px; color: var(--text-tertiary); align-self: center; }
+        .tv-locked { padding: 16px 14px 18px; text-align: center; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+        .tv-locked-title { font-size: 14px; font-weight: 650; color: var(--text); margin-bottom: 4px; }
+        .tv-locked-hint { font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+        .tv-locked-btn { border: none; border-radius: 980px; padding: 10px 18px; font-size: 13px; font-weight: 650; cursor: pointer; background: var(--accent); color: #fff; }
 
         .position-row {
           display: flex; justify-content: space-between; align-items: center;

@@ -214,6 +214,9 @@ def payments_config():
     return {
         "heleket": heleket_pay.is_configured(),
         "crypto_pay": crypto_pay.is_configured(),
+        "heleket_plans": heleket_pay.plan_amounts(),
+        "heleket_test_mode": heleket_pay.is_test_mode(),
+        "heleket_currency": heleket_pay.HELEKET_CURRENCY,
     }
 
 
@@ -1198,7 +1201,15 @@ def health():
 
 
 @app.get("/api/signals")
-def get_active_signals():
+def get_active_signals(authorization: str | None = Header(default=None)):
+    """Открытые сигналы. Уровни entry/stop/TP — только Premium/VIP/admin.
+    Free и гости видят символ/сторону/график, но уровни затёрты."""
+    user = current_user(authorization)
+    can_see_levels = False
+    if user:
+        tier = auth.effective_tier(user)
+        can_see_levels = bool(user.get("is_admin")) or auth.tier_allows(tier, "premium")
+
     trades = db.load_trades()
     trader_ids = {t.get('trader_id') for t in trades.values() if t.get('trader_id')}
     traders_by_id = db.get_traders_by_ids(trader_ids)
@@ -1235,27 +1246,38 @@ def get_active_signals():
 
         entry_reasons = json.loads(t['entry_reasons_json']) if t.get('entry_reasons_json') else []
         trader = traders_by_id.get(t.get('trader_id'))
-        out.append({
+        item = {
             "symbol": symbol,
             "signal": t['signal'],
-            "entry": t['entry'],
-            "stop":  t['stop'],
-            "tp1": t['tp1'], "tp2": t['tp2'], "tp3": t['tp3'],
+            "entry": t['entry'] if can_see_levels else None,
+            "stop":  t['stop'] if can_see_levels else None,
+            "tp1": t['tp1'] if can_see_levels else None,
+            "tp2": t['tp2'] if can_see_levels else None,
+            "tp3": t['tp3'] if can_see_levels else None,
+            "levels_locked": not can_see_levels,
             "score": t.get('score'),
             "regime": t.get('regime'),
-            "tp1_hit": bool(t.get('tp1_hit')),
-            "tp2_hit": bool(t.get('tp2_hit')),
-            "be_hit":  bool(t.get('be_hit')),
+            "exit_mode": t.get('exit_mode') or 'ladder',
+            "tp1_hit": bool(t.get('tp1_hit')) if can_see_levels else False,
+            "tp2_hit": bool(t.get('tp2_hit')) if can_see_levels else False,
+            "be_hit":  bool(t.get('be_hit')) if can_see_levels else False,
             "opened_at": t.get('opened_at'),
             "candles": candles,
             "live_price": live_price,
-            "entry_reasons": entry_reasons,
-            "position_size": t.get('position_size'),
+            "entry_reasons": entry_reasons if can_see_levels else [],
+            "position_size": t.get('position_size') if can_see_levels else None,
             "exchange": t.get('exchange') or 'bybit',
             "listed_on": t.get('listed_on') or (t.get('exchange') or 'bybit'),
             "trader": {"id": trader['id'], "name": trader['name'], "avatar_url": trader.get('avatar_url'), "source_type": trader.get('source_type')} if trader else None,
-        })
+        }
+        out.append(item)
     return out
+
+
+@app.get("/api/ingest/health")
+def ingest_health(admin=Depends(require_admin)):
+    """Статус ingest по каналам — тишина, дневные лимиты, ошибки."""
+    return telegram_ingest.ingest_health_snapshot()
 
 
 _stats_cache = {"ts": 0.0, "data": None}

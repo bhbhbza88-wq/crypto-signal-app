@@ -11,6 +11,7 @@ Env:
   HELEKET_AMOUNT_MONTH       — 29
   HELEKET_AMOUNT_3MO         — 75
   HELEKET_AMOUNT_LIFETIME    — 299
+  HELEKET_TEST_AMOUNT        — если задан (напр. 1), все тарифы = эта сумма для теста
   HELEKET_WEBHOOK_IP         — 31.133.220.8 (optional check)
 """
 from __future__ import annotations
@@ -39,6 +40,9 @@ _PLAN_AMOUNTS = {
     "3mo": os.getenv("HELEKET_AMOUNT_3MO", "75").strip() or "75",
     "lifetime": os.getenv("HELEKET_AMOUNT_LIFETIME", "299").strip() or "299",
 }
+_TEST_AMOUNT = os.getenv("HELEKET_TEST_AMOUNT", "").strip()
+if _TEST_AMOUNT:
+    _PLAN_AMOUNTS = {k: _TEST_AMOUNT for k in _PLAN_AMOUNTS}
 _PLAN_DAYS = {
     "month": int(os.getenv("HELEKET_DAYS_MONTH", "30") or "30"),
     "3mo": int(os.getenv("HELEKET_DAYS_3MO", "90") or "90"),
@@ -68,6 +72,14 @@ def callback_url() -> str:
 
 def plan_amount(period: str) -> str:
     return _PLAN_AMOUNTS.get(period, _PLAN_AMOUNTS["month"])
+
+
+def plan_amounts() -> dict[str, str]:
+    return dict(_PLAN_AMOUNTS)
+
+
+def is_test_mode() -> bool:
+    return bool(_TEST_AMOUNT)
 
 
 def plan_days(period: str) -> int:

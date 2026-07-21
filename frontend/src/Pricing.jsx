@@ -14,11 +14,17 @@ export default function Pricing({ user, onNeedAuth }) {
   const [payBusy, setPayBusy] = useState(false)
   const [payError, setPayError] = useState(null)
   const [heleketEnabled, setHeleketEnabled] = useState(false)
+  const [heleketPlans, setHeleketPlans] = useState(null)
+  const [heleketTestMode, setHeleketTestMode] = useState(false)
   const [paidNotice, setPaidNotice] = useState(false)
 
   useEffect(() => {
     api.paymentsConfig()
-      .then((c) => setHeleketEnabled(!!c.heleket))
+      .then((c) => {
+        setHeleketEnabled(!!c.heleket)
+        setHeleketPlans(c.heleket_plans || null)
+        setHeleketTestMode(!!c.heleket_test_mode)
+      })
       .catch(() => setHeleketEnabled(false))
     const qs = new URLSearchParams(window.location.search)
     if (qs.get('paid') === '1') setPaidNotice(true)
@@ -74,6 +80,16 @@ export default function Pricing({ user, onNeedAuth }) {
 
   function priceFor(tier) {
     if (tier.key === 'free') return { amount: 0, suffix: t('price.forever') }
+    if (heleketPlans && tier.key === 'premium') {
+      const raw = period === 'lifetime' ? heleketPlans.lifetime : heleketPlans[period] ?? heleketPlans.month
+      const amount = Math.round(Number(raw) || 0)
+      const suffix = period === 'lifetime'
+        ? t('price.lifetimeSuffix')
+        : period === 'month'
+          ? t('price.perMonth')
+          : t('price.perMonths', { n: PERIODS.find(p => p.key === period)?.mult ?? 1 })
+      return { amount, suffix }
+    }
     if (period === 'lifetime') return { amount: tier.lifetime, suffix: t('price.lifetimeSuffix') }
     const p = PERIODS.find(p => p.key === period)
     const total = Math.round(tier.price * p.mult * (1 - p.discount))
@@ -128,6 +144,12 @@ export default function Pricing({ user, onNeedAuth }) {
       {paidNotice && (
         <div className="pr-banner" style={{ borderColor: 'var(--long)', color: 'var(--text)' }}>
           {t('price.paidNotice')}
+        </div>
+      )}
+
+      {heleketTestMode && (
+        <div className="pr-banner" style={{ borderColor: 'var(--long)' }}>
+          {t('price.testMode')}
         </div>
       )}
 

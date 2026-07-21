@@ -480,7 +480,13 @@ export default function App() {
                       </div>
                       {loading ? <SignalSkeleton /> : signals.length === 0 ? <EmptySignal t={t} /> : (
                         <div className="signals-grid">
-                          {signals.map(s => <SignalCard key={s.id ?? s.symbol} signal={s} />)}
+                          {signals.map(s => (
+                            <SignalCard
+                              key={s.id ?? s.symbol}
+                              signal={s}
+                              onNeedPremium={() => setTab('pricing')}
+                            />
+                          ))}
                         </div>
                       )}
                     </section>
