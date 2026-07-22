@@ -1,7 +1,8 @@
 {
   "cleanUrls": false,
-  "trailingSlash": false,
+  "directoryListing": false,
   "rewrites": [
+    { "source": "/", "destination": "/index.html" },
     { "source": "/app", "destination": "/index.html" },
     { "source": "/app/**", "destination": "/index.html" },
     { "source": "/verify-email", "destination": "/index.html" },
