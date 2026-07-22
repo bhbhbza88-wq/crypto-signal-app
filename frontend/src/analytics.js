@@ -32,13 +32,16 @@ export function initAnalytics() {
     k.async = 1
     k.src = r
     a.parentNode.insertBefore(k, a)
-  })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym')
+  })(window, document, 'script', `https://mc.yandex.ru/metrika/tag.js?id=${METRIKA_ID}`, 'ym')
 
   window.ym(METRIKA_ID, 'init', {
+    ssr: true,
+    webvisor: true,
     clickmap: true,
     trackLinks: true,
     accurateTrackBounce: true,
-    webvisor: true,
+    referrer: document.referrer,
+    url: location.href,
   })
 }
 
