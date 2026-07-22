@@ -216,3 +216,41 @@ def send_reset_email(to: str, token: str) -> bool:
     <p style="color:#666;font-size:13px">Ссылка действует 1 час. Если ты не запрашивал сброс — игнорируй письмо.</p>
     """
     return send_email(to, subject, text, html)
+
+
+def send_welcome_email(to: str) -> bool:
+    app_url = f"{FRONTEND_URL}/app/overview"
+    subject = "Добро пожаловать в NOWICKI"
+    text = (
+        f"Привет!\n\n"
+        f"Аккаунт на NOWICKI подтверждён. Открытые сигналы и история — в кабинете:\n"
+        f"{app_url}\n\n"
+        f"Если будут вопросы — ответь на это письмо или напиши в поддержку на сайте."
+    )
+    html = f"""
+    <p>Привет!</p>
+    <p>Аккаунт на <b>NOWICKI</b> подтверждён. Открытые сигналы и история — в кабинете:</p>
+    <p><a href="{app_url}">Открыть кабинет</a></p>
+    <p style="color:#666;font-size:13px">Вопросы — ответь на письмо или напиши в поддержку на сайте.</p>
+    """
+    return send_email(to, subject, text, html)
+
+
+def send_pricing_nudge_email(to: str) -> bool:
+    pricing_url = f"{FRONTEND_URL}/app/pricing"
+    subject = "Premium на NOWICKI — уровни входов и закрытый канал"
+    text = (
+        f"Привет!\n\n"
+        f"Ты уже смотришь сигналы на NOWICKI. С Premium открываются уровни входа/стопа/TP "
+        f"и доступ в закрытый канал.\n\n"
+        f"Тарифы: {pricing_url}\n\n"
+        f"Если не интересно — просто игнорируй письмо, больше не напомним."
+    )
+    html = f"""
+    <p>Привет!</p>
+    <p>Ты уже смотришь сигналы на <b>NOWICKI</b>. С Premium открываются уровни входа/стопа/TP
+    и доступ в закрытый канал.</p>
+    <p><a href="{pricing_url}">Смотреть тарифы</a></p>
+    <p style="color:#666;font-size:13px">Если не интересно — игнорируй письмо, больше не напомним.</p>
+    """
+    return send_email(to, subject, text, html)

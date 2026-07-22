@@ -157,7 +157,34 @@ def verify_email(token: str):
     db.set_email_verified(uid, True)
     user = _maybe_promote_admin(db.get_user_by_id(uid))
     sess = _issue_session(uid)
+    if user and not user.get('welcome_email_sent'):
+        _send_welcome_once(user)
     return {'token': sess, 'user': public_user(user)}, None
+
+
+def _send_welcome_once(user: dict) -> None:
+    """Welcome после verify / нового Google — флаг ставим после попытки отправки."""
+    if not user or user.get('welcome_email_sent'):
+        return
+    email = user.get('email')
+    uid = user.get('id')
+    if not email or not uid:
+        return
+    if not email_smtp.is_configured():
+        return
+
+    def _run():
+        try:
+            email_smtp.send_welcome_email(email)
+        except Exception as e:
+            print(f"[email] welcome failed: {e}")
+        finally:
+            try:
+                db.mark_welcome_email_sent(uid)
+            except Exception as e:
+                print(f"[email] mark welcome_email_sent failed: {e}")
+
+    threading.Thread(target=_run, daemon=True, name="email-welcome").start()
 
 
 def resend_verification(email: str):
@@ -216,6 +243,7 @@ def login_with_google(id_token_str: str):
         return None, 'Email Google не подтверждён'
 
     user = db.get_user_by_google_id(sub) or db.get_user_by_email(email)
+    is_new = False
     if user:
         if not user.get('google_id'):
             db.set_user_google_id(user['id'], sub)
@@ -230,9 +258,12 @@ def login_with_google(id_token_str: str):
             email_verified=1, google_id=sub,
         )
         user = db.get_user_by_id(uid)
+        is_new = True
 
     user = _maybe_promote_admin(user)
     token = _issue_session(user['id'])
+    if is_new:
+        _send_welcome_once(user)
     return user, token
 
 

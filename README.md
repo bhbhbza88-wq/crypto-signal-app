@@ -210,6 +210,39 @@ npm run dev
 
 Пока `VITE_METRIKA_ID` не задан — трекинг тихо отключён (без ошибок).
 
+### Ошибки (Sentry)
+
+Ловим прод-баги на backend (FastAPI) и frontend (React).
+
+1. Создай проект(ы) на https://sentry.io (можно один DSN на оба сервиса или два отдельных).
+2. Backend (Railway `crypto-signal-app`):
+   - `SENTRY_DSN=...`
+   - опционально `SENTRY_ENVIRONMENT=production`, `SENTRY_TRACES_SAMPLE_RATE=0.1`
+3. Frontend (Railway `terrific-expression`, build-time):
+   - `VITE_SENTRY_DSN=...`
+   - опционально `VITE_SENTRY_ENVIRONMENT=production`
+4. Пересобери frontend после добавления `VITE_*`.
+
+Пока DSN не задан — Sentry не инициализируется.
+
+### Telegram ingest (больше сигналов, осторожно)
+
+Лимиты отбора сигналов из источников — через env (backend). **Рекомендуемые значения на Railway** (чуть мягче дефолтов):
+
+| Переменная | Рекомендация | Дефолт в коде |
+|---|---|---|
+| `INGEST_MIN_QUALITY_SCORE` | `54` | `58` |
+| `INGEST_MAX_PER_CHANNEL_DAY` | `6` | `4` |
+| `INGEST_AGG_MAX_OPEN` | `12` | `8` |
+| `INGEST_MAX_ENTRY_SLIP_PCT` | `3.0` (проценты; внутри → `0.03`) | `2.5` |
+
+Также проверь:
+- `TELEGRAM_SOURCE_CHANNELS` — список каналов-источников
+- AI-ключи (`OPENAI_API_KEY` / OpenRouter и т.п.) — без них extract/vision не работают
+- `INGEST_VISION=1` — **только если готов платить за vision-токены** (скриншоты/баннеры); по умолчанию выключено
+
+Админка → вкладка **Ingest** показывает снимок `/api/ingest/health` (day_count, last_signal, open_aggregated, ошибки каналов).
+
 ## Стиль работы с проектом (для будущих сессий)
 
 - Отвечать по-русски, прямо, без воды.

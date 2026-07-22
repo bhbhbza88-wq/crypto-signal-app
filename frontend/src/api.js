@@ -120,6 +120,15 @@ export const api = {
   adminAddSignal: (data) => post('/admin/add-signal', data),
   adminGrantPremium: (email, days = 30, tier = 'premium') =>
     post('/admin/grant-premium', { email, days, tier }),
+  adminListUsers: ({ q = '', limit = 50, offset = 0, tier = '' } = {}) => {
+    const params = new URLSearchParams()
+    params.set('limit', String(limit))
+    params.set('offset', String(offset))
+    if (q) params.set('q', q)
+    if (tier) params.set('tier', tier)
+    return get(`/admin/users?${params}`)
+  },
+  adminIngestHealth: () => get('/ingest/health'),
   // Без symbol/signal/entry/pnl backend сам берёт случайную монету и % —
   // каждая практика выглядит по-разному, а не всегда BTC +3.2%.
   adminChatEngageTest: (data = {}) =>

@@ -19,12 +19,30 @@ from fastapi import FastAPI, Header, HTTPException, Depends, BackgroundTasks, Re
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+_SENTRY_DSN = (os.getenv("SENTRY_DSN") or "").strip()
+if _SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    sentry_sdk.init(
+        dsn=_SENTRY_DSN,
+        environment=(os.getenv("SENTRY_ENVIRONMENT") or "production").strip() or "production",
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1") or "0.1"),
+        integrations=[
+            StarletteIntegration(transaction_style="endpoint"),
+            FastApiIntegration(transaction_style="endpoint"),
+        ],
+        send_default_pii=False,
+    )
+
 import database as db
 import auth
 import telegram_bot
 import crypto_pay
 import heleket_pay
 import public_feed
+import email_smtp
 from scanner import start_background_scanner, MAX_OPEN_TRADES
 import data_layer
 from data_layer import exchange, api_call, build_features, detect_regime, get_active_symbols, CANDIDATES
@@ -40,6 +58,28 @@ import chat_engage
 import ai_client
 
 
+PRICING_NUDGE_INTERVAL_SEC = int(os.getenv("PRICING_NUDGE_INTERVAL_SEC", "1200") or "1200")  # 20 мин
+
+
+async def _pricing_nudge_loop():
+    """Раз в 15–30 мин: free + verified + ≥24ч → одно pricing-письмо."""
+    await asyncio.sleep(60)  # дать БД/SMTP подняться
+    while True:
+        try:
+            if email_smtp.is_configured():
+                for u in db.list_users_for_pricing_nudge(limit=30):
+                    try:
+                        email_smtp.send_pricing_nudge_email(u["email"])
+                    except Exception as e:
+                        print(f"[email] pricing nudge failed for {u.get('email')}: {e}")
+                    finally:
+                        db.mark_pricing_nudge_sent(u["id"])
+                    await asyncio.sleep(0.4)
+        except Exception as e:
+            print(f"[email] pricing nudge loop: {e}")
+        await asyncio.sleep(max(900, PRICING_NUDGE_INTERVAL_SEC))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
@@ -51,6 +91,7 @@ async def lifespan(app: FastAPI):
     if chat_engage.needs_own_client():
         asyncio.create_task(chat_engage.run())
     asyncio.create_task(telegram_bot.set_webhook())
+    asyncio.create_task(_pricing_nudge_loop())
     # Crypto Pay webhook URL ставится вручную в @CryptoBot → My Apps → Webhooks
     # (API-метода setWebhook у Crypto Pay нет).
     yield
@@ -563,6 +604,22 @@ def admin_premium_requests(admin=Depends(require_admin)):
                FROM premium_requests ORDER BY id DESC LIMIT 30"""
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+@app.get("/api/admin/users")
+def admin_list_users(
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    tier: str | None = None,
+    admin=Depends(require_admin),
+):
+    """CRM-lite: список пользователей (поиск по email, фильтр free/premium/unverified)."""
+    tier_filter = (tier or "").strip().lower() or None
+    if tier_filter and tier_filter not in ("free", "premium", "unverified"):
+        raise HTTPException(status_code=400, detail="tier: free | premium | unverified")
+    users = db.list_users(limit=limit, offset=offset, q=q, tier_filter=tier_filter)
+    return {"users": users, "limit": limit, "offset": offset}
 
 
 @app.get("/api/admin/channel-daily")

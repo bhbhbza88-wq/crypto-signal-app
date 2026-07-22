@@ -167,6 +167,12 @@ def init_db():
         if 'premium_until' not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN premium_until TEXT")
             print("✅ Миграция: добавлена колонка premium_until в users")
+        if 'welcome_email_sent' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN welcome_email_sent INTEGER DEFAULT 0")
+            print("✅ Миграция: добавлена колонка welcome_email_sent в users")
+        if 'pricing_nudge_sent' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN pricing_nudge_sent INTEGER DEFAULT 0")
+            print("✅ Миграция: добавлена колонка pricing_nudge_sent в users")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_id)")
 
         conn.execute("""
@@ -1123,6 +1129,117 @@ def get_user_by_id(user_id):
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         return dict(row) if row else None
+
+
+def list_users(limit: int = 50, offset: int = 0, q: str | None = None, tier_filter: str | None = None):
+    """CRM-lite: пользователи с pending premium и последним статусом Heleket."""
+    limit = max(1, min(int(limit or 50), 200))
+    offset = max(0, int(offset or 0))
+    q = (q or "").strip().lower()
+    tier_filter = (tier_filter or "").strip().lower() or None
+    now_iso = datetime.now().isoformat()
+
+    where = ["1=1"]
+    params: list = []
+    if q:
+        where.append("u.email LIKE ?")
+        params.append(f"%{q}%")
+
+    # free / premium / unverified — по «эффективному» тарифу и верификации
+    if tier_filter == "unverified":
+        where.append("COALESCE(u.email_verified, 0) = 0")
+    elif tier_filter == "premium":
+        where.append(
+            """(
+                u.tier IN ('premium', 'vip')
+                AND (u.premium_until IS NULL OR u.premium_until > ?)
+            )"""
+        )
+        params.append(now_iso)
+    elif tier_filter == "free":
+        where.append(
+            """(
+                COALESCE(u.email_verified, 0) = 1
+                AND NOT (
+                    u.tier IN ('premium', 'vip')
+                    AND (u.premium_until IS NULL OR u.premium_until > ?)
+                )
+            )"""
+        )
+        params.append(now_iso)
+
+    sql = f"""
+        SELECT
+            u.id, u.email, u.created_at, u.email_verified, u.tier, u.premium_until,
+            u.telegram_id,
+            (
+                SELECT pr.status FROM premium_requests pr
+                WHERE pr.email = u.email AND pr.status = 'pending'
+                ORDER BY pr.id DESC LIMIT 1
+            ) AS pending_premium_status,
+            (
+                SELECT h.status FROM heleket_orders h
+                WHERE h.user_id = u.id
+                ORDER BY h.created_at DESC LIMIT 1
+            ) AS last_heleket_status
+        FROM users u
+        WHERE {' AND '.join(where)}
+        ORDER BY u.id DESC
+        LIMIT ? OFFSET ?
+    """
+    params.extend([limit, offset])
+    with get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            pending = d.pop("pending_premium_status", None)
+            d["email_verified"] = bool(d.get("email_verified"))
+            d["pending_premium_request"] = pending or False
+            d["telegram_linked"] = bool(d.get("telegram_id"))
+            out.append(d)
+        return out
+
+
+def mark_welcome_email_sent(user_id: int) -> None:
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET welcome_email_sent=1 WHERE id=?",
+            (int(user_id),),
+        )
+
+
+def mark_pricing_nudge_sent(user_id: int) -> None:
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET pricing_nudge_sent=1 WHERE id=?",
+            (int(user_id),),
+        )
+
+
+def list_users_for_pricing_nudge(limit: int = 40) -> list[dict]:
+    """Free, verified, созданы ≥24ч назад, nudge ещё не уходил, не premium."""
+    limit = max(1, min(int(limit or 40), 100))
+    cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
+    now_iso = datetime.now().isoformat()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, email FROM users
+            WHERE COALESCE(email_verified, 0) = 1
+              AND COALESCE(pricing_nudge_sent, 0) = 0
+              AND created_at IS NOT NULL
+              AND created_at <= ?
+              AND NOT (
+                  tier IN ('premium', 'vip')
+                  AND (premium_until IS NULL OR premium_until > ?)
+              )
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (cutoff, now_iso, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def set_user_tier(user_id, tier):

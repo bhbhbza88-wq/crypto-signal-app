@@ -8,8 +8,10 @@ const ADMIN_TABS = [
   { key: 'traders',   label: 'Трейдеры' },
   { key: 'signal',    label: 'Новый сигнал' },
   { key: 'open',      label: 'Открытые позиции' },
+  { key: 'users',     label: 'Пользователи' },
   { key: 'premium',   label: 'Premium' },
   { key: 'channels',  label: 'История по каналам' },
+  { key: 'ingest',    label: 'Ingest' },
   { key: 'engage',    label: 'Telegram практика' },
   { key: 'backfill',  label: 'Публикация истории' },
 ]
@@ -42,6 +44,17 @@ export default function Admin() {
   const [channelDays, setChannelDays] = useState(14)
   const [channelStats, setChannelStats] = useState({ rows: [], since: null, days: 14 })
 
+  const [users, setUsers] = useState([])
+  const [usersQ, setUsersQ] = useState('')
+  const [usersFilter, setUsersFilter] = useState('')
+  const [usersBusy, setUsersBusy] = useState(false)
+  const [usersMsg, setUsersMsg] = useState(null)
+  const [grantBusyEmail, setGrantBusyEmail] = useState(null)
+
+  const [ingestHealth, setIngestHealth] = useState(null)
+  const [ingestBusy, setIngestBusy] = useState(false)
+  const [ingestErr, setIngestErr] = useState(null)
+
   const load = useCallback(async () => {
     try {
       const [t, s, reqs, ch] = await Promise.all([
@@ -58,7 +71,59 @@ export default function Admin() {
     }
   }, [channelDays])
 
+  const loadUsers = useCallback(async () => {
+    setUsersBusy(true)
+    try {
+      const r = await api.adminListUsers({ q: usersQ.trim(), tier: usersFilter, limit: 100 })
+      setUsers(r.users || [])
+    } catch (e) {
+      setUsersMsg({ ok: false, text: e.message })
+    } finally {
+      setUsersBusy(false)
+    }
+  }, [usersQ, usersFilter])
+
+  const loadIngest = useCallback(async () => {
+    setIngestBusy(true); setIngestErr(null)
+    try {
+      setIngestHealth(await api.adminIngestHealth())
+    } catch (e) {
+      setIngestErr(e.message)
+    } finally {
+      setIngestBusy(false)
+    }
+  }, [])
+
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (tab === 'users') loadUsers()
+  }, [tab, loadUsers])
+  useEffect(() => {
+    if (tab === 'ingest') loadIngest()
+  }, [tab, loadIngest])
+
+  function isPremiumUser(u) {
+    if (!u || !['premium', 'vip'].includes(u.tier)) return false
+    if (!u.premium_until) return true
+    return new Date(u.premium_until) > new Date()
+  }
+
+  async function grantUserPremium(email) {
+    if (!confirm(`Выдать Premium на 30 дней: ${email}?`)) return
+    setGrantBusyEmail(email); setUsersMsg(null)
+    try {
+      const r = await api.adminGrantPremium(email, 30, 'premium')
+      setUsersMsg({
+        ok: true,
+        text: `Premium: ${r.email} до ${r.premium_until ? String(r.premium_until).slice(0, 10) : '—'}`,
+      })
+      await loadUsers()
+    } catch (err) {
+      setUsersMsg({ ok: false, text: err.message })
+    } finally {
+      setGrantBusyEmail(null)
+    }
+  }
 
   // Group channel rows by date for display
   const channelByDate = (() => {
@@ -269,6 +334,129 @@ export default function Admin() {
               )
             })}
           </div>
+        )}
+      </section>}
+
+      {/* Пользователи (CRM-lite) */}
+      {tab === 'users' && <section className="adm-card" style={{ marginTop: 16 }}>
+        <h2 className="section-title">Пользователи</h2>
+        <div className="adm-users-filters">
+          <input
+            className="adm-input"
+            type="search"
+            placeholder="Поиск по email…"
+            value={usersQ}
+            onChange={e => setUsersQ(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') loadUsers() }}
+          />
+          <select
+            className="adm-input"
+            value={usersFilter}
+            onChange={e => setUsersFilter(e.target.value)}
+          >
+            <option value="">Все</option>
+            <option value="free">Free</option>
+            <option value="premium">Premium</option>
+            <option value="unverified">Unverified</option>
+          </select>
+          <button type="button" className="adm-submit" disabled={usersBusy} onClick={loadUsers}>
+            {usersBusy ? '…' : 'Найти'}
+          </button>
+        </div>
+        {usersMsg && <div className={usersMsg.ok ? 'adm-msg-ok' : 'adm-msg-err'}>{usersMsg.text}</div>}
+        <div className="adm-users-table">
+          <div className="adm-users-tr head">
+            <span>Email</span>
+            <span>Registered</span>
+            <span>Verified</span>
+            <span>Premium</span>
+            <span>TG linked</span>
+            <span>Payment pending</span>
+            <span></span>
+          </div>
+          {users.length === 0 && !usersBusy && (
+            <div className="adm-empty">Пользователей не найдено</div>
+          )}
+          {users.map(u => {
+            const pending = u.pending_premium_request
+              || (u.last_heleket_status && ['pending', 'check', 'process'].includes(String(u.last_heleket_status).toLowerCase()))
+            return (
+              <div key={u.id} className="adm-users-tr">
+                <span className="adm-users-email" title={u.email}>{u.email}</span>
+                <span className="mono">{String(u.created_at || '').slice(0, 10) || '—'}</span>
+                <span className={u.email_verified ? 'pos' : 'neg'}>{u.email_verified ? 'yes' : 'no'}</span>
+                <span className={isPremiumUser(u) ? 'pos' : ''}>
+                  {isPremiumUser(u) ? (u.premium_until ? String(u.premium_until).slice(0, 10) : u.tier) : '—'}
+                </span>
+                <span className={u.telegram_id || u.telegram_linked ? 'pos' : ''}>
+                  {u.telegram_id || u.telegram_linked ? 'yes' : '—'}
+                </span>
+                <span className={pending ? 'adm-amber' : ''}>
+                  {pending
+                    ? (typeof u.pending_premium_request === 'string' ? u.pending_premium_request : (u.last_heleket_status || 'pending'))
+                    : (u.last_heleket_status || '—')}
+                </span>
+                <span>
+                  {!isPremiumUser(u) && (
+                    <button
+                      type="button"
+                      className="adm-req-btn"
+                      disabled={!!grantBusyEmail}
+                      onClick={() => grantUserPremium(u.email)}
+                    >
+                      {grantBusyEmail === u.email ? '…' : 'Grant premium'}
+                    </button>
+                  )}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </section>}
+
+      {/* Ingest health */}
+      {tab === 'ingest' && <section className="adm-card" style={{ marginTop: 16 }}>
+        <div className="adm-ch-head">
+          <h2 className="section-title" style={{ margin: 0, flex: 1 }}>Ingest health</h2>
+          <button type="button" className="adm-req-btn" disabled={ingestBusy} onClick={loadIngest}>
+            {ingestBusy ? '…' : 'Обновить'}
+          </button>
+        </div>
+        <p className="adm-hint" style={{ marginTop: -4 }}>
+          Снимок <code>/api/ingest/health</code>: дневные лимиты, последний сигнал, открытые aggregated, ошибки каналов.
+        </p>
+        {ingestErr && <div className="adm-msg-err">{ingestErr}</div>}
+        {ingestHealth && (
+          <>
+            <div className="adm-ingest-summary">
+              <span>configured: <b>{ingestHealth.configured ? 'yes' : 'no'}</b></span>
+              <span>open_aggregated: <b>{ingestHealth.open_aggregated ?? '—'}</b> / {ingestHealth.agg_max_open ?? '—'}</span>
+              <span>silence ≥ <b>{ingestHealth.silence_threshold_min ?? '—'}</b> min</span>
+            </div>
+            <div className="adm-users-table">
+              <div className="adm-users-tr head ingest">
+                <span>Channel</span>
+                <span>day_count</span>
+                <span>last_signal</span>
+                <span>silence</span>
+                <span>ok</span>
+                <span>error</span>
+              </div>
+              {(ingestHealth.channels || []).length === 0 && (
+                <div className="adm-empty">Каналы не настроены или нет данных</div>
+              )}
+              {(ingestHealth.channels || []).map(c => (
+                <div key={c.channel} className="adm-users-tr ingest">
+                  <span className="adm-users-email" title={c.alias || c.channel}>{c.alias || c.channel}</span>
+                  <span className="mono">{c.day_count ?? 0}/{c.day_limit ?? '—'}</span>
+                  <span className="mono">{c.last_signal_at ? String(c.last_signal_at).slice(0, 16).replace('T', ' ') : '—'}</span>
+                  <span className="mono">{c.silence_minutes != null ? `${c.silence_minutes}m` : '—'}</span>
+                  <span className={c.ok ? 'pos' : 'neg'}>{c.ok ? 'ok' : 'silent'}</span>
+                  <span className="adm-ingest-err" title={c.last_error || ''}>{c.last_error || '—'}</span>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </section>}
 
@@ -528,8 +716,20 @@ export default function Admin() {
         .adm-open-sym { font-weight: 700; color: var(--text); font-family: var(--font-mono); }
         .adm-open-trader { color: var(--text-secondary); }
         .adm-open-entry { margin-left: auto; color: var(--text-tertiary); font-family: var(--font-mono); }
+        .adm-users-filters { display: grid; grid-template-columns: 1fr 140px auto; gap: 8px; }
+        .adm-users-table { display: flex; flex-direction: column; max-height: 520px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
+        .adm-users-tr { display: grid; grid-template-columns: 1.6fr 0.85fr 0.7fr 0.9fr 0.7fr 1fr auto; gap: 8px; padding: 8px 12px; font-size: 12px; border-top: 1px solid var(--border); align-items: center; }
+        .adm-users-tr.head { border-top: none; color: var(--text-tertiary); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px; background: var(--surface-hover); }
+        .adm-users-tr.ingest { grid-template-columns: 1.4fr 0.8fr 1.1fr 0.7fr 0.6fr 1.4fr; }
+        .adm-users-email { font-family: var(--font-mono); font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .adm-amber { color: var(--amber); font-weight: 700; }
+        .adm-ingest-summary { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-secondary); }
+        .adm-ingest-summary b { color: var(--text); font-family: var(--font-mono); }
+        .adm-ingest-err { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font-size: 11px; }
         @media (max-width: 768px) {
           .adm-row3 { grid-template-columns: 1fr; }
+          .adm-users-filters { grid-template-columns: 1fr; }
+          .adm-users-tr, .adm-users-tr.ingest { grid-template-columns: 1fr; }
         }
       `}</style>
     </div>

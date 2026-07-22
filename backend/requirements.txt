@@ -10,3 +10,4 @@ qrcode
 google-auth
 anthropic
 python-dotenv
+sentry-sdk[fastapi]

@@ -42,7 +42,29 @@ AI_MODEL = ai_client.MODEL_FAST
 AI_VISION_MODEL = ai_client.MODEL_VISION
 
 SOURCE_TYPE = "telegram_aggregate"
-AGG_MAX_OPEN = 8  # с 7 источниками лимит 5 слишком рано режет поток
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)) or str(default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_slip_pct(name: str, default_pct: float = 2.5) -> float:
+    """Env в процентах (2.5 = 2.5%) → доля (0.025) для сравнения с ценой."""
+    raw = os.getenv(name, str(default_pct))
+    try:
+        pct = float(raw or default_pct)
+    except (TypeError, ValueError):
+        pct = default_pct
+    # Если уже задали долю (< 0.5), не делим ещё раз
+    if pct < 0.5:
+        return pct
+    return pct / 100.0
+
+
+AGG_MAX_OPEN = _env_int("INGEST_AGG_MAX_OPEN", 8)  # с 7 источниками лимит 5 слишком рано режет поток
 
 # Health: алерт, если канал молчит дольше N минут (при живом ingest)
 INGEST_SILENCE_MINUTES = int(os.getenv("INGEST_SILENCE_MINUTES", "120") or "120")
@@ -79,12 +101,12 @@ CHANNEL_WEIGHTS = {
     "Aggregated Stream: Foxtrot": 0.82,
     "Aggregated Stream: Golf": 1.05,
 }
-MIN_QUALITY_SCORE = 58          # ниже — не открываем
+MIN_QUALITY_SCORE = _env_int("INGEST_MIN_QUALITY_SCORE", 58)  # ниже — не открываем
 MIN_RR = 1.15                   # TP1 / риск
 MIN_RISK_PCT = 0.004            # стоп ближе 0.4% — шум
 MAX_RISK_PCT = 0.09             # стоп шире 9% — мусор
-MAX_ENTRY_SLIP_PCT = 0.025      # цена ушла >2.5% от entry — поздно
-MAX_PER_CHANNEL_DAY = 4         # чтобы один канал не забил слоты
+MAX_ENTRY_SLIP_PCT = _env_slip_pct("INGEST_MAX_ENTRY_SLIP_PCT", 2.5)  # цена ушла >N% от entry — поздно
+MAX_PER_CHANNEL_DAY = _env_int("INGEST_MAX_PER_CHANNEL_DAY", 4)  # чтобы один канал не забил слоты
 
 EXTRACTOR_SYSTEM_PROMPT = (
     "Ты извлекаешь параметры торгового сигнала из сообщения крипто-канала. "
