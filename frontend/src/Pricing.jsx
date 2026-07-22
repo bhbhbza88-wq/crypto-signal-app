@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { TG_RESULTS_CHANNEL, TG_PREMIUM, TG_SUPPORT, TG_SUPPORT_USER, SUPPORT_EMAIL } from './shared'
 import { api } from './api'
 import { useI18n } from './i18n'
+import { trackEvent, Goals } from './analytics'
 
 const PREMIUM_BOT = TG_PREMIUM
 
@@ -98,6 +99,7 @@ export default function Pricing({ user, onNeedAuth }) {
 
   function choose(tier) {
     if (tier === 'free') return
+    trackEvent(Goals.pricingClick, { tier, period, source: 'app_pricing' })
     if (heleketEnabled) {
       if (!user) {
         onNeedAuth?.()
@@ -107,6 +109,7 @@ export default function Pricing({ user, onNeedAuth }) {
       startHeleketPayment()
       return
     }
+    trackEvent(Goals.telegramBot, { source: 'app_pricing', tier })
     window.open(PREMIUM_BOT, '_blank', 'noopener,noreferrer')
   }
 

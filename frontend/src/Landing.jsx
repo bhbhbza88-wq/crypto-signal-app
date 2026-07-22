@@ -8,6 +8,7 @@ import {
   polishHistory, polishStats, buildShowcaseCurve,
 } from './shared'
 import { useI18n } from './i18n'
+import { trackEvent, Goals } from './analytics'
 
 const SCAN_COINS = [
   'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'LINK',
@@ -261,7 +262,10 @@ export default function Landing() {
                 <button
                   type="button"
                   className="btn-solid"
-                  onClick={() => window.open(`${TG_BOT}?start=premium`, '_blank', 'noopener,noreferrer')}
+                  onClick={() => {
+                    trackEvent(Goals.telegramBot, { source: 'landing_signals_lock' })
+                    window.open(`${TG_BOT}?start=premium`, '_blank', 'noopener,noreferrer')
+                  }}
                 >
                   {t('land.signals.unlock')}
                 </button>
@@ -286,7 +290,15 @@ export default function Landing() {
             </ul>
           </div>
           <div className="honest-cta reveal">
-            <a className="btn-solid" href={TG_BOT} target="_blank" rel="noopener noreferrer">{t('land.about.openBot')}</a>
+            <a
+              className="btn-solid"
+              href={TG_BOT}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => trackEvent(Goals.telegramBot, { source: 'landing_about' })}
+            >
+              {t('land.about.openBot')}
+            </a>
             <a className="btn-ghost" href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">{t('land.about.viewResults')}</a>
           </div>
         </div>
@@ -307,9 +319,12 @@ export default function Landing() {
                   type="button"
                   className="btn-solid"
                   onClick={() => {
+                    trackEvent(Goals.pricingClick, { tier: tier.key, source: 'landing' })
                     if (tier.key === 'free') navigate('/app/overview')
-                    else if (tier.key === 'lifetime') window.open(`${TG_BOT}?start=premium`, '_blank', 'noopener,noreferrer')
-                    else window.open(`${TG_BOT}?start=premium`, '_blank', 'noopener,noreferrer')
+                    else {
+                      trackEvent(Goals.telegramBot, { source: 'landing_pricing', tier: tier.key })
+                      window.open(`${TG_BOT}?start=premium`, '_blank', 'noopener,noreferrer')
+                    }
                   }}
                 >
                   {tier.key === 'free' ? t('land.tier.free.cta') : t('land.tier.premium.cta')}
@@ -352,7 +367,13 @@ export default function Landing() {
               <div className="support-value">{SUPPORT_EMAIL}</div>
               <div className="support-hint">{t('land.support.emailHint')}</div>
             </a>
-            <a className="support-card" href={TG_BOT} target="_blank" rel="noopener noreferrer">
+            <a
+              className="support-card"
+              href={TG_BOT}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => trackEvent(Goals.telegramBot, { source: 'landing_support' })}
+            >
               <div className="support-label">{t('land.support.botLabel')}</div>
               <div className="support-value">{t('land.support.botValue')}</div>
               <div className="support-hint">{t('land.support.botHint')}</div>
@@ -374,7 +395,14 @@ export default function Landing() {
           <div className="foot-links">
             <a href={TG_RESULTS_CHANNEL} target="_blank" rel="noopener noreferrer">{t('land.footer.results')}</a>
             <a href="#pricing" onClick={e => { e.preventDefault(); go('#pricing') }}>{t('land.footer.premium')}</a>
-            <a href={TG_BOT} target="_blank" rel="noopener noreferrer">{t('land.footer.bot')}</a>
+            <a
+              href={TG_BOT}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => trackEvent(Goals.telegramBot, { source: 'landing_footer' })}
+            >
+              {t('land.footer.bot')}
+            </a>
             <a href="#support" onClick={e => { e.preventDefault(); go('#support') }}>{t('land.footer.support')}</a>
             <a href="/support.html">{t('land.footer.contacts')}</a>
             <button type="button" onClick={() => navigate('/app/overview')}>{t('land.footer.platform')}</button>

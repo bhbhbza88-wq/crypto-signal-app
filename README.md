@@ -193,6 +193,23 @@ npm run dev
 Открой http://localhost:5173. Для указания другого backend — `frontend/.env` с
 `VITE_API_URL=http://адрес-backend` (без слэша на конце).
 
+### Аналитика (Яндекс Метрика)
+
+Для RU/PL аудитории подключена **Яндекс Метрика** (SPA pageviews + цели).
+
+1. Создай счётчик на https://metrika.yandex.ru/ → «Добавить счётчик» → сайт `nowicki.trade`.
+2. Скопируй **номер счётчика** (только цифры).
+3. Добавь переменную окружения на **frontend** (Railway Variables, build-time):
+   `VITE_METRIKA_ID=<номер>`
+4. Пересобери/задеплой frontend (Vite вшивает ID при `npm run build`).
+5. Локально: `frontend/.env` → `VITE_METRIKA_ID=...` (см. `.env.example`).
+
+Дашборд: https://metrika.yandex.ru/ — посетители, источники, вебвизор.
+Цели в коде (создай одноимённые в Метрике → Цели → JavaScript-событие):  
+`pricing_click`, `telegram_bot_click`, `login`, `register`.
+
+Пока `VITE_METRIKA_ID` не задан — трекинг тихо отключён (без ошибок).
+
 ## Стиль работы с проектом (для будущих сессий)
 
 - Отвечать по-русски, прямо, без воды.

@@ -25,6 +25,8 @@ Thumbs.db
 # Окружение
 .env
 .env.*
+!.env.example
+!**/.env.example
 
 # Локальный scratch / секреты Telegram (не коммитить)
 backend/_tmp*

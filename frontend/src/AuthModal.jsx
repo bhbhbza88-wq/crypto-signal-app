@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { api, setToken } from './api'
 import { useI18n } from './i18n'
+import { trackEvent, Goals } from './analytics'
 
 const GIS_SRC = 'https://accounts.google.com/gsi/client'
 
@@ -43,7 +44,8 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
     }).catch(() => {})
   }, [])
 
-  const finishAuth = useCallback((res) => {
+  const finishAuth = useCallback((res, source = 'email') => {
+    trackEvent(Goals.login, { method: source })
     setToken(res.token)
     onAuth(res.user)
     onClose()
@@ -53,7 +55,7 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
     setError(null); setBusy(true)
     try {
       const res = await api.googleLogin(response.credential)
-      finishAuth(res)
+      finishAuth(res, 'google')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -121,17 +123,18 @@ export default function AuthModal({ onClose, onAuth, initialMode = 'login' }) {
       }
       if (mode === 'login') {
         const res = await api.login(email, password)
-        finishAuth(res)
+        finishAuth(res, 'email')
         return
       }
       if (mode === 'register') {
         const res = await api.register(email, password)
+        trackEvent(Goals.register, { method: 'email' })
         if (res.needs_verification) {
           setMode('check_email')
           setInfo(res.message)
           return
         }
-        finishAuth(res)
+        finishAuth(res, 'email')
       }
     } catch (err) {
       setError(err.message)
