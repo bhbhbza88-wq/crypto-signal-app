@@ -92,6 +92,8 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(chat_engage.run())
     asyncio.create_task(telegram_bot.set_webhook())
     asyncio.create_task(_pricing_nudge_loop())
+    if heleket_pay.is_configured():
+        asyncio.create_task(heleket_pay.recover_pending_paid_orders())
     # Crypto Pay webhook URL ставится вручную в @CryptoBot → My Apps → Webhooks
     # (API-метода setWebhook у Crypto Pay нет).
     yield
@@ -284,6 +286,19 @@ async def heleket_create_invoice(req: HeleketCreateRequest, user=Depends(require
     }
 
 
+@app.post("/api/payments/heleket/sync")
+async def heleket_sync_payment(user=Depends(require_user)):
+    """После возврата с оплаты: сверяем pending-счета с Heleket и выдаём Premium."""
+    if not heleket_pay.is_configured():
+        raise HTTPException(status_code=503, detail="Heleket не настроен")
+    _rate_limit(f"heleket:sync:{user['id']}", limit=12, window=60)
+    result = await heleket_pay.sync_user_payments(user["id"])
+    # Always return fresh user profile so UI can unlock without full reload
+    fresh = auth.public_user(db.get_user_by_id(user["id"]) or user)
+    result["user"] = fresh
+    return result
+
+
 def require_tier(min_tier: str):
     def dep(authorization: str | None = Header(default=None)):
         user = auth.user_from_token(_token_from_header(authorization))
@@ -302,6 +317,14 @@ def require_admin(authorization: str | None = Header(default=None)):
     if not user.get('is_admin'):
         raise HTTPException(status_code=403, detail="Только для администратора")
     return user
+
+
+@app.post("/api/admin/heleket-recover")
+async def admin_heleket_recover(admin=Depends(require_admin)):
+    """Админ: перепроверить все pending Heleket-заказы и выдать Premium где paid."""
+    if not heleket_pay.is_configured():
+        raise HTTPException(status_code=503, detail="Heleket не настроен")
+    return await heleket_pay.recover_pending_paid_orders(limit=50)
 
 
 @app.post("/api/auth/register")

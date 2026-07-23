@@ -137,6 +137,8 @@ export const api = {
   telegramLinkToken: () => post('/telegram/link-token', {}),
   paymentsConfig: () => get('/payments/config'),
   createHeleketPayment: (period = 'month') => post('/payments/heleket/create', { period }),
+  syncHeleketPayment: () => post('/payments/heleket/sync', {}),
+  adminHeleketRecover: () => post('/admin/heleket-recover', {}),
   adminBackfillChannelHistory: (opts = {}) => {
     const params = new URLSearchParams()
     if (opts.limit) params.set('limit', opts.limit)

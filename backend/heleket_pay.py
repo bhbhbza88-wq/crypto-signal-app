@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -105,7 +106,12 @@ def verify_webhook_payload(body: dict[str, Any]) -> bool:
         return False
     data = {k: v for k, v in body.items() if k != "sign"}
     expected = _make_sign(data, HELEKET_PAYMENT_API_KEY)
-    return hashlib.compare_digest(str(sign).lower(), expected.lower())
+    # hmac.compare_digest (hashlib has no compare_digest) — unequal lengths → False, not crash
+    a = str(sign).lower().encode("utf-8")
+    b = expected.lower().encode("utf-8")
+    if len(a) != len(b):
+        return False
+    return hmac.compare_digest(a, b)
 
 
 def webhook_ip_allowed(ip: str | None) -> bool:
@@ -217,28 +223,75 @@ async def create_invoice_for_telegram(chat_id: int, period: str = "month") -> di
     )
 
 
-async def handle_webhook(body: dict[str, Any]) -> dict:
+async def _signed_post_async(path: str, payload: dict) -> dict | None:
+    if not is_configured():
+        return None
+    body_str = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    b64 = base64.b64encode(body_str.encode("utf-8")).decode("ascii")
+    sign = hashlib.md5((b64 + HELEKET_PAYMENT_API_KEY).encode("utf-8")).hexdigest()
+    headers = {
+        "merchant": HELEKET_MERCHANT_UUID,
+        "sign": sign,
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(
+                f"https://api.heleket.com{path}",
+                content=body_str.encode("utf-8"),
+                headers=headers,
+            )
+            return r.json()
+    except Exception as e:
+        print(f"[heleket] POST {path} error: {e}")
+        return None
+
+
+async def fetch_payment_info(*, order_id: str | None = None, uuid: str | None = None) -> dict | None:
+    payload: dict[str, str] = {}
+    if order_id:
+        payload["order_id"] = order_id
+    elif uuid:
+        payload["uuid"] = uuid
+    else:
+        return None
+    data = await _signed_post_async("/v1/payment/info", payload)
+    if not data or data.get("state") != 0:
+        return None
+    return data.get("result") or None
+
+
+async def fulfill_paid_order(
+    *,
+    order_id: str,
+    heleket_uuid: str | None = None,
+    additional_data: str | None = None,
+    status_hint: str | None = None,
+) -> dict:
+    """Идемпотентная выдача Premium по оплаченному order_id."""
     import database as db
     import telegram_bot
 
-    if not verify_webhook_payload(body):
-        return {"ok": False, "error": "invalid_sign"}
-
-    status = (body.get("status") or body.get("payment_status") or "").strip().lower()
-    order_id = body.get("order_id")
-    heleket_uuid = body.get("uuid")
-
-    if status not in _PAID_STATUSES:
-        return {"ok": True, "skipped": status or "unknown"}
+    status = (status_hint or "").strip().lower()
+    if status and status not in _PAID_STATUSES:
+        return {"ok": True, "skipped": status}
 
     if not order_id:
         return {"ok": False, "error": "no order_id"}
 
     order = db.get_heleket_order(order_id)
     if order and order.get("status") == "granted":
-        return {"ok": True, "duplicate": True, "order_id": order_id}
+        user = db.get_user_by_id(order["user_id"]) if order.get("user_id") else None
+        return {
+            "ok": True,
+            "duplicate": True,
+            "order_id": order_id,
+            "granted": (user or {}).get("email"),
+            "tier": (user or {}).get("tier"),
+            "premium_until": (user or {}).get("premium_until"),
+        }
 
-    meta = parse_meta(body.get("additional_data"))
+    meta = parse_meta(additional_data)
     user_id = None
     period = "month"
     telegram_id = None
@@ -258,6 +311,12 @@ async def handle_webhook(body: dict[str, Any]) -> dict:
             telegram_id = int(meta["tg"])
         except ValueError:
             telegram_id = None
+
+    # Fallback: order_id = hk-{user_id}-{ts}-{tail}
+    if not user_id and isinstance(order_id, str) and order_id.startswith("hk-"):
+        parts = order_id.split("-")
+        if len(parts) >= 2 and parts[1].isdigit():
+            user_id = int(parts[1])
 
     user = db.get_user_by_id(user_id) if user_id else None
     if not user and order:
@@ -282,8 +341,123 @@ async def handle_webhook(body: dict[str, Any]) -> dict:
         days=days,
     )
     db.mark_heleket_order(order_id, "granted", heleket_uuid=heleket_uuid)
+    user = db.get_user_by_id(user["id"]) or user
     await telegram_bot._notify_admins(
         f"💰 Heleket → Premium ({period}, {days}d)\n"
         f"order={order_id} · {user['email']}\n{result}"
     )
-    return {"ok": True, "granted": user["email"], "order_id": order_id, "period": period}
+    return {
+        "ok": True,
+        "granted": user["email"],
+        "order_id": order_id,
+        "period": period,
+        "tier": user.get("tier"),
+        "premium_until": user.get("premium_until"),
+    }
+
+
+async def handle_webhook(body: dict[str, Any]) -> dict:
+    if not verify_webhook_payload(body):
+        print("[heleket] webhook invalid_sign")
+        return {"ok": False, "error": "invalid_sign"}
+
+    status = (body.get("status") or body.get("payment_status") or "").strip().lower()
+    order_id = body.get("order_id")
+    heleket_uuid = body.get("uuid")
+
+    if status not in _PAID_STATUSES:
+        # Keep latest non-terminal status on the local order for CRM
+        if order_id and status:
+            import database as db
+            order = db.get_heleket_order(order_id)
+            if order and order.get("status") not in ("granted",):
+                db.mark_heleket_order(order_id, status, heleket_uuid=heleket_uuid)
+        return {"ok": True, "skipped": status or "unknown"}
+
+    return await fulfill_paid_order(
+        order_id=order_id,
+        heleket_uuid=heleket_uuid,
+        additional_data=body.get("additional_data"),
+        status_hint=status,
+    )
+
+
+async def sync_order_from_heleket(order_id: str) -> dict:
+    """Pull payment/info from Heleket and grant if paid."""
+    info = await fetch_payment_info(order_id=order_id)
+    if not info:
+        return {"ok": False, "error": "not_found", "order_id": order_id}
+    status = (info.get("status") or info.get("payment_status") or "").strip().lower()
+    if status not in _PAID_STATUSES:
+        import database as db
+        order = db.get_heleket_order(order_id)
+        if order and order.get("status") not in ("granted",) and status:
+            db.mark_heleket_order(order_id, status, heleket_uuid=info.get("uuid"))
+        return {"ok": True, "skipped": status or "unknown", "order_id": order_id}
+    return await fulfill_paid_order(
+        order_id=info.get("order_id") or order_id,
+        heleket_uuid=info.get("uuid"),
+        additional_data=info.get("additional_data"),
+        status_hint=status,
+    )
+
+
+async def sync_user_payments(user_id: int) -> dict:
+    """Check recent orders for this user against Heleket; grant if any paid."""
+    import database as db
+
+    orders = db.list_heleket_orders_for_user(user_id, limit=10)
+    if not orders:
+        return {"ok": True, "checked": 0, "granted": None}
+
+    granted = None
+    checked = 0
+    results = []
+    for order in orders:
+        if order.get("status") == "granted":
+            user = db.get_user_by_id(user_id)
+            return {
+                "ok": True,
+                "checked": 0,
+                "already": True,
+                "granted": (user or {}).get("email"),
+                "tier": (user or {}).get("tier"),
+                "premium_until": (user or {}).get("premium_until"),
+            }
+        checked += 1
+        r = await sync_order_from_heleket(order["order_id"])
+        results.append(r)
+        if r.get("granted"):
+            granted = r
+            break
+
+    user = db.get_user_by_id(user_id)
+    out = {
+        "ok": True,
+        "checked": checked,
+        "granted": (granted or {}).get("granted"),
+        "tier": (user or {}).get("tier"),
+        "premium_until": (user or {}).get("premium_until"),
+        "results": results,
+    }
+    return out
+
+
+async def recover_pending_paid_orders(*, limit: int = 30) -> dict:
+    """Startup/admin: re-check pending local orders via Heleket payment/info."""
+    import database as db
+
+    if not is_configured():
+        return {"ok": False, "error": "not_configured"}
+    pending = db.list_pending_heleket_orders(limit=limit)
+    granted = []
+    skipped = 0
+    for order in pending:
+        r = await sync_order_from_heleket(order["order_id"])
+        if r.get("granted") and not r.get("duplicate"):
+            granted.append(r["granted"])
+        else:
+            skipped += 1
+    if granted:
+        print(f"[heleket] recover granted={granted}")
+    return {"ok": True, "pending": len(pending), "granted": granted, "skipped": skipped}

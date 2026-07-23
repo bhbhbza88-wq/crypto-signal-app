@@ -1345,14 +1345,50 @@ def get_heleket_order(order_id: str):
         return dict(row) if row else None
 
 
+def list_heleket_orders_for_user(user_id: int, *, limit: int = 20):
+    limit = max(1, min(int(limit or 20), 50))
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM heleket_orders
+               WHERE user_id=?
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (int(user_id), limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_pending_heleket_orders(*, limit: int = 50):
+    """Orders not yet granted (pending / paid_no_user / check / etc.)."""
+    limit = max(1, min(int(limit or 50), 200))
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM heleket_orders
+               WHERE COALESCE(status, '') NOT IN ('granted', 'cancel', 'cancel_timeout', 'fail', 'wrong_amount', 'system_fail')
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def mark_heleket_order(order_id: str, status: str, heleket_uuid: str | None = None) -> None:
+    paid_statuses = {"paid", "paid_over", "granted", "paid_no_user"}
     with _lock, get_conn() as conn:
-        conn.execute(
-            """UPDATE heleket_orders
-               SET status=?, paid_at=?, heleket_uuid=COALESCE(?, heleket_uuid)
-               WHERE order_id=?""",
-            (status, datetime.now().isoformat(), heleket_uuid, order_id),
-        )
+        if status in paid_statuses:
+            conn.execute(
+                """UPDATE heleket_orders
+                   SET status=?, paid_at=?, heleket_uuid=COALESCE(?, heleket_uuid)
+                   WHERE order_id=?""",
+                (status, datetime.now().isoformat(), heleket_uuid, order_id),
+            )
+        else:
+            conn.execute(
+                """UPDATE heleket_orders
+                   SET status=?, heleket_uuid=COALESCE(?, heleket_uuid)
+                   WHERE order_id=?""",
+                (status, heleket_uuid, order_id),
+            )
 
 
 # ── Ingest quality helpers ────────────────────────────────────────────

@@ -6,7 +6,7 @@ import { trackEvent, Goals } from './analytics'
 
 const PREMIUM_BOT = TG_PREMIUM
 
-export default function Pricing({ user, onNeedAuth }) {
+export default function Pricing({ user, onNeedAuth, onUserUpdate }) {
   const { t } = useI18n()
   const [period, setPeriod] = useState('month')
   const [openFaq, setOpenFaq] = useState(null)
@@ -18,6 +18,7 @@ export default function Pricing({ user, onNeedAuth }) {
   const [heleketPlans, setHeleketPlans] = useState(null)
   const [heleketTestMode, setHeleketTestMode] = useState(false)
   const [paidNotice, setPaidNotice] = useState(false)
+  const [syncStatus, setSyncStatus] = useState(null) // checking | unlocked | waiting
 
   useEffect(() => {
     api.paymentsConfig()
@@ -30,6 +31,42 @@ export default function Pricing({ user, onNeedAuth }) {
     const qs = new URLSearchParams(window.location.search)
     if (qs.get('paid') === '1') setPaidNotice(true)
   }, [])
+
+  // After Heleket redirect (?paid=1): poll sync so Premium unlocks even if webhook was delayed/failed
+  useEffect(() => {
+    if (!paidNotice || !user) return
+    if (user.tier === 'premium' || user.tier === 'vip') {
+      setSyncStatus('unlocked')
+      return
+    }
+    let cancelled = false
+    let attempts = 0
+    setSyncStatus('checking')
+
+    async function tick() {
+      if (cancelled) return
+      attempts += 1
+      try {
+        const r = await api.syncHeleketPayment()
+        if (r?.user) onUserUpdate?.(r.user)
+        const tier = r?.user?.tier || r?.tier
+        if (tier === 'premium' || tier === 'vip' || r?.granted) {
+          if (!cancelled) setSyncStatus('unlocked')
+          return
+        }
+      } catch {
+        /* keep polling */
+      }
+      if (cancelled) return
+      if (attempts >= 12) {
+        setSyncStatus('waiting')
+        return
+      }
+      setTimeout(tick, attempts < 4 ? 2000 : 4000)
+    }
+    tick()
+    return () => { cancelled = true }
+  }, [paidNotice, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const PERIODS = useMemo(() => [
     { key: 'month', label: t('price.period.month'), mult: 1, discount: 0 },
@@ -146,7 +183,11 @@ export default function Pricing({ user, onNeedAuth }) {
 
       {paidNotice && (
         <div className="pr-banner" style={{ borderColor: 'var(--long)', color: 'var(--text)' }}>
-          {t('price.paidNotice')}
+          {syncStatus === 'unlocked'
+            ? t('price.paidUnlocked')
+            : syncStatus === 'checking'
+              ? t('price.paidChecking')
+              : t('price.paidNotice')}
         </div>
       )}
 
