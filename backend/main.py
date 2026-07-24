@@ -1646,6 +1646,32 @@ def get_market():
         return {"error": str(e)}
 
 
+@app.get("/api/markets/bitunix")
+def get_bitunix_markets(force: bool = False):
+    """Все OPEN USDT-M фьючерсы Bitunix (символы в формате BTC/USDT)."""
+    import bitunix_client
+    try:
+        pairs = bitunix_client.load_futures_pairs(force=bool(force))
+        symbols = bitunix_client.list_unified_symbols()
+        return {
+            "exchange": "bitunix",
+            "type": "futures_usdt_m",
+            "count": len(symbols),
+            "symbols": symbols,
+            "pairs": [
+                {
+                    "symbol": f"{(p.get('base') or '').upper()}/{(p.get('quote') or 'USDT').upper()}",
+                    "id": p.get("symbol"),
+                    "max_leverage": p.get("maxLeverage"),
+                    "status": p.get("symbolStatus"),
+                }
+                for p in pairs
+            ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Bitunix markets unavailable: {e}")
+
+
 # ── Backtest ─────────────────────────────────────────────────────
 
 class BacktestRequest(BaseModel):

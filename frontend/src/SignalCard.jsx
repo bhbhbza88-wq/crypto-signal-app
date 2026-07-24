@@ -10,13 +10,22 @@ function formatListingsNote(listedOn, t) {
     .filter(Boolean)
   const bybit = parts.includes('bybit')
   const binance = parts.includes('binance')
-  if (bybit && binance) return t('signal.venuesBoth')
+  const bitunix = parts.includes('bitunix')
+  const names = []
+  if (bybit) names.push('Bybit')
+  if (binance) names.push('Binance')
+  if (bitunix) names.push('Bitunix')
+  if (names.length >= 2) {
+    return names.join(t('signal.venuesJoin') || ' · ') + ' Futures'
+  }
+  if (bitunix && !bybit && !binance) return t('signal.venuesBitunixOnly')
   if (binance && !bybit) return t('signal.venuesBinanceOnly')
-  if (bybit && !binance) return t('signal.venuesBybitOnly')
+  if (bybit && !binance && !bitunix) return t('signal.venuesBybitOnly')
+  if (bybit && binance && !bitunix) return t('signal.venuesBoth')
   return t('signal.venuesDefault')
 }
 
-/** Живая цена с Bybit (linear → spot) или Binance futures. */
+/** Живая цена с Bybit / Binance / Bitunix futures. */
 function useLiveSignalPrice(symbol, exchange = 'bybit', fallback = null) {
   const [price, setPrice] = useState(fallback)
   useEffect(() => {
@@ -36,6 +45,13 @@ function useLiveSignalPrice(symbol, exchange = 'bybit', fallback = null) {
           const res = await fetch(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${raw}`)
           const data = await res.json()
           p = parseFloat(data?.price)
+        } else if (ex === 'bitunix') {
+          const res = await fetch(
+            `https://fapi.bitunix.com/api/v1/futures/market/tickers?symbols=${raw}`
+          )
+          const data = await res.json()
+          const row = data?.data?.[0]
+          p = parseFloat(row?.lastPrice || row?.last || row?.markPrice)
         } else {
           for (const category of ['linear', 'spot']) {
             const res = await fetch(
