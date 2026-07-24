@@ -204,6 +204,11 @@ MODEL_VISION = (
     or os.getenv("COMETAPI_MODEL_VISION")
     or _default_vision_model()
 ).strip()
+# Image edit (replace text on PnL share cards) — Gemini Flash Image via OpenRouter
+MODEL_IMAGE_EDIT = (
+    os.getenv("OPENROUTER_MODEL_IMAGE_EDIT")
+    or "google/gemini-2.5-flash-image"
+).strip()
 MODEL_CHAT_ENGAGE = (
     os.getenv("OPENROUTER_MODEL_ENGAGE")
     or os.getenv("COMETAPI_MODEL_CHAT_ENGAGE")
@@ -462,6 +467,123 @@ async def vision_json_completion(
             last_err = e
             print(f"[ai_client] vision_json attempt {attempt + 1} failed: {e}")
     raise last_err or RuntimeError("vision_json failed")
+
+
+def _extract_image_bytes_from_openrouter(data: dict) -> bytes:
+    """Достаёт PNG/JPEG bytes из ответа OpenRouter image model."""
+    import base64
+
+    msg = (data.get("choices") or [{}])[0].get("message") or {}
+    # Новый формат: message.images[]
+    for img in msg.get("images") or []:
+        url = (img.get("image_url") or img).get("url") if isinstance(img, dict) else None
+        if isinstance(img, dict) and not url:
+            url = img.get("url")
+        if url and isinstance(url, str) and "base64," in url:
+            return base64.b64decode(url.split("base64,", 1)[1])
+    content = msg.get("content")
+    parts = content if isinstance(content, list) else ([content] if content else [])
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        # {"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}
+        if part.get("type") in ("image_url", "image"):
+            url = (part.get("image_url") or part.get("image") or {}).get("url") or part.get("url")
+            if isinstance(url, str) and "base64," in url:
+                return base64.b64decode(url.split("base64,", 1)[1])
+        # inline_data style
+        inline = part.get("inline_data") or part.get("inlineData")
+        if isinstance(inline, dict) and inline.get("data"):
+            return base64.b64decode(inline["data"])
+    raise ValueError(f"no image in OpenRouter response keys={list(msg.keys())}")
+
+
+async def edit_image_bytes(
+    *,
+    image_bytes: bytes,
+    prompt: str,
+    model: str | None = None,
+    media_type: str = "image/png",
+    timeout: float = 120,
+) -> bytes:
+    """AI image edit через OpenRouter (Gemini Flash Image): правит фото по текстовой инструкции."""
+    import base64
+
+    if not openrouter_configured():
+        raise RuntimeError("OPENROUTER_API_KEY required for image edit")
+    image_bytes, media_type = normalize_image_bytes(image_bytes, media_type)
+    b64 = base64.b64encode(image_bytes).decode()
+    data_url = f"data:{media_type};base64,{b64}"
+    use_model = (model or MODEL_IMAGE_EDIT).strip()
+    body = {
+        "model": use_model,
+        "modalities": ["image", "text"],
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ],
+    }
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(
+            OPENROUTER_CHAT_URL,
+            json=body,
+            headers=openai_auth_headers(),
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"image edit HTTP {resp.status_code}: {resp.text[:400]}")
+        data = resp.json()
+    out = _extract_image_bytes_from_openrouter(data)
+    if not out:
+        raise ValueError("empty edited image")
+    return out
+
+
+def edit_image_bytes_sync(
+    *,
+    image_bytes: bytes,
+    prompt: str,
+    model: str | None = None,
+    media_type: str = "image/png",
+    timeout: float = 120,
+) -> bytes:
+    """Sync-обёртка для profit_card / telegram_bot."""
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        # из async-контекста — отдельный поток с новым loop
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(
+                lambda: asyncio.run(
+                    edit_image_bytes(
+                        image_bytes=image_bytes,
+                        prompt=prompt,
+                        model=model,
+                        media_type=media_type,
+                        timeout=timeout,
+                    )
+                )
+            )
+            return fut.result(timeout=timeout + 30)
+    return asyncio.run(
+        edit_image_bytes(
+            image_bytes=image_bytes,
+            prompt=prompt,
+            model=model,
+            media_type=media_type,
+            timeout=timeout,
+        )
+    )
 
 
 def normalize_image_bytes(image_bytes: bytes, media_type: str = "image/jpeg") -> tuple[bytes, str]:

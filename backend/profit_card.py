@@ -1,7 +1,7 @@
 """
-Карточка закрытия: либо классический Binance-фон, либо пул реальных
-шарингов (Bitunix / BingX / Binance) из assets/pnl_templates — меняем
-только текст (пара, Лонг/Шорт, ROI%, цены), арт не перерисовываем.
+Карточка закрытия: пул реальных шарингов (Bitunix / BingX / Binance).
+Текст сделки меняет AI image-edit (Gemini Flash Image via OpenRouter) —
+без чёрных прямоугольников поверх арта. PIL-оверлей — только fallback.
 """
 
 from __future__ import annotations
@@ -218,6 +218,45 @@ def _px(frac: float, total: int) -> int:
     return int(round(frac * total))
 
 
+def _pnl_edit_prompt(
+    *,
+    family: str,
+    pair: str,
+    side: str,
+    leverage: int,
+    roi_str: str,
+    entry_str: str,
+    exit_str: str,
+) -> str:
+    is_long = side.upper() == "LONG"
+    side_ru = "Лонг" if is_long else "Шорт"
+    side_ua = "Довгий" if is_long else "Короткий"
+    side_en = "Long" if is_long else "Short"
+    return (
+        "You are editing an exchange PnL share screenshot (Bitunix / BingX / Binance).\n"
+        "CRITICAL RULES:\n"
+        "- Change ONLY the trade data text values on this image.\n"
+        "- Do NOT redraw, crop, stretch, or cover the artwork/photo/illustration.\n"
+        "- Do NOT add black rectangles, panels, or overlays.\n"
+        "- Keep logos, QR codes, referral codes, avatars, timestamps, footer, and layout identical.\n"
+        "- Keep fonts, sizes, colors, and positions looking native to this card.\n"
+        "- Match the card language (Russian / Ukrainian / English) already used on the image.\n"
+        "- Side color MUST be: Long/Лонг/Довгий = bright green (#0ECB81). "
+        "Short/Шорт/Короткий = red or pink. Never paint Long in red/pink.\n"
+        "- PnL % color: green if positive (+), red/pink if negative (−).\n"
+        "\n"
+        f"Set the trade fields to EXACTLY these values:\n"
+        f"- Symbol/pair: {pair}\n"
+        f"- Side: {side_ru} (or {side_ua}/{side_en} if that language is on the card)\n"
+        f"- Leverage: {leverage}X\n"
+        f"- Main PnL percent: {roi_str}\n"
+        f"- Entry / opening price: {entry_str}\n"
+        f"- Exit / closing / last price: {exit_str}\n"
+        f"Family hint: {family}.\n"
+        "Return the edited image only."
+    )
+
+
 def render_template_card(
     template_file: str,
     family: str,
@@ -228,7 +267,7 @@ def render_template_card(
     exit_price: float | None = None,
     leverage: int | None = None,
 ) -> bytes:
-    """Один шаблон: затираем левую текстовую зону и рисуем новые цифры."""
+    """Шаблон: AI заменяет только текст сделки, арт не трогаем."""
     side = (side or "LONG").upper()
     leverage = leverage or SHARE_LEVERAGE
     entry = float(entry)
@@ -242,6 +281,76 @@ def render_template_card(
     if not path.exists():
         raise FileNotFoundError(path)
 
+    show_pnl = polish_pnl(pnl_pct, decimals=2)
+    roi = round(show_pnl * leverage, 2)
+    coin = symbol.replace("/USDT", "").replace("USDT", "").upper()
+    pair = f"{coin}USDT"
+    roi_str = f"+{roi:.2f}%" if roi >= 0 else f"{roi:.2f}%"
+    entry_str = _fmt_share_price(entry)
+    exit_str = _fmt_share_price(exit_price)
+
+    use_ai = os.getenv("PROFIT_CARD_AI", "1").strip().lower() in ("1", "true", "yes", "on")
+    if use_ai:
+        try:
+            import ai_client
+
+            raw = path.read_bytes()
+            prompt = _pnl_edit_prompt(
+                family=family,
+                pair=pair,
+                side=side,
+                leverage=leverage,
+                roi_str=roi_str,
+                entry_str=entry_str,
+                exit_str=exit_str,
+            )
+            edited = ai_client.edit_image_bytes_sync(
+                image_bytes=raw,
+                prompt=prompt,
+                media_type="image/png",
+                timeout=float(os.getenv("PROFIT_CARD_AI_TIMEOUT", "120") or "120"),
+            )
+            # нормализуем в PNG
+            img = Image.open(io.BytesIO(edited)).convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG", optimize=True)
+            return buf.getvalue()
+        except Exception as e:
+            print(f"[profit_card] AI edit failed ({template_file}): {e} — fallback PIL")
+
+    return _render_template_card_pil(
+        template_file=template_file,
+        family=family,
+        symbol=symbol,
+        side=side,
+        entry=entry,
+        pnl_pct=pnl_pct,
+        exit_price=exit_price,
+        leverage=leverage,
+    )
+
+
+def _render_template_card_pil(
+    template_file: str,
+    family: str,
+    symbol: str,
+    side: str,
+    entry: float,
+    pnl_pct: float,
+    exit_price: float | None = None,
+    leverage: int | None = None,
+) -> bytes:
+    """Fallback: старый PIL-оверлей (только если AI недоступен)."""
+    side = (side or "LONG").upper()
+    leverage = leverage or SHARE_LEVERAGE
+    entry = float(entry)
+    pnl_pct = float(pnl_pct)
+    if exit_price is None:
+        exit_price = _exit_from_pnl(side, entry, pnl_pct)
+    else:
+        exit_price = float(exit_price)
+
+    path = TEMPLATES_DIR / template_file
     layout = (_load_manifest().get("layouts") or {}).get(family) or {}
     if not layout:
         raise ValueError(f"нет layout для family={family}")
@@ -265,19 +374,15 @@ def render_template_card(
     clear_y1 = _px(float(layout.get("clear_y1", 0.78 if family != "binance" else 0.78)), H)
     fill = _sample_fill(img, (8, clear_y0, min(40, max(8, clear_x1 // 4)), clear_y1))
     fill = tuple(max(0, min(255, c - 12)) for c in fill)
-    # Панель текста на шарингах почти всегда чёрная; если сэмпл светлый —
-    # не рисуем белую «плашку» поверх арта.
     if sum(fill) / 3 > 35:
         fill = (0, 0, 0)
 
     if family == "binance":
-        # Две зоны: слева пара/ROI (эмблема справа сверху цела),
-        # снизу на всю ширину — обе колонки цен (без футера с лого).
-        prices_y0 = _px(float(layout.get("prices_clear_y0", 0.62)), H)
-        draw.rectangle((0, clear_y0, clear_x1, prices_y0), fill=fill)
+        upper_x1 = _px(float(layout.get("clear_x1", 0.72)), W)
+        prices_y0 = _px(float(layout.get("prices_clear_y0", 0.58)), H)
+        draw.rectangle((0, clear_y0, upper_x1, prices_y0), fill=fill)
         draw.rectangle((0, prices_y0, W - 1, clear_y1), fill=fill)
     else:
-        # Чуть шире текста — иначе хвосты старых цифр («0X») торчат из-под нового
         draw.rectangle((0, clear_y0, min(W - 1, clear_x1 + _px(0.04, W)), clear_y1), fill=fill)
 
     def fxy(key, default=(0.06, 0.2)):
@@ -325,7 +430,7 @@ def render_template_card(
         e_s, x_s = _fmt_share_price(entry), _fmt_share_price(exit_price)
         draw.text((p1x, p1y), f"Цена открытия {e_s}", font=font_price, fill=WHITE)
         draw.text((p2x, p2y), f"Цена закрытия {x_s}", font=font_price, fill=WHITE)
-    else:  # bingx
+    else:
         if "header_xy" in layout:
             hx, hy = fxy("header_xy")
             font_h = _font(fsize("header_size", 0.028), bold=False)
