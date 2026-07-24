@@ -269,8 +269,16 @@ def render_template_card(
     # не рисуем белую «плашку» поверх арта.
     if sum(fill) / 3 > 35:
         fill = (0, 0, 0)
-    # Чуть шире текста — иначе хвосты старых цифр («0X») торчат из-под нового
-    draw.rectangle((0, clear_y0, min(W - 1, clear_x1 + _px(0.04, W)), clear_y1), fill=fill)
+
+    if family == "binance":
+        # Две зоны: слева пара/ROI (эмблема справа сверху цела),
+        # снизу на всю ширину — обе колонки цен (без футера с лого).
+        prices_y0 = _px(float(layout.get("prices_clear_y0", 0.62)), H)
+        draw.rectangle((0, clear_y0, clear_x1, prices_y0), fill=fill)
+        draw.rectangle((0, prices_y0, W - 1, clear_y1), fill=fill)
+    else:
+        # Чуть шире текста — иначе хвосты старых цифр («0X») торчат из-под нового
+        draw.rectangle((0, clear_y0, min(W - 1, clear_x1 + _px(0.04, W)), clear_y1), fill=fill)
 
     def fxy(key, default=(0.06, 0.2)):
         xy = layout.get(key) or default
