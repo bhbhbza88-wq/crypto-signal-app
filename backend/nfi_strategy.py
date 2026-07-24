@@ -16,7 +16,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from data_layer import (
     fetch_data_cached, build_features, detect_regime,
-    get_active_symbols, api_call, exchange,
+    get_active_symbols, api_call, exchange, preferred_exchange_for,
 )
 
 # ── Параметры ────────────────────────────────────────────────────
@@ -676,7 +676,7 @@ def generate_nfi_signal(symbol):
     if is_in_cooldown(symbol):  return None
     if not daily_loss_ok():     return None
 
-    data = fetch_data_cached(symbol)
+    data = fetch_data_cached(symbol, exchange_id=preferred_exchange_for(symbol))
     if not data:
         return None
 
@@ -748,14 +748,21 @@ def generate_nfi_signal(symbol):
 
 
 def scan_for_nfi_signals():
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import os
     signals = []
-    for symbol in get_active_symbols():
-        try:
-            sig = generate_nfi_signal(symbol)
-            if sig:
-                signals.append(sig)
-        except Exception as e:
-            print(f"  ❌ {symbol}: {e}")
+    symbols = get_active_symbols()
+    workers = max(2, min(int(os.getenv("NFI_SCAN_WORKERS", "8") or "8"), 16))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(generate_nfi_signal, sym): sym for sym in symbols}
+        for fut in as_completed(futs):
+            sym = futs[fut]
+            try:
+                sig = fut.result()
+                if sig:
+                    signals.append(sig)
+            except Exception as e:
+                print(f"  ❌ {sym}: {e}")
     signals.sort(key=lambda x: x['score'], reverse=True)
     return signals
 

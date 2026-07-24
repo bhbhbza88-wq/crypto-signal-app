@@ -352,26 +352,82 @@ def get_exchange_futures_symbols(exchange_id: str, force: bool = False) -> list[
         return []
 
 
+_UNIVERSE_TTL = 3600
+_universe_state = {"ts": 0.0, "symbols": [], "preferred": {}}
+_universe_lock = threading.Lock()
+
+
+def preferred_exchange_for(symbol: str) -> str | None:
+    """Первая биржа из preference, где символ есть в кэше рынков (без live ticker)."""
+    uni = futures_venues._unified_base_quote(symbol)
+    with _universe_lock:
+        pref = _universe_state["preferred"].get(uni)
+        if pref:
+            return pref
+    # лениво обновим universe map
+    get_all_venue_symbols()
+    with _universe_lock:
+        return _universe_state["preferred"].get(uni)
+
+
+def get_all_venue_symbols(force: bool = False) -> list[str]:
+    """Уникальный union USDT-M символов по всем подключённым биржам."""
+    now = time.time()
+    with _universe_lock:
+        if (
+            not force
+            and _universe_state["symbols"]
+            and (now - _universe_state["ts"]) < _UNIVERSE_TTL
+        ):
+            return list(_universe_state["symbols"])
+
+    preferred_map = {}
+    ordered = []
+    seen = set()
+    # CANDIDATES первыми — привычный топ всегда в начале скана
+    for s in CANDIDATES:
+        if s not in seen:
+            seen.add(s)
+            ordered.append(s)
+
+    for ex_id in _EXCHANGE_PREFERENCE:
+        for s in get_exchange_futures_symbols(ex_id, force=force):
+            if s not in preferred_map:
+                preferred_map[s] = ex_id
+            if s not in seen:
+                seen.add(s)
+                ordered.append(s)
+
+    # preferred для CANDIDATES тоже
+    for s in ordered:
+        preferred_map.setdefault(s, "bybit")
+
+    with _universe_lock:
+        _universe_state["ts"] = time.time()
+        _universe_state["symbols"] = ordered
+        _universe_state["preferred"] = preferred_map
+    print(f"[data_layer] universe={len(ordered)} venues={len(_EXCHANGE_PREFERENCE)}")
+    return list(ordered)
+
+
 def get_bitunix_futures_symbols(force: bool = False):
     """Все OPEN USDT-M фьючерсы Bitunix в формате BTC/USDT."""
     return get_exchange_futures_symbols("bitunix", force=force)
 
 
 def get_active_symbols():
-    """Сканнер: CANDIDATES (+ опциональный Bitunix merge через env)."""
-    merge = (os.getenv("BITUNIX_MERGE_UNIVERSE", "0") or "0").strip().lower()
-    if merge not in ("1", "true", "yes", "on"):
+    """Сканер / NFI / overview: полный union бирж (~1200), либо только CANDIDATES.
+
+    SCAN_FULL_UNIVERSE=0 — откат на 39 монет.
+    """
+    full = (os.getenv("SCAN_FULL_UNIVERSE", "1") or "1").strip().lower()
+    if full in ("0", "false", "no", "off"):
         return list(CANDIDATES)
-    bitunix_syms = get_bitunix_futures_symbols()
-    if not bitunix_syms:
-        return list(CANDIDATES)
-    seen = set()
-    out = []
-    for s in list(CANDIDATES) + bitunix_syms:
-        if s not in seen:
-            seen.add(s)
-            out.append(s)
-    return out
+    # legacy alias
+    if (os.getenv("BITUNIX_MERGE_UNIVERSE", "") or "").strip().lower() in ("0", "false", "no", "off"):
+        # только если явно выключили bitunix merge и не форсили full — не используем
+        pass
+    return get_all_venue_symbols()
 
 
 def list_supported_exchanges():
@@ -382,33 +438,58 @@ def list_supported_exchanges():
 
 
 # ── Обзор рынка (Скринер) ────────────────────────────────────────
-# Снапшот режимов по всем парам. Строится в фоновом потоке, потому что
-# холодный проход по 39 парам занимает десятки секунд — HTTP-запрос
-# не должен этого ждать. Пока снапшота нет, эндпоинт отдаёт "loading".
+# Снапшот режимов. Полный universe строится в фоне с пулом воркеров.
 
-OVERVIEW_TTL = 180
+OVERVIEW_TTL = int(os.getenv("OVERVIEW_TTL_SEC", "600") or "600")
+_OVERVIEW_WORKERS = int(os.getenv("OVERVIEW_WORKERS", "12") or "12")
 _overview_state = {'ts': 0, 'data': None, 'building': False}
 _overview_lock = threading.Lock()
 
 
-def _build_market_overview():
-    symbols = []
-    for sym in CANDIDATES:
-        data = fetch_data_cached(sym)
-        if not data:
-            continue
-        df = build_features(data['1h'])
-        regime, adx = detect_regime(df)
-        symbols.append({'symbol': sym, 'regime': regime, 'adx': round(float(adx), 1)})
-    up = sum(1 for s in symbols if s['regime'] == 'UPTREND')
-    down = sum(1 for s in symbols if s['regime'] == 'DOWNTREND')
-    btc = next((s for s in symbols if s['symbol'] == 'BTC/USDT'), None)
+def _overview_symbol_row(sym: str):
+    ex_id = preferred_exchange_for(sym) or "bybit"
+    # Для обзора хватает 1h — иначе 1200×3 ТФ неподъёмно
+    raw = fetch_ohlcv_raw(sym, "1h", limit=120, exchange_id=ex_id)
+    if not raw or len(raw) < 50:
+        return None
+    cols = ["timestamp", "open", "high", "low", "close", "volume"]
+    df = build_features(pd.DataFrame(raw, columns=cols))
+    regime, adx = detect_regime(df)
     return {
-        'symbols': symbols,
-        'btc_regime': btc['regime'] if btc else 'НЕТ ДАННЫХ',
-        'uptrend_count': up,
-        'downtrend_count': down,
-        'chop_count': len(symbols) - up - down,
+        "symbol": sym,
+        "regime": regime,
+        "adx": round(float(adx), 1),
+        "exchange": ex_id,
+    }
+
+
+def _build_market_overview():
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    symbols_in = get_active_symbols()
+    symbols = []
+    workers = max(2, min(_OVERVIEW_WORKERS, 24))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(_overview_symbol_row, sym): sym for sym in symbols_in}
+        for fut in as_completed(futs):
+            try:
+                row = fut.result()
+            except Exception:
+                row = None
+            if row:
+                symbols.append(row)
+    symbols.sort(key=lambda s: s["symbol"])
+    up = sum(1 for s in symbols if s["regime"] == "UPTREND")
+    down = sum(1 for s in symbols if s["regime"] == "DOWNTREND")
+    btc = next((s for s in symbols if s["symbol"] == "BTC/USDT"), None)
+    return {
+        "symbols": symbols,
+        "btc_regime": btc["regime"] if btc else "НЕТ ДАННЫХ",
+        "uptrend_count": up,
+        "downtrend_count": down,
+        "chop_count": len(symbols) - up - down,
+        "universe_size": len(symbols_in),
+        "scanned": len(symbols),
     }
 
 
