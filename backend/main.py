@@ -1360,6 +1360,19 @@ def ingest_health(admin=Depends(require_admin)):
     return telegram_ingest.ingest_health_snapshot()
 
 
+@app.post("/api/admin/sentry-test-error")
+def admin_sentry_test_error(admin=Depends(require_admin)):
+    """Искусственная ошибка для проверки Sentry → AI triage (только admin).
+
+    Вызывает необработанное исключение — Sentry SDK должен создать Issue.
+    В проде используй редко, только для smoke-теста пайплайна.
+    """
+    raise RuntimeError(
+        "NOWICKI_SENTRY_TEST: intentional admin test error "
+        f"(by user_id={admin.get('id')})"
+    )
+
+
 _stats_cache = {"ts": 0.0, "data": None}
 _STATS_TTL_SEC = 45
 

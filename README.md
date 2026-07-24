@@ -247,6 +247,16 @@ npm run dev
 
 Пока DSN не задан — Sentry не инициализируется.
 
+**AI triage (без авто-merge):** новый Issue в Sentry → Cursor Automation → ветка `fix/sentry-…` + PR. Merge только вручную. Инструкции агента и guardrails: [`ops/sentry-triage-agent.md`](ops/sentry-triage-agent.md).
+
+Smoke-тест Issue с backend (нужен admin-токен):
+
+```bash
+curl -X POST "$API/api/admin/sentry-test-error" -H "Authorization: Bearer <admin-session>"
+```
+
+Опционально для алерта в Telegram из cloud-агента: `SENTRY_ALERT_CHAT_ID` (+ уже есть `TELEGRAM_BOT_TOKEN`).
+
 ### Telegram ingest (больше сигналов, осторожно)
 
 Лимиты отбора сигналов из источников — через env (backend). **Рекомендуемые значения на Railway** (чуть мягче дефолтов):
