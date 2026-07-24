@@ -218,6 +218,41 @@ def _px(frac: float, total: int) -> int:
     return int(round(frac * total))
 
 
+# Вымышленные ники для шарингов (не светим реальные User-*/email с шаблонов)
+_FAKE_USERS = (
+    "nova_rx", "apexloop", "orbitfox", "silverchart", "km_pulse",
+    "driftline", "quark_tv", "northwire", "pixelbay", "frostedge",
+    "lunatrade", "hexavolt", "cinderfx", "blueorbit", "zincwave",
+)
+
+
+def _fake_username(seed: str = "") -> str:
+    import hashlib
+    h = int(hashlib.md5((seed or "nowicki").encode()).hexdigest()[:8], 16)
+    return _FAKE_USERS[h % len(_FAKE_USERS)]
+
+
+# Обрезка низа: реф-код / QR / invite / partner strip (доли высоты, что ОСТАВЛЯЕМ)
+_CROP_KEEP_TOP = {
+    "binance": 0.84,   # без BINANCE FUTURES footer + QR + реф
+    "bingx": 0.86,     # без чёрной плашки с кодом/QR
+    "bitunix": 0.88,   # без белого футера / partner code / QR
+}
+
+
+def _crop_share_footer(img: Image.Image, family: str) -> Image.Image:
+    keep = float(
+        os.getenv(f"PROFIT_CARD_CROP_{family.upper()}", "")
+        or _CROP_KEEP_TOP.get(family, 0.88)
+    )
+    keep = max(0.70, min(0.95, keep))
+    h = img.height
+    cut = int(round(h * keep))
+    if cut >= h - 4:
+        return img
+    return img.crop((0, 0, img.width, cut))
+
+
 def _pnl_edit_prompt(
     *,
     family: str,
@@ -227,6 +262,7 @@ def _pnl_edit_prompt(
     roi_str: str,
     entry_str: str,
     exit_str: str,
+    fake_user: str,
 ) -> str:
     is_long = side.upper() == "LONG"
     side_ru = "Лонг" if is_long else "Шорт"
@@ -235,15 +271,20 @@ def _pnl_edit_prompt(
     return (
         "You are editing an exchange PnL share screenshot (Bitunix / BingX / Binance).\n"
         "CRITICAL RULES:\n"
-        "- Change ONLY the trade data text values on this image.\n"
+        "- Change ONLY the trade data text and the displayed username/handle.\n"
         "- Do NOT redraw, crop, stretch, or cover the artwork/photo/illustration.\n"
         "- Do NOT add black rectangles, panels, or overlays.\n"
-        "- Keep logos, QR codes, referral codes, avatars, timestamps, footer, and layout identical.\n"
-        "- Keep fonts, sizes, colors, and positions looking native to this card.\n"
+        "- Keep exchange logos, artwork, layout, fonts and native look.\n"
         "- Match the card language (Russian / Ukrainian / English) already used on the image.\n"
         "- Side color MUST be: Long/Лонг/Довгий = bright green (#0ECB81). "
         "Short/Шорт/Короткий = red or pink. Never paint Long in red/pink.\n"
         "- PnL % color: green if positive (+), red/pink if negative (−).\n"
+        "\n"
+        "PRIVACY / IDENTITY:\n"
+        f"- Replace ANY username, User-XXXX, email, masked email, or nickname with exactly: {fake_user}\n"
+        "- Remove or blank out referral / invite / partner codes and QR codes if present "
+        "(do not invent a new code).\n"
+        "- Do not keep original personal identifiers from the template.\n"
         "\n"
         f"Set the trade fields to EXACTLY these values:\n"
         f"- Symbol/pair: {pair}\n"
@@ -252,6 +293,7 @@ def _pnl_edit_prompt(
         f"- Main PnL percent: {roi_str}\n"
         f"- Entry / opening price: {entry_str}\n"
         f"- Exit / closing / last price: {exit_str}\n"
+        f"- Username: {fake_user}\n"
         f"Family hint: {family}.\n"
         "Return the edited image only."
     )
@@ -267,7 +309,7 @@ def render_template_card(
     exit_price: float | None = None,
     leverage: int | None = None,
 ) -> bytes:
-    """Шаблон: AI заменяет только текст сделки, арт не трогаем."""
+    """Шаблон: AI меняет текст/ник, затем обрезаем футер с реф/QR."""
     side = (side or "LONG").upper()
     leverage = leverage or SHARE_LEVERAGE
     entry = float(entry)
@@ -288,6 +330,7 @@ def render_template_card(
     roi_str = f"+{roi:.2f}%" if roi >= 0 else f"{roi:.2f}%"
     entry_str = _fmt_share_price(entry)
     exit_str = _fmt_share_price(exit_price)
+    fake_user = _fake_username(f"{template_file}:{pair}:{side}:{leverage}")
 
     use_ai = os.getenv("PROFIT_CARD_AI", "1").strip().lower() in ("1", "true", "yes", "on")
     if use_ai:
@@ -303,6 +346,7 @@ def render_template_card(
                 roi_str=roi_str,
                 entry_str=entry_str,
                 exit_str=exit_str,
+                fake_user=fake_user,
             )
             edited = ai_client.edit_image_bytes_sync(
                 image_bytes=raw,
@@ -310,15 +354,15 @@ def render_template_card(
                 media_type="image/png",
                 timeout=float(os.getenv("PROFIT_CARD_AI_TIMEOUT", "120") or "120"),
             )
-            # нормализуем в PNG
             img = Image.open(io.BytesIO(edited)).convert("RGB")
+            img = _crop_share_footer(img, family)
             buf = io.BytesIO()
             img.save(buf, format="PNG", optimize=True)
             return buf.getvalue()
         except Exception as e:
             print(f"[profit_card] AI edit failed ({template_file}): {e} — fallback PIL")
 
-    return _render_template_card_pil(
+    png = _render_template_card_pil(
         template_file=template_file,
         family=family,
         symbol=symbol,
@@ -328,6 +372,11 @@ def render_template_card(
         exit_price=exit_price,
         leverage=leverage,
     )
+    img = Image.open(io.BytesIO(png)).convert("RGB")
+    img = _crop_share_footer(img, family)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
 
 
 def _render_template_card_pil(
