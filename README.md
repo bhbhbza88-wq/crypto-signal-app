@@ -114,7 +114,7 @@ POST /api/auth/register, /api/auth/login, /api/auth/logout   — аутенти�
 GET  /api/auth/me                                             — текущий пользователь
 POST /api/billing/upgrade                                     — смена тарифа (заглушка оплаты)
 POST /api/ai/chat                                              — AI-ассистент
-GET  /api/signals                                              — активные сигналы (каналы / manual / webhook)
+GET  /api/signals                                              — активные сигналы (каналы / manual)
 GET  /api/stats                                                — статистика (сегодня/неделя/всё время)
 GET  /api/strategies/summary                                  — сводка по 3 стратегиям
 GET  /api/history, /api/events                                 — история сделок, лог событий

@@ -38,7 +38,7 @@ TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "")
 TELEGRAM_SOURCE_CHANNELS = os.getenv("TELEGRAM_SOURCE_CHANNELS", "")
 
 GROQ_API_KEY = ai_client.api_key()  # legacy alias
-AI_MODEL = ai_client.MODEL_FAST
+AI_MODEL = ai_client.MODEL_INGEST
 AI_VISION_MODEL = ai_client.MODEL_VISION
 
 SOURCE_TYPE = "telegram_aggregate"
@@ -109,26 +109,49 @@ MAX_ENTRY_SLIP_PCT = _env_slip_pct("INGEST_MAX_ENTRY_SLIP_PCT", 2.5)  # цена
 MAX_PER_CHANNEL_DAY = _env_int("INGEST_MAX_PER_CHANNEL_DAY", 4)  # чтобы один канал не забил слоты
 
 EXTRACTOR_SYSTEM_PROMPT = (
-    "Ты извлекаешь параметры торгового сигнала из сообщения крипто-канала. "
+    "Ты извлекаешь параметры НОВОГО торгового сигнала из сообщения крипто-канала. "
     "Верни ТОЛЬКО JSON без пояснений: "
     '{"is_signal": bool, "symbol": string, "side": "LONG"|"SHORT", '
-    '"entry": number, "stop": number, "tp1": number, "tp2": number|null, "tp3": number|null}. '
-    "is_signal=false, если в сообщении нет конкретной сделки с явной ценой входа "
-    "и стоп-лоссом (реклама, комментарий, разбор без чисел, объявление без "
-    "риск-менеджмента). Не придумывай entry/stop/tp1, если они не названы в "
-    "тексте прямо — в этом случае is_signal=false.\n"
-    "tp2/tp3 верни ТОЛЬКО если канал сам явно назвал эти уровни отдельными "
-    "числами в этом же сообщении. Если названа только одна цель (TP1) — "
-    "верни tp2=null, tp3=null. Никогда не вычисляй/не досчитывай tp2/tp3 сам.\n"
-    "Отдельно проверь: это НОВЫЙ вход или апдейт по уже открытой позиции? "
-    "is_signal=false для любого сообщения о состоянии уже существующей сделки, "
-    "даже если в нём снова названы те же цифры — например: 'держим позицию', "
-    "'SL в безубыток', 'TP1 взят, двигаем стоп', 'напоминаю о сделке', "
-    "'сделка ещё актуальна', благодарности/итоги по закрытой сделке. "
-    "is_signal=true только для сообщения, которое звучит как самостоятельный "
-    "новый призыв к действию прямо сейчас (открыть позицию), а не комментарий "
-    "к ранее опубликованному сетапу.\n"
-    "symbol верни как тикер к USDT, например BTCUSDT."
+    '"entry": number, "stop": number, "tp1": number, "tp2": number|null, "tp3": number|null}.\n'
+    "\n"
+    "Сторона (side): LONG/SHORT, также BUY/SELL, лонг/шорт, покупка/продажа, "
+    "лонгнем/шортнем, набор/разгрузка в явном торговом контексте. "
+    "Если сторона неоднозначна — is_signal=false.\n"
+    "\n"
+    "Символ: тикер к USDT, например BTCUSDT, ETHUSDT. Убери # $ / пробелы; "
+    "BTC, BTC/USDT, $BTC → BTCUSDT. Не путай тикер с числом цены.\n"
+    "\n"
+    "Entry / stop / tp1 — только из этого сообщения, не выдумывай:\n"
+    "- Явные цены: Entry/Вход/ENTRY, SL/Stop/Стоп, TP/Target/Цель/Take Profit.\n"
+    "- Зона входа («вход 1.20–1.25», «entry 0.04-0.042»): возьми СЕРЕДИНУ диапазона.\n"
+    "- Стоп в процентах («SL -2%», «стоп 1.5%»): посчитай от entry "
+    "(LONG: entry*(1-pct/100), SHORT: entry*(1+pct/100)).\n"
+    "- Несколько TP: tp1 = первая цель; tp2/tp3 только если канал ЯВНО назвал "
+    "отдельные числа. Одну цель → tp2=null, tp3=null. Не досчитывай лестницу сам.\n"
+    "- Если нет явного entry ИЛИ явного stop (числом или %) — is_signal=false. "
+    "Не подставляй «текущую цену» и не угадывай стоп.\n"
+    "\n"
+    "is_signal=false для: рекламы, мемов, разборов без цифр, идей «смотрим», "
+    "апдейтов уже открытой сделки («держим», «SL в б/у», «TP1 взят», "
+    "«двигаем стоп», «сделка ещё актуальна», «напоминаю»), итогов/благодарностей "
+    "по закрытой сделке, закрытий без нового входа.\n"
+    "is_signal=true только если это самостоятельный новый призыв открыть позицию сейчас "
+    "с конкретным символом, стороной, входом и стопом.\n"
+    "\n"
+    "Числа: точка как десятичный разделитель; «1,234» в EU-формате цены — 1.234 "
+    "если это цена альткоина, не тысячи."
+)
+
+CLOSE_SYSTEM_PROMPT = (
+    "Тебе дают тикер уже открытой позиции и текст сообщения из крипто-канала. "
+    "Определи: объявляет ли сообщение о ЗАКРЫТИИ/ВЫХОДЕ именно из ЭТОЙ позиции "
+    "(канал сам закрыл, зафиксировал, вышел, stopped out, close/exit по этой монете).\n"
+    "is_close=false если: только апдейт стопа/цели без выхода, разговор про другую монету, "
+    "общий комментарий, новый вход, «держим», «ждём TP», частичный фиксат без полного закрытия "
+    "если явно сказано что позиция ещё открыта.\n"
+    "reason: profit — закрыли в плюс / take profit; loss — стоп / минус; "
+    "manual — закрыли вручную без явного PnL; unknown — закрытие без ясной причины.\n"
+    'Верни ТОЛЬКО JSON: {"is_close": bool, "reason": "profit"|"loss"|"manual"|"unknown"}.'
 )
 
 
@@ -163,14 +186,14 @@ async def _extract_signal(text: str) -> dict | None:
         print(f"[telegram_ingest] regex parse: {regex_hit.get('symbol')} {regex_hit.get('side')}")
         return regex_hit
 
-    # 2) AI fallback
+    # 2) AI fallback (MODEL_INGEST)
     if not ai_client.fast_configured():
         return None
     try:
-        parsed = await ai_client.fast_json_completion(
+        parsed = await ai_client.ingest_json_completion(
             system=EXTRACTOR_SYSTEM_PROMPT,
-            user_text=text[:1200],
-            max_tokens=160,
+            user_text=text[:3000],
+            max_tokens=260,
         )
     except Exception as e:
         print(f"[telegram_ingest] Ошибка извлечения сигнала: {e}")
@@ -185,21 +208,27 @@ async def _extract_signal(text: str) -> dict | None:
 
 
 async def _extract_signal_from_image(image_bytes: bytes, caption: str = "") -> dict | None:
-    """Скрин/баннер с ценами — только если INGEST_VISION=1 (дорого по токенам)."""
+    """Скрин/баннер с ценами — vision включён по умолчанию (INGEST_VISION)."""
     if not ai_client.INGEST_VISION:
         return None
     if not ai_client.fast_configured() or not image_bytes:
         return None
-    # Подпись без признаков сигнала + фото: всё равно пробуем vision.
-    # Подпись явно «не сигнал» и без цифр — пропускаем.
+    # Подпись явно «не сигнал» и длинная — не тратим vision.
+    # Фото без текста / короткий caption — всегда пробуем.
     if caption.strip() and not looks_like_signal(caption) and len(caption) > 80:
         return None
+    vision_system = (
+        EXTRACTOR_SYSTEM_PROMPT
+        + "\n\nКартинка — скрин сигнала, баннер канала или график с подписями Entry/SL/TP. "
+        "Прочитай тикер, сторону и уровни с изображения (и подписи, если есть). "
+        "Если на фото нет конкретной сделки с ценами — is_signal=false."
+    )
     try:
         parsed = await ai_client.vision_json_completion(
-            system=EXTRACTOR_SYSTEM_PROMPT,
+            system=vision_system,
             image_bytes=image_bytes,
             caption=caption,
-            max_tokens=160,
+            max_tokens=260,
         )
     except Exception as e:
         print(f"[telegram_ingest] Ошибка извлечения сигнала с картинки: {e}")
@@ -209,7 +238,24 @@ async def _extract_signal_from_image(image_bytes: bytes, caption: str = "") -> d
         return None
     if any(parsed.get(k) is None for k in ("symbol", "side", "entry", "stop", "tp1")):
         return None
+    parsed["parser"] = "vision"
     return parsed
+
+
+def _message_has_image(msg) -> bool:
+    """Фото или картинка-документ (каналы часто шлют баннер как file)."""
+    if getattr(msg, "photo", None):
+        return True
+    doc = getattr(msg, "document", None)
+    if not doc:
+        return False
+    mime = (getattr(doc, "mime_type", None) or "").lower()
+    if mime.startswith("image/"):
+        return True
+    for attr in getattr(doc, "attributes", None) or []:
+        if type(attr).__name__ == "DocumentAttributeImageSize":
+            return True
+    return False
 
 
 def _derive_tp_ladder(side: str, entry: float, tp1: float) -> tuple[float, float]:
@@ -302,23 +348,15 @@ CLOSE_KEYWORDS_RE = re.compile(
     re.IGNORECASE,
 )
 
-CLOSE_SYSTEM_PROMPT = (
-    "Тебе дают тикер уже открытой позиции и текст сообщения из крипто-канала. "
-    "Определи: объявляет ли это сообщение о закрытии/выходе именно из ЭТОЙ позиции "
-    "(канал сам вручную закрыл/вышел) — а не апдейт по стопу/цели без закрытия, "
-    "не разговор про другую монету, не общий комментарий. "
-    'Верни ТОЛЬКО JSON: {"is_close": bool, "reason": "profit"|"loss"|"manual"|"unknown"}.'
-)
-
 
 async def _extract_close_signal(text: str, symbol_base: str) -> dict | None:
     if not ai_client.fast_configured() or not text.strip():
         return None
     try:
-        parsed = await ai_client.fast_json_completion(
+        parsed = await ai_client.ingest_json_completion(
             system=CLOSE_SYSTEM_PROMPT,
-            user_text=f"Тикер открытой позиции: {symbol_base}\n\nСообщение канала:\n{text[:800]}",
-            max_tokens=80,
+            user_text=f"Тикер открытой позиции: {symbol_base}\n\nСообщение канала:\n{text[:3000]}",
+            max_tokens=120,
         )
     except Exception as e:
         print(f"[telegram_ingest] Ошибка проверки закрытия: {e}")
@@ -391,7 +429,7 @@ async def _try_close_from_channel(display_name: str, text: str):
 
 async def _handle_message(display_name: str, msg, channel_username: str | None = None):
     """`msg` — Telethon Message или NewMessage.Event.
-    Предфильтр → regex → Haiku JSON; vision только при INGEST_VISION=1."""
+    Предфильтр → regex → AI ingest JSON; vision только при INGEST_VISION=1."""
     channel = (channel_username or display_name).lstrip("@")
     msg_id = getattr(msg, "id", None)
     text = (msg.raw_text or "").strip() if hasattr(msg, "raw_text") else ""
@@ -424,8 +462,8 @@ async def _handle_message(display_name: str, msg, channel_username: str | None =
         not parsed
         and not ai_failed
         and ai_client.INGEST_VISION
-        and getattr(msg, "photo", None)
-        and (not text or looks_like_signal(text) or len(text) < 40)
+        and _message_has_image(msg)
+        and (not text or looks_like_signal(text) or len(text) < 80)
     ):
         try:
             image_bytes = await msg.download_media(file=bytes)
@@ -435,6 +473,8 @@ async def _handle_message(display_name: str, msg, channel_username: str | None =
         if image_bytes:
             try:
                 parsed = await _extract_signal_from_image(image_bytes, text)
+                if parsed:
+                    print(f"[telegram_ingest] {display_name}: vision parse {parsed.get('symbol')} {parsed.get('side')}")
             except Exception as e:
                 if msg_id is not None:
                     db.enqueue_ingest_retry(

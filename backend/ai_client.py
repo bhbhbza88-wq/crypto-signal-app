@@ -5,14 +5,15 @@
   OPENROUTER_API_KEY     — основной ключ
 
 Модели по сложности (переопределяются env):
-  OPENROUTER_MODEL_FAST   — дешёвая: парсинг сигналов, JSON
+  OPENROUTER_MODEL_FAST   — дешёвая: прочий быстрый JSON
+  OPENROUTER_MODEL_INGEST — парсинг сигналов из TG-каналов (сильнее FAST)
   OPENROUTER_MODEL_CHAT   — средняя: AI «Ник» на сайте
-  OPENROUTER_MODEL_VISION — средняя+vision: разбор скринов графика
+  OPENROUTER_MODEL_VISION — vision: скрины сигналов TG + графики на сайте
 
 Fallback (если OpenRouter нет):
   GROQ_API_KEY / ANTHROPIC_API_KEY / COMETAPI_KEY / OPENAI_API_KEY
   OLLAMA_URL — локальный chat_engage
-  INGEST_VISION — 0/1, vision для TG-ingest
+  INGEST_VISION — 0/1, vision для TG-ingest (по умолчанию ВКЛ)
 """
 
 from __future__ import annotations
@@ -38,10 +39,11 @@ OPENROUTER_BASE = (
 ).strip().rstrip("/")
 OPENROUTER_CHAT_URL = f"{OPENROUTER_BASE}/chat/completions"
 
-# Дешёвая / средняя / vision (OpenRouter slugs)
+# Дешёвая / ingest / средняя / vision (OpenRouter slugs)
 OR_FAST_DEFAULT = "google/gemini-2.5-flash-lite"
+OR_INGEST_DEFAULT = "google/gemini-2.5-flash"  # умнее lite для разбора каналов
 OR_CHAT_DEFAULT = "google/gemini-2.5-flash"
-OR_VISION_DEFAULT = "openai/gpt-4o-mini"  # дешевле Haiku, хорошо читает скрины
+OR_VISION_DEFAULT = "google/gemini-2.5-flash"  # multimodal: скрины сигналов из каналов
 
 COMETAPI_KEY = os.getenv("COMETAPI_KEY", "").strip()
 COMETAPI_BASE = (
@@ -58,7 +60,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 
-INGEST_VISION = os.getenv("INGEST_VISION", "0").strip().lower() in ("1", "true", "yes", "on")
+INGEST_VISION = os.getenv("INGEST_VISION", "1").strip().lower() in ("1", "true", "yes", "on")
 
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 GROQ_CHAT_MODEL = "llama-3.3-70b-versatile"
@@ -158,6 +160,16 @@ def _default_fast_model() -> str:
     return "gpt-4o-mini"
 
 
+def _default_ingest_model() -> str:
+    if openrouter_configured():
+        return OR_INGEST_DEFAULT
+    if claude_api_key():
+        return HAIKU_MODEL
+    if GROQ_API_KEY:
+        return GROQ_CHAT_MODEL
+    return "gpt-4o-mini"
+
+
 def _default_vision_model() -> str:
     if openrouter_configured():
         return OR_VISION_DEFAULT
@@ -180,6 +192,12 @@ MODEL_FAST = (
     or os.getenv("COMETAPI_MODEL_FAST")
     or os.getenv("AI_MODEL_CHAT")
     or _default_fast_model()
+).strip()
+MODEL_INGEST = (
+    os.getenv("OPENROUTER_MODEL_INGEST")
+    or os.getenv("ANTHROPIC_MODEL_INGEST")
+    or os.getenv("COMETAPI_MODEL_INGEST")
+    or _default_ingest_model()
 ).strip()
 MODEL_VISION = (
     os.getenv("OPENROUTER_MODEL_VISION")
@@ -320,14 +338,16 @@ async def fast_json_completion(
     system: str,
     user_text: str,
     max_tokens: int = 180,
+    model: str | None = None,
 ) -> dict:
-    """Дешёвый JSON (парсинг сигналов)."""
+    """Дешёвый JSON (парсинг сигналов и прочий structured output)."""
     sys = system.rstrip() + "\n\nОтветь ТОЛЬКО валидным JSON-объектом. Без markdown и пояснений."
+    use_model = (model or MODEL_FAST).strip()
 
     if openrouter_configured() or (GROQ_API_KEY and not claude_api_key()):
         # OpenRouter (или Groq) — OpenAI-совместимый путь
         raw = await openai_compatible_completion(
-            model=MODEL_FAST,
+            model=use_model,
             messages=[
                 {"role": "system", "content": sys},
                 {"role": "user", "content": user_text},
@@ -341,11 +361,26 @@ async def fast_json_completion(
     raw = await anthropic_completion(
         system=sys,
         user_content=user_text,
-        model=MODEL_FAST,
+        model=use_model,
         max_tokens=max_tokens,
         temperature=0.0,
     )
     return parse_json_content(raw)
+
+
+async def ingest_json_completion(
+    *,
+    system: str,
+    user_text: str,
+    max_tokens: int = 260,
+) -> dict:
+    """JSON-парсинг постов TG-каналов — более сильная MODEL_INGEST."""
+    return await fast_json_completion(
+        system=system,
+        user_text=user_text,
+        max_tokens=max_tokens,
+        model=MODEL_INGEST,
+    )
 
 
 async def vision_json_completion(

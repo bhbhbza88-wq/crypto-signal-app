@@ -219,17 +219,6 @@ class AddSignalRequest(BaseModel):
     note: str | None = None   # комментарий трейдера к сделке (необязательно)
 
 
-class TradingViewWebhook(BaseModel):
-    ticker: str
-    action: str            # "buy" | "sell"
-    price: float
-    indicator_name: str
-    secret: str
-
-
-TRADINGVIEW_SECRET = os.getenv("TRADINGVIEW_SECRET", "")
-
-
 def _token_from_header(authorization: str | None) -> str | None:
     if authorization and authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
@@ -688,69 +677,6 @@ def admin_add_signal(req: AddSignalRequest, background_tasks: BackgroundTasks, a
     except Exception as e:
         print(f"chat_engage open: {e}")
     return {"ok": True, "symbol": symbol, "trader": trader['name']}
-
-
-# ── Вебхуки TradingView ────────────────────────────────────────────
-# Расчёт SL/TP на вебхуке — заглушка 1:3 (стоп 2%, тейк 6%). Как и ручные
-# сигналы, дальше сделку ведёт tracker.py по цене Bybit — никакой отдельной
-# логики TP/SL для вебхуков не нужно, она уже общая для всех open_trades.
-TV_SL_PCT = 0.02
-TV_TP_PCT = 0.06
-
-
-@app.post("/api/webhooks/tradingview")
-def tradingview_webhook(req: TradingViewWebhook, background_tasks: BackgroundTasks):
-    if not TRADINGVIEW_SECRET or not hmac.compare_digest(req.secret, TRADINGVIEW_SECRET):
-        raise HTTPException(status_code=401, detail="Неверный секрет")
-
-    action = req.action.lower().strip()
-    if action not in ('buy', 'sell'):
-        raise HTTPException(status_code=400, detail="action должен быть buy или sell")
-    signal = 'LONG' if action == 'buy' else 'SHORT'
-
-    if req.price <= 0:
-        raise HTTPException(status_code=400, detail="price должен быть положительным")
-
-    entry = req.price
-    if signal == 'LONG':
-        stop = entry * (1 - TV_SL_PCT)
-        tp1, tp2, tp3 = entry * 1.02, entry * 1.04, entry * (1 + TV_TP_PCT)
-    else:
-        stop = entry * (1 + TV_SL_PCT)
-        tp1, tp2, tp3 = entry * 0.98, entry * 0.96, entry * (1 - TV_TP_PCT)
-
-    trader_id = db.get_or_create_trader(req.indicator_name)
-    trader = db.get_trader(trader_id)
-
-    symbol, err = open_signal(
-        req.ticker, signal, entry, stop, tp1, tp2, tp3,
-        trader_id=trader_id, regime="tradingview",
-        reasons=[f"TradingView: {req.indicator_name}"],
-    )
-    if err == 'already_open':
-        raise HTTPException(status_code=409, detail=f"По {normalize_symbol(req.ticker)} уже есть открытая позиция")
-    if err == 'invalid_levels':
-        raise HTTPException(status_code=400, detail="Некорректные уровни TP/SL")
-
-    db.add_event(symbol, 'tradingview_signal',
-                 f"{req.indicator_name}: {signal} {symbol} @ {entry}")
-
-    opened = db.get_trade(symbol) or {}
-    background_tasks.add_task(telegram_bot.notify_manual_signal, {
-        "symbol": symbol, "signal": signal,
-        "entry": entry, "stop": stop,
-        "tp1": tp1, "tp2": tp2, "tp3": tp3,
-        "exchange": opened.get("exchange") or "bybit",
-        "listed_on": opened.get("listed_on") or opened.get("exchange") or "bybit",
-    }, f"TradingView · {trader['name']}")
-
-    try:
-        import chat_engage
-        chat_engage.fire_open(symbol, signal, entry)
-    except Exception as e:
-        print(f"chat_engage open: {e}")
-
-    return {"ok": True, "symbol": symbol, "signal": signal, "trader": trader['name']}
 
 
 # ── AI (OpenRouter главный; Groq/Anthropic — fallback) ───────────────
