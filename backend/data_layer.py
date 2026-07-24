@@ -416,18 +416,16 @@ def get_bitunix_futures_symbols(force: bool = False):
 
 
 def get_active_symbols():
-    """Сканер / NFI / overview: полный union бирж (~1200), либо только CANDIDATES.
+    """Сканер NFI / overview: узкий CANDIDATES (~39).
 
-    SCAN_FULL_UNIVERSE=0 — откат на 39 монет.
+    Полный union бирж (~1200) — НЕ для автопоиска, а для probe_listings /
+    get_all_venue_symbols при импорте сигналов с каналов.
+    Полный скан: SCAN_FULL_UNIVERSE=1 (обычно не нужно).
     """
-    full = (os.getenv("SCAN_FULL_UNIVERSE", "1") or "1").strip().lower()
-    if full in ("0", "false", "no", "off"):
-        return list(CANDIDATES)
-    # legacy alias
-    if (os.getenv("BITUNIX_MERGE_UNIVERSE", "") or "").strip().lower() in ("0", "false", "no", "off"):
-        # только если явно выключили bitunix merge и не форсили full — не используем
-        pass
-    return get_all_venue_symbols()
+    full = (os.getenv("SCAN_FULL_UNIVERSE", "0") or "0").strip().lower()
+    if full in ("1", "true", "yes", "on"):
+        return get_all_venue_symbols()
+    return list(CANDIDATES)
 
 
 def list_supported_exchanges():
@@ -464,11 +462,12 @@ def _overview_symbol_row(sym: str):
 
 
 def _build_market_overview():
+    """Обзор рынка по CANDIDATES (не по всему union ~1200)."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    symbols_in = get_active_symbols()
+    symbols_in = list(CANDIDATES)
     symbols = []
-    workers = max(2, min(_OVERVIEW_WORKERS, 24))
+    workers = max(2, min(_OVERVIEW_WORKERS, 12))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {pool.submit(_overview_symbol_row, sym): sym for sym in symbols_in}
         for fut in as_completed(futs):
