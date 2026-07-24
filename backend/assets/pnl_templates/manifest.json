@@ -1,0 +1,239 @@
+{
+  "layouts": {
+    "bitunix": {
+      "clear_x1": 0.58,
+      "pair_xy": [
+        0.055,
+        0.16
+      ],
+      "pair_size": 0.045,
+      "side_xy": [
+        0.06,
+        0.24
+      ],
+      "side_size": 0.032,
+      "roi_xy": [
+        0.055,
+        0.32
+      ],
+      "roi_size": 0.1,
+      "price1_xy": [
+        0.055,
+        0.55
+      ],
+      "price2_xy": [
+        0.055,
+        0.62
+      ],
+      "price_size": 0.028,
+      "label_mode": "inline",
+      "side_style": "inline",
+      "pair_with_side": true,
+      "footer_clear": false,
+      "clear_y0": 0.12,
+      "clear_y1": 0.82
+    },
+    "bingx": {
+      "clear_x1": 0.58,
+      "header_xy": [
+        0.05,
+        0.105
+      ],
+      "header_size": 0.028,
+      "pair_xy": [
+        0.05,
+        0.165
+      ],
+      "pair_size": 0.048,
+      "side_xy": [
+        0.05,
+        0.235
+      ],
+      "side_size": 0.034,
+      "roi_xy": [
+        0.05,
+        0.33
+      ],
+      "roi_size": 0.12,
+      "price1_xy": [
+        0.05,
+        0.5
+      ],
+      "price2_xy": [
+        0.05,
+        0.56
+      ],
+      "price_size": 0.028,
+      "label_mode": "inline",
+      "side_style": "row",
+      "pair_with_side": false,
+      "footer_clear": false,
+      "clear_y0": 0.09,
+      "clear_y1": 0.7
+    },
+    "binance": {
+      "clear_x1": 0.92,
+      "pair_xy": [
+        0.07,
+        0.235
+      ],
+      "pair_size": 0.04,
+      "side_xy": [
+        0.07,
+        0.3
+      ],
+      "side_size": 0.03,
+      "roi_xy": [
+        0.07,
+        0.43
+      ],
+      "roi_size": 0.095,
+      "price1_xy": [
+        0.07,
+        0.72
+      ],
+      "price2_xy": [
+        0.48,
+        0.72
+      ],
+      "label1_xy": [
+        0.07,
+        0.665
+      ],
+      "label2_xy": [
+        0.48,
+        0.665
+      ],
+      "price_size": 0.033,
+      "label_size": 0.026,
+      "label_mode": "columns",
+      "side_style": "row",
+      "pair_with_side": false,
+      "footer_clear": false,
+      "clear_y0": 0.18,
+      "clear_y1": 0.8
+    }
+  },
+  "templates": [
+    {
+      "file": "tpl_01_1280x1280.png",
+      "family": "bingx",
+      "width": 1280,
+      "height": 1280
+    },
+    {
+      "file": "tpl_02_1080x967.png",
+      "family": "bingx",
+      "width": 1080,
+      "height": 967
+    },
+    {
+      "file": "tpl_03_1280x1280.png",
+      "family": "bingx",
+      "width": 1280,
+      "height": 1280
+    },
+    {
+      "file": "tpl_04_1080x969.png",
+      "family": "bingx",
+      "width": 1080,
+      "height": 969
+    },
+    {
+      "file": "tpl_05_1035x1005.png",
+      "family": "bitunix",
+      "width": 1035,
+      "height": 1005
+    },
+    {
+      "file": "tpl_06_840x840.png",
+      "family": "bingx",
+      "width": 840,
+      "height": 840
+    },
+    {
+      "file": "tpl_07_1035x1005.png",
+      "family": "bitunix",
+      "width": 1035,
+      "height": 1005
+    },
+    {
+      "file": "tpl_08_1280x1280.png",
+      "family": "bingx",
+      "width": 1280,
+      "height": 1280
+    },
+    {
+      "file": "tpl_09_1035x1095.png",
+      "family": "bitunix",
+      "width": 1035,
+      "height": 1095
+    },
+    {
+      "file": "tpl_10_1080x1064.png",
+      "family": "bingx",
+      "width": 1080,
+      "height": 1064
+    },
+    {
+      "file": "tpl_11_920x964.png",
+      "family": "bitunix",
+      "width": 920,
+      "height": 964
+    },
+    {
+      "file": "tpl_12_1280x1280.png",
+      "family": "bingx",
+      "width": 1280,
+      "height": 1280
+    },
+    {
+      "file": "tpl_13_1035x1095.png",
+      "family": "bitunix",
+      "width": 1035,
+      "height": 1095
+    },
+    {
+      "file": "tpl_14_1080x869.png",
+      "family": "bingx",
+      "width": 1080,
+      "height": 869
+    },
+    {
+      "file": "tpl_15_935x1280.png",
+      "family": "binance",
+      "width": 935,
+      "height": 1280
+    },
+    {
+      "file": "tpl_16_1280x1280.png",
+      "family": "bingx",
+      "width": 1280,
+      "height": 1280
+    },
+    {
+      "file": "tpl_17_1078x860.png",
+      "family": "bingx",
+      "width": 1078,
+      "height": 860
+    },
+    {
+      "file": "tpl_18_1035x1005.png",
+      "family": "bitunix",
+      "width": 1035,
+      "height": 1005
+    },
+    {
+      "file": "tpl_19_934x1280.png",
+      "family": "binance",
+      "width": 934,
+      "height": 1280
+    },
+    {
+      "file": "tpl_20_1280x1280.png",
+      "family": "bingx",
+      "width": 1280,
+      "height": 1280
+    }
+  ]
+}

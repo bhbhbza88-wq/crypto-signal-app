@@ -1,13 +1,15 @@
 """
-Карточка закрытия: статичный фон (assets/pnl_card_bg.png) + текст поверх.
-Раскладка как у Binance Futures share.
-Шрифты с кириллицей — backend/assets/fonts (DejaVu), иначе системные.
+Карточка закрытия: либо классический Binance-фон, либо пул реальных
+шарингов (Bitunix / BingX / Binance) из assets/pnl_templates — меняем
+только текст (пара, Лонг/Шорт, ROI%, цены), арт не перерисовываем.
 """
 
 from __future__ import annotations
 
 import io
+import json
 import os
+import random
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -23,6 +25,8 @@ PNL_SHOW_MULT = float(os.getenv("PNL_WIN_MULT", "1.22") or "1.22")
 _ASSETS = Path(__file__).resolve().parent / "assets"
 BG_PATH = _ASSETS / "pnl_card_bg.png"
 BYBIT_BG_PATH = _ASSETS / "bybit_pnl_card_bg.png"
+TEMPLATES_DIR = _ASSETS / "pnl_templates"
+MANIFEST_PATH = TEMPLATES_DIR / "manifest.json"
 _FONT_REG = _ASSETS / "fonts" / "card-regular.ttf"
 _FONT_BOLD = _ASSETS / "fonts" / "card-bold.ttf"
 
@@ -30,6 +34,7 @@ WHITE = (255, 255, 255)
 GREY = (132, 142, 156)
 GREEN = (14, 203, 129)
 RED = (246, 70, 93)
+BINGX_PINK = (255, 77, 141)
 
 
 @lru_cache(maxsize=8)
@@ -50,7 +55,6 @@ def _font(size: int, bold: bool = False):
                 return ImageFont.truetype(path, size)
             except OSError:
                 continue
-    # load_default() без кириллицы — лучше громко упасть, чем слать □□□
     raise RuntimeError(
         "Нет TTF с кириллицей для profit_card. "
         "Положи DejaVu в backend/assets/fonts/card-regular.ttf и card-bold.ttf"
@@ -58,7 +62,6 @@ def _font(size: int, bold: bool = False):
 
 
 def _fmt_price(v: float) -> str:
-    """Как на Binance share — фиксированная точность, без обрезки нулей."""
     try:
         n = float(v)
     except (TypeError, ValueError):
@@ -70,6 +73,25 @@ def _fmt_price(v: float) -> str:
     if n >= 1:
         return f"{n:.7f}"
     return f"{n:.8f}"
+
+
+def _fmt_share_price(v: float) -> str:
+    n = float(v)
+    if n >= 100:
+        s = f"{n:.2f}"
+    elif n >= 1:
+        s = f"{n:.4f}"
+    elif n >= 0.1:
+        s = f"{n:.5f}"
+    elif n >= 0.01:
+        s = f"{n:.5f}"
+    else:
+        s = f"{n:.6f}"
+    if "." in s:
+        s = s.rstrip("0")
+        if s.endswith("."):
+            s += "0"
+    return s
 
 
 def _exit_from_pnl(side: str, entry: float, pnl_pct: float) -> float:
@@ -86,8 +108,6 @@ def _load_bg() -> Image.Image:
 
 
 def _bg_for_text() -> Image.Image:
-    """Эталонный фон Binance как есть: эмблема справа (левый край ~0.566 у строки пары,
-    ~0.643 у ROI). Текст держим левее — сдвигать/перерисовывать фон не нужно."""
     return _load_bg().copy()
 
 
@@ -110,7 +130,6 @@ def render_profit_card(
         exit_price = float(exit_price)
 
     show_pnl = polish_pnl(pnl_pct, decimals=2)
-    # ROI на карточке = движение цены × плечо (как Binance ROE)
     roi = round(show_pnl * leverage, 2)
 
     coin = symbol.replace("/USDT", "").replace("USDT", "").upper()
@@ -124,7 +143,6 @@ def render_profit_card(
     W, H = img.size
     draw = ImageDraw.Draw(img)
 
-    # Текст как на эталоне: заканчивается ~0.46–0.52 ширины, эмблема начинается с ~0.566.
     pad = int(W * 0.070)
     text_max_w = max(120, int(W * 0.52) - pad)
     col2_x = int(W * 0.48)
@@ -169,24 +187,202 @@ def render_profit_card(
     return buf.getvalue()
 
 
-# ── Bybit-style карточка (скрин из приложения с реф-плашкой) ──────────
-# Фон — реальный скрин юзера (assets/bybit_pnl_card_bg.png), НЕ трогаем:
-# лого, деньги/стрелки, сетку, футер с QR и реф-кодом. Перекрашиваем только
-# 5 динамических зон (замерено по пикселям с оригинала).
-# y-диапазоны зон подобраны по пикселям оригинала; x — считается динамически
-# под фактическую ширину нового текста (см. render_bybit_card), чтобы не
-# оставлять «пустой» чёрный шов там, где сетка фона просто вырезана без текста.
+# ── Пул шаблонов Bitunix / BingX / Binance (только текст поверх фото) ──
+
+@lru_cache(maxsize=1)
+def _load_manifest() -> dict:
+    if not MANIFEST_PATH.exists():
+        return {"layouts": {}, "templates": []}
+    return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+
+
+def list_share_templates(family: str | None = None) -> list[dict]:
+    items = list(_load_manifest().get("templates") or [])
+    if family:
+        fam = family.lower().strip()
+        items = [t for t in items if t.get("family") == fam]
+    return items
+
+
+def _sample_fill(img: Image.Image, box: tuple[int, int, int, int]) -> tuple[int, int, int]:
+    x0, y0, x1, y1 = box
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(img.width, x1), min(img.height, y1)
+    if x1 <= x0 or y1 <= y0:
+        return (0, 0, 0)
+    crop = img.crop((x0, y0, x1, y1)).resize((1, 1), Image.Resampling.BOX)
+    return crop.getpixel((0, 0))[:3]
+
+
+def _px(frac: float, total: int) -> int:
+    return int(round(frac * total))
+
+
+def render_template_card(
+    template_file: str,
+    family: str,
+    symbol: str,
+    side: str,
+    entry: float,
+    pnl_pct: float,
+    exit_price: float | None = None,
+    leverage: int | None = None,
+) -> bytes:
+    """Один шаблон: затираем левую текстовую зону и рисуем новые цифры."""
+    side = (side or "LONG").upper()
+    leverage = leverage or SHARE_LEVERAGE
+    entry = float(entry)
+    pnl_pct = float(pnl_pct)
+    if exit_price is None:
+        exit_price = _exit_from_pnl(side, entry, pnl_pct)
+    else:
+        exit_price = float(exit_price)
+
+    path = TEMPLATES_DIR / template_file
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    layout = (_load_manifest().get("layouts") or {}).get(family) or {}
+    if not layout:
+        raise ValueError(f"нет layout для family={family}")
+
+    show_pnl = polish_pnl(pnl_pct, decimals=2)
+    roi = round(show_pnl * leverage, 2)
+    coin = symbol.replace("/USDT", "").replace("USDT", "").upper()
+    pair = f"{coin}USDT"
+    is_long = side == "LONG"
+    side_ru = "Лонг" if is_long else "Шорт"
+    side_color = GREEN if is_long else (BINGX_PINK if family == "bingx" else RED)
+    roi_color = GREEN if roi >= 0 else (BINGX_PINK if family == "bingx" else RED)
+    roi_str = f"+{roi:.2f}%" if roi >= 0 else f"{roi:.2f}%"
+
+    img = Image.open(path).convert("RGB")
+    W, H = img.size
+    draw = ImageDraw.Draw(img)
+
+    clear_x1 = _px(float(layout.get("clear_x1", 0.52)), W)
+    clear_y0 = _px(float(layout.get("clear_y0", 0.10 if family != "binance" else 0.20)), H)
+    clear_y1 = _px(float(layout.get("clear_y1", 0.78 if family != "binance" else 0.78)), H)
+    fill = _sample_fill(img, (8, clear_y0, min(40, max(8, clear_x1 // 4)), clear_y1))
+    fill = tuple(max(0, min(255, c - 12)) for c in fill)
+    # Панель текста на шарингах почти всегда чёрная; если сэмпл светлый —
+    # не рисуем белую «плашку» поверх арта.
+    if sum(fill) / 3 > 35:
+        fill = (0, 0, 0)
+    # Чуть шире текста — иначе хвосты старых цифр («0X») торчат из-под нового
+    draw.rectangle((0, clear_y0, min(W - 1, clear_x1 + _px(0.04, W)), clear_y1), fill=fill)
+
+    def fxy(key, default=(0.06, 0.2)):
+        xy = layout.get(key) or default
+        return _px(float(xy[0]), W), _px(float(xy[1]), H)
+
+    def fsize(key, default=0.04):
+        return max(14, _px(float(layout.get(key, default)), H))
+
+    font_pair = _font(fsize("pair_size", 0.045), bold=True)
+    font_side = _font(fsize("side_size", 0.032), bold=True)
+    font_roi = _font(fsize("roi_size", 0.11), bold=True)
+    font_price = _font(fsize("price_size", 0.028), bold=False)
+    font_price_val = _font(fsize("price_size", 0.028), bold=True)
+
+    px, py = fxy("pair_xy")
+    sx, sy = fxy("side_xy")
+    rx, ry = fxy("roi_xy")
+    p1x, p1y = fxy("price1_xy")
+    p2x, p2y = fxy("price2_xy")
+
+    if family == "binance":
+        pair_line = f"{pair} Бессрочный"
+        draw.text((px, py), pair_line, font=font_pair, fill=WHITE)
+        draw.text((sx, sy), f"{side_ru} ", font=font_side, fill=side_color)
+        sw = draw.textlength(f"{side_ru} ", font=font_side)
+        draw.text((sx + sw, sy), f"| {leverage}x", font=font_side, fill=GREY)
+        draw.text((rx, ry), roi_str, font=font_roi, fill=roi_color)
+        font_lab = _font(fsize("label_size", 0.026), bold=False)
+        l1 = layout.get("label1_xy") or [0.07, 0.665]
+        l2 = layout.get("label2_xy") or [0.48, 0.665]
+        draw.text((_px(l1[0], W), _px(l1[1], H)), "Цена входа", font=font_lab, fill=GREY)
+        draw.text((_px(l2[0], W), _px(l2[1], H)), "Средняя цена закрытия", font=font_lab, fill=GREY)
+        draw.text((p1x, p1y), _fmt_price(entry).replace(".", ","), font=font_price_val, fill=WHITE)
+        draw.text((p2x, p2y), _fmt_price(exit_price).replace(".", ","), font=font_price_val, fill=WHITE)
+    elif family == "bitunix":
+        draw.text((px, py), pair, font=font_pair, fill=WHITE)
+        pair_w = draw.textlength(pair, font=font_pair)
+        sep = " | "
+        draw.text((px + pair_w, py), sep, font=font_pair, fill=WHITE)
+        sep_w = draw.textlength(sep, font=font_pair)
+        side_line = f"{side_ru} {leverage}X"
+        draw.text((px + pair_w + sep_w, py), side_line, font=font_pair, fill=side_color)
+        draw.text((rx, ry), roi_str, font=font_roi, fill=roi_color)
+        e_s, x_s = _fmt_share_price(entry), _fmt_share_price(exit_price)
+        draw.text((p1x, p1y), f"Цена открытия {e_s}", font=font_price, fill=WHITE)
+        draw.text((p2x, p2y), f"Цена закрытия {x_s}", font=font_price, fill=WHITE)
+    else:  # bingx
+        if "header_xy" in layout:
+            hx, hy = fxy("header_xy")
+            font_h = _font(fsize("header_size", 0.028), bold=False)
+            draw.text((hx, hy), "Реализованная П/У", font=font_h, fill=WHITE)
+        draw.text((px, py), pair, font=font_pair, fill=WHITE)
+        draw.text((sx, sy), side_ru, font=font_side, fill=side_color)
+        sw = draw.textlength(side_ru, font=font_side)
+        draw.text((sx + sw + 10, sy), f"|  {leverage}X", font=font_side, fill=WHITE)
+        draw.text((rx, ry), roi_str, font=font_roi, fill=roi_color)
+        e_s, x_s = _fmt_share_price(entry), _fmt_share_price(exit_price)
+        draw.text((p1x, p1y), f"Цена закрытия  {x_s}", font=font_price, fill=WHITE)
+        draw.text((p2x, p2y), f"Цена входа  {e_s}", font=font_price, fill=WHITE)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def render_share_card(
+    symbol: str,
+    side: str,
+    entry: float,
+    pnl_pct: float,
+    exit_price: float | None = None,
+    leverage: int | None = None,
+    family: str | None = None,
+    template_file: str | None = None,
+) -> bytes:
+    """Случайный шаблон из пула или классический Binance-fallback."""
+    fam_env = (family or os.getenv("PROFIT_CARD_FAMILY") or "").strip().lower()
+    templates = list_share_templates(fam_env or None)
+    if template_file:
+        templates = [t for t in templates if t.get("file") == template_file] or templates
+    if not templates:
+        return render_profit_card(
+            symbol=symbol, side=side, entry=entry, pnl_pct=pnl_pct,
+            exit_price=exit_price, leverage=leverage,
+        )
+    pick = random.choice(templates)
+    try:
+        return render_template_card(
+            template_file=pick["file"],
+            family=pick["family"],
+            symbol=symbol,
+            side=side,
+            entry=entry,
+            pnl_pct=pnl_pct,
+            exit_price=exit_price,
+            leverage=leverage,
+        )
+    except Exception as e:
+        print(f"[profit_card] template {pick.get('file')} failed: {e}")
+        return render_profit_card(
+            symbol=symbol, side=side, entry=entry, pnl_pct=pnl_pct,
+            exit_price=exit_price, leverage=leverage,
+        )
+
+
+# ── Bybit-style карточка ─────────────────────────────────────────────
 _BYBIT_ROW_SYMBOL_Y = (180, 226)
 _BYBIT_ROW_PNL_Y = (312, 388)
 _BYBIT_ROW_ENTRY_Y = (474, 513)
 _BYBIT_ROW_EXIT_Y = (574, 613)
 _BYBIT_ROW_DURATION_Y = (669, 718)
-
-# Минимальный правый край очистки — правый край оригинального текста на
-# скрине (замерено по пикселям). Гарантирует, что старые цифры не будут
-# «торчать» из-под нового текста, даже если у нашего шрифта другая метрика.
 _BYBIT_MIN_CLEAR_X = {"symbol": 409, "pnl": 268, "entry": 139, "exit": 151, "duration": 249}
-
 _BYBIT_X0 = 30
 _BYBIT_SYMBOL_XY = (50, 183)
 _BYBIT_PILL_Y = (186, 222)
@@ -195,8 +391,6 @@ _BYBIT_PNL_XY = (53, 316)
 _BYBIT_ENTRY_XY = (48, 477)
 _BYBIT_EXIT_XY = (48, 577)
 _BYBIT_DURATION_XY = (49, 675)
-# Белый блок "Присоединяйтесь..." + QR — реф-реклама самого Bybit, не наша.
-# Обрезаем карточку по верхнему краю этого блока, чтобы его не показывать.
 _BYBIT_CROP_H = 838
 
 
@@ -208,8 +402,6 @@ def _load_bybit_bg() -> Image.Image:
 
 
 def _draw_topleft(draw, xy, text, font, fill) -> tuple[int, int]:
-    """Рисует текст так, чтобы видимый верх-лево глифов совпал с xy
-    (компенсирует внутренние отступы шрифта у ascent)."""
     x, y = xy
     l, t, r, b = draw.textbbox((0, 0), text, font=font)
     draw.text((x - l, y - t), text, font=font, fill=fill)
@@ -217,7 +409,6 @@ def _draw_topleft(draw, xy, text, font, fill) -> tuple[int, int]:
 
 
 def _fmt_bybit_price(v: float) -> str:
-    """Короче, чем _fmt_price — как реально показывает Bybit (без лишних нулей)."""
     n = float(v)
     if n >= 1000:
         s = f"{n:.2f}"
@@ -235,7 +426,6 @@ def _fmt_bybit_price(v: float) -> str:
 
 
 def fmt_duration_ru(total_minutes: float) -> str:
-    """'22 ч. 2 мин.' / '48 мин.' / '1 д. 6 ч.' — как подпись 'Срок' на Bybit."""
     m = max(1, int(round(total_minutes)))
     if m < 60:
         return f"{m} мин."
@@ -254,10 +444,6 @@ def render_bybit_card(
     pnl_usdt: float,
     duration_minutes: float = 60.0,
 ) -> bytes:
-    """Карточка в стиле шаринга из приложения Bybit. Фон (лого/мешок денег/
-    сетка/футер с QR и реф-кодом) — оригинальный скрин, не меняется.
-    Меняются только: пара, Лонг/Шорт, P&L в USDT, цены входа/выхода, срок.
-    """
     side = (side or "LONG").upper()
     entry = float(entry)
     exit_price = float(exit_price)
@@ -272,8 +458,6 @@ def render_bybit_card(
     img = _load_bybit_bg().copy()
     draw = ImageDraw.Draw(img)
 
-    # Размеры подобраны так, чтобы ширина рендера ≈ ширине оригинального
-    # текста на скрине (другой шрифт даёт другую метрику при том же px).
     font_symbol = _font(41, bold=True)
     font_pill = _font(20, bold=False)
     font_pnl = _font(66, bold=True)
@@ -281,28 +465,21 @@ def render_bybit_card(
     font_duration = _font(22, bold=False)
 
     def clear_row(y0, y1, x1, min_key):
-        """Чистим под ширину нового текста, но не уже правого края оригинала
-        (min_key) — иначе из-под нового текста «торчат» старые цифры/буквы
-        (другой шрифт даёт другую метрику ширины)."""
         x1 = max(x1 + 4, _BYBIT_MIN_CLEAR_X[min_key])
         draw.rectangle((_BYBIT_X0, y0, x1, y1), fill=(0, 0, 0))
 
-    # ── Пара + плашка Лонг/Шорт ──
     sym_measure_w = draw.textlength(pair_line, font=font_symbol)
     pill_l, pill_t, pill_r, pill_b = draw.textbbox((0, 0), side_ru, font=font_pill)
     pill_text_w, pill_text_h = pill_r - pill_l, pill_b - pill_t
     pill_pad_x, pill_h = 18, _BYBIT_PILL_Y[1] - _BYBIT_PILL_Y[0]
     pill_x0 = _BYBIT_SYMBOL_XY[0] + sym_measure_w + _BYBIT_PILL_GAP
-    # Растягиваем плашку вправо (если нужно) так, чтобы она сама доходила
-    # до границы очистки — иначе между плашкой и очищенной зоной остаётся
-    # видимый чёрный "шов" без узора сетки.
     natural_w = pill_text_w + pill_pad_x * 2
     stretch_w = (_BYBIT_MIN_CLEAR_X["symbol"] - 4) - pill_x0
     pill_total_w = max(natural_w, stretch_w)
     row1_end_x = pill_x0 + pill_total_w
     clear_row(*_BYBIT_ROW_SYMBOL_Y, row1_end_x, "symbol")
 
-    sym_w, _ = _draw_topleft(draw, _BYBIT_SYMBOL_XY, pair_line, font_symbol, WHITE)
+    _draw_topleft(draw, _BYBIT_SYMBOL_XY, pair_line, font_symbol, WHITE)
     pill_x1 = pill_x0 + pill_total_w
     pill_y0, pill_y1 = _BYBIT_PILL_Y
     draw.rounded_rectangle(
@@ -313,19 +490,16 @@ def render_bybit_card(
     text_x = pill_x0 + (pill_total_w - pill_text_w) // 2
     draw.text((text_x - pill_l, text_y - pill_t), side_ru, font=font_pill, fill=side_color)
 
-    # ── P&L (USDT) ──
     pnl_w = draw.textlength(pnl_str, font=font_pnl)
     clear_row(*_BYBIT_ROW_PNL_Y, _BYBIT_PNL_XY[0] + pnl_w, "pnl")
     _draw_topleft(draw, _BYBIT_PNL_XY, pnl_str, font_pnl, GREEN)
 
-    # ── Цена входа / выхода ──
     entry_str, exit_str = _fmt_bybit_price(entry), _fmt_bybit_price(exit_price)
     clear_row(*_BYBIT_ROW_ENTRY_Y, _BYBIT_ENTRY_XY[0] + draw.textlength(entry_str, font=font_price), "entry")
     _draw_topleft(draw, _BYBIT_ENTRY_XY, entry_str, font_price, WHITE)
     clear_row(*_BYBIT_ROW_EXIT_Y, _BYBIT_EXIT_XY[0] + draw.textlength(exit_str, font=font_price), "exit")
     _draw_topleft(draw, _BYBIT_EXIT_XY, exit_str, font_price, WHITE)
 
-    # ── Срок ──
     duration_line = f"Срок {fmt_duration_ru(duration_minutes)}"
     dur_w = draw.textlength(duration_line, font=font_duration)
     clear_row(*_BYBIT_ROW_DURATION_Y, _BYBIT_DURATION_XY[0] + dur_w, "duration")

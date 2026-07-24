@@ -793,8 +793,8 @@ async def notify_signal_closed(signal: dict, result: str, pnl: float):
     photo = None
     if entry is not None:
         try:
-            from profit_card import render_profit_card
-            photo = render_profit_card(
+            from profit_card import render_share_card
+            photo = render_share_card(
                 symbol=sym, side=side or "LONG", entry=float(entry),
                 pnl_pct=float(pnl), exit_price=float(exit_price) if exit_price is not None else None,
             )

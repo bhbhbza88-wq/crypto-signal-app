@@ -534,9 +534,7 @@ def fire_practice_profit(
 
 
 def _render_card(symbol, side, entry, pnl, exit_price, exchange=None, duration_minutes=None):
-    """Шаблон карточки — по бирже, где реально торгуется монета:
-    Bybit → скрин из приложения Bybit (с реф-плашкой), иначе — Binance share.
-    Так карточка совпадает с площадкой, а не выбирается вслепую."""
+    """Шаблон карточки — Bybit свой скрин; иначе пул Bitunix/BingX/Binance шарингов."""
     exchange = (exchange or "bybit").lower().strip()
     if exchange == "bybit":
         from profit_card import render_bybit_card
@@ -545,8 +543,8 @@ def _render_card(symbol, side, entry, pnl, exit_price, exchange=None, duration_m
             symbol=symbol, side=side, entry=float(entry), exit_price=float(exit_price),
             pnl_usdt=pnl_usdt, duration_minutes=duration_minutes or _random_duration_minutes(),
         )
-    from profit_card import render_profit_card
-    return render_profit_card(
+    from profit_card import render_share_card
+    return render_share_card(
         symbol=symbol, side=side, entry=float(entry),
         pnl_pct=float(pnl), exit_price=exit_price,
     )

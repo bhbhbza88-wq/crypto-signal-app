@@ -42,3 +42,7 @@ backend/_retest_*
 backend/*_session_out.txt
 backend/practice_chat_engage.py
 backend/_fetch_api_for_login.py
+
+backend/assets/pnl_templates/_preview/
+backend/assets/pnl_templates/_classify.py
+
