@@ -416,11 +416,11 @@ def get_bitunix_futures_symbols(force: bool = False):
 
 
 def get_active_symbols():
-    """Сканер NFI / overview: узкий CANDIDATES (~39).
+    """Узкий список CANDIDATES (~39) для overview / бэктеста.
 
-    Полный union бирж (~1200) — НЕ для автопоиска, а для probe_listings /
-    get_all_venue_symbols при импорте сигналов с каналов.
-    Полный скан: SCAN_FULL_UNIVERSE=1 (обычно не нужно).
+    Полный union бирж (~1200) — для probe_listings / get_all_venue_symbols
+    при валидации листингов сигналов с каналов (не автопоиск монет).
+    SCAN_FULL_UNIVERSE=1 расширяет до union — обычно не нужно.
     """
     full = (os.getenv("SCAN_FULL_UNIVERSE", "0") or "0").strip().lower()
     if full in ("1", "true", "yes", "on"):

@@ -61,7 +61,7 @@ function LiveScanner({ prices, t }) {
       <div className="scanner-top">
         <span className="tl-row" aria-hidden="true"><span className="tl r" /><span className="tl a" /><span className="tl g" /></span>
         <span className="live-pill"><span className="live-dot" /> ONLINE</span>
-        <span className="scanner-title">Market Scanner</span>
+        <span className="scanner-title">{t('land.scan.widgetTitle')}</span>
         {prices && (
           <span className="scanner-tickers">
             BTC ${prices.btc.price} · ETH ${prices.eth.price}

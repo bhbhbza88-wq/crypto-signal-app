@@ -1,10 +1,14 @@
 """
-V9 Strategy — единая логика для лайва и бэктеста.
-Ключевые принципы:
+V9 Strategy — логика входов/уровней для бэктеста и трекера.
+
+Live NFI-автопоиск отключён (`generate_nfi_signal` / `scan_for_nfi_signals`
+возвращают None/[]). Торговые сигналы приходят из каналов / manual / webhook.
+
+Ключевые принципы (бэктест / paper):
   - Вход на ОТКАТЕ к EMA (не на хае): RSI 35-55 для LONG, 45-65 для SHORT
   - R:R минимум 2:1 (SL 2.2 ATR, TP1 2.5, TP2 4.5, TP3 7.0)
   - Правильный векторизованный Supertrend (без look-ahead)
-  - Score 0-20, единый core_signal() для лайва и бэктеста
+  - Score 0-20, core_signal() / should_enter() для бэктеста
   - Supertrend + MACD + ADX + объём + структура как фильтры
   - Cooldown, Daily Loss Limit, Volatility Sizing
 """
@@ -15,8 +19,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from data_layer import (
-    fetch_data_cached, build_features, detect_regime,
-    get_active_symbols, api_call, exchange, preferred_exchange_for,
+    build_features, detect_regime,
+    api_call, exchange,
 )
 
 # ── Параметры ────────────────────────────────────────────────────
@@ -622,149 +626,16 @@ def core_signal(df_1h, signal, df_4h=None):
 
 
 # ══════════════════════════════════════════════════════════════════
-# LIVE SIGNAL
+# LIVE NFI AUTO-SEARCH — отключён (совместимость API)
 # ══════════════════════════════════════════════════════════════════
-def _generate_momentum_signal(symbol, df_1h):
-    """
-    Live-версия momentum: входим в момент перехода ADX+EMA-тренда в true
-    (см. core_signal_momentum). Не зависит от detect_regime — направление
-    уже закодировано в самом условии. Уровни — те же, что в бэктесте
-    (backtest_levels с STRATEGY_MODE='momentum': широкий стоп + время-выход).
-    """
-    signal = None
-    if core_signal_momentum(df_1h, 'LONG'):
-        signal = 'LONG'
-    elif core_signal_momentum(df_1h, 'SHORT'):
-        signal = 'SHORT'
-    if not signal:
-        return None
-
-    if not btc_allows(symbol, signal):
-        return None
-
-    last    = df_1h.iloc[-1]
-    entry   = last['close']
-    atr_val = last['atr']
-    atr_pct = atr_val / entry if entry > 0 else 0
-    adx_val = last['adx'] if not pd.isna(last['adx']) else 0
-
-    stop, tp1, tp2, tp3 = backtest_levels(signal, entry, atr_val, adx_val, atr_pct, df_1h)
-    pos_size = volatility_position_size(entry, stop, atr_pct)
-    if pos_size <= 0:
-        return None
-
-    score = min(SCORE_MAX, int(adx_val))  # прокси силы сигнала для сортировки в сканере
-
-    print(f"💎 {symbol}: {signal} | MOMENTUM | ADX={adx_val:.0f} | {pos_size:.0f}$")
-
-    return {
-        'symbol': symbol, 'signal': signal, 'score': score, 'regime': 'MOMENTUM',
-        'entry': entry, 'stop': stop, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
-        'chandelier_stop': stop, 'position_size': pos_size,
-        'last': last, 'last_1h': last, 'df': df_1h,
-        'entry_reasons': [
-            f'Momentum: ADX {adx_val:.0f} (растёт), переход в тренд',
-            f'EMA-стек по сигналу: ✓',
-            f'Позиция: {pos_size:.0f}$ (volatility-adj)',
-            f'Выход по времени (~36ч) — широкий защитный стоп {stop:.4f}',
-            f'BTC: {get_btc_regime()}',
-        ],
-    }
-
-
 def generate_nfi_signal(symbol):
-    if is_in_cooldown(symbol):  return None
-    if not daily_loss_ok():     return None
-
-    data = fetch_data_cached(symbol, exchange_id=preferred_exchange_for(symbol))
-    if not data:
-        return None
-
-    df_4h = build_features(data['4h'])
-    df_1h = build_features(data['1h'])
-
-    try:
-        df_1h = calc_supertrend(df_1h)
-    except Exception:
-        pass
-
-    if STRATEGY_MODE == "momentum":
-        return _generate_momentum_signal(symbol, df_1h)
-
-    regime, adx_1h = detect_regime(df_1h)
-    if regime in ('FLAT', 'CHOP'):
-        return None
-
-    # Определяем направление по режиму
-    signal = None
-    if regime == 'UPTREND'   and core_signal(df_1h, 'LONG',  df_4h):  signal = 'LONG'
-    elif regime == 'DOWNTREND' and core_signal(df_1h, 'SHORT', df_4h): signal = 'SHORT'
-    if not signal:
-        return None
-
-    if not btc_allows(symbol, signal):
-        return None
-
-    score = calc_score(df_1h, regime, signal)
-    if score < SCORE_MIN:
-        print(f"  ⛔ {symbol}: score={score} < {SCORE_MIN}")
-        return None
-
-    last    = df_1h.iloc[-1]
-    entry   = last['close']
-    atr_val = last['atr']
-    atr_pct = atr_val / entry if entry > 0 else 0
-    adx_val = last['adx'] if not pd.isna(last['adx']) else 0
-
-    sl_m, tp1_m, tp2_m, tp3_m = get_mults(adx_val, atr_pct)
-    stop, tp1, tp2, tp3 = calc_levels(signal, entry, atr_val, sl_m, tp1_m, tp2_m, tp3_m)
-    pos_size = volatility_position_size(entry, stop, atr_pct)
-    if pos_size <= 0:
-        return None
-
-    _, pb = detect_pullback(df_1h, signal)
-    _, st = detect_structure(df_1h, signal)
-    long_ce, short_ce = calc_chandelier_exit(df_1h)
-    chandelier_stop = float(long_ce.iloc[-1]) if signal == 'LONG' else float(short_ce.iloc[-1])
-
-    print(f"💎 {symbol}: {signal} | {regime} | ADX={adx_val:.0f} | score={score}/{SCORE_MAX} | {pos_size:.0f}$")
-
-    return {
-        'symbol': symbol, 'signal': signal, 'score': score, 'regime': regime,
-        'entry': entry, 'stop': stop, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
-        'chandelier_stop': chandelier_stop, 'position_size': pos_size,
-        'last': last, 'last_1h': last, 'df': df_1h,
-        'entry_reasons': [
-            f'Режим: {regime} | ADX {adx_val:.0f}',
-            f'Вход на откате к EMA (RSI {last["rsi"]:.0f})',
-            f'Supertrend: {"бычий ✓" if signal == "LONG" else "медвежий ✓"}',
-            f'MACD разворот: ✓',
-            f'Структура: {"✓" if st > 0 else "—"} | Score: {score}/{SCORE_MAX}',
-            f'Позиция: {pos_size:.0f}$ (volatility-adj)',
-            f'R:R ≈ 1:2 (SL {sl_m:.1f} ATR / TP2 {tp2_m:.1f} ATR)',
-            f'BTC: {get_btc_regime()}',
-        ],
-    }
+    """Устарело: live NFI-автопоиск удалён. Оставлено None для совместимости."""
+    return None
 
 
 def scan_for_nfi_signals():
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    import os
-    signals = []
-    symbols = get_active_symbols()
-    workers = max(2, min(int(os.getenv("NFI_SCAN_WORKERS", "8") or "8"), 16))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futs = {pool.submit(generate_nfi_signal, sym): sym for sym in symbols}
-        for fut in as_completed(futs):
-            sym = futs[fut]
-            try:
-                sig = fut.result()
-                if sig:
-                    signals.append(sig)
-            except Exception as e:
-                print(f"  ❌ {sym}: {e}")
-    signals.sort(key=lambda x: x['score'], reverse=True)
-    return signals
+    """Устарело: live NFI-автопоиск удалён."""
+    return []
 
 
 # ══════════════════════════════════════════════════════════════════

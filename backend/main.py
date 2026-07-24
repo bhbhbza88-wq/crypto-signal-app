@@ -45,7 +45,7 @@ import public_feed
 import email_smtp
 from scanner import start_background_scanner, MAX_OPEN_TRADES
 import data_layer
-from data_layer import exchange, api_call, build_features, detect_regime, get_active_symbols, CANDIDATES
+from data_layer import exchange, api_call, build_features, detect_regime, CANDIDATES
 import nfi_strategy
 from nfi_strategy import (
     build_nfi_features, should_enter,
@@ -1042,11 +1042,10 @@ class AIChatRequest(BaseModel):
 
 
 def _ai_strategy_knowledge() -> str:
-    mode = getattr(nfi_strategy, "STRATEGY_MODE", "momentum")
     return (
-        f"NOWICKI: реле сигналов (часто TG/webhook), не «магический бот». "
-        f"Сканер V8 mode={mode}, авто-скан выкл. Трекер ведёт TP/стоп/BE. "
-        "Можешь кратко говорить про ADX, режим рынка, R:R, инвалидацию — без лекций."
+        "NOWICKI: сигналы приходят из внешних каналов / ручного ввода / webhook "
+        "(не собственный автопоиск монет). Трекер ведёт TP/стоп/BE по открытым сделкам. "
+        "Можешь кратко говорить про уровни, R:R, инвалидацию — без лекций."
     )
 
 
