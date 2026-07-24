@@ -1646,30 +1646,52 @@ def get_market():
         return {"error": str(e)}
 
 
-@app.get("/api/markets/bitunix")
-def get_bitunix_markets(force: bool = False):
-    """Все OPEN USDT-M фьючерсы Bitunix (символы в формате BTC/USDT)."""
-    import bitunix_client
-    try:
-        pairs = bitunix_client.load_futures_pairs(force=bool(force))
-        symbols = bitunix_client.list_unified_symbols()
-        return {
-            "exchange": "bitunix",
-            "type": "futures_usdt_m",
+@app.get("/api/markets")
+def get_all_markets_summary(force: bool = False):
+    """Сводка по всем биржам: count + symbols (может быть тяжеловато при force=1)."""
+    out = []
+    for ex in data_layer.list_supported_exchanges():
+        symbols = data_layer.get_exchange_futures_symbols(ex["id"], force=bool(force))
+        out.append({
+            "exchange": ex["id"],
+            "name": ex["name"],
             "count": len(symbols),
             "symbols": symbols,
-            "pairs": [
-                {
-                    "symbol": f"{(p.get('base') or '').upper()}/{(p.get('quote') or 'USDT').upper()}",
-                    "id": p.get("symbol"),
-                    "max_leverage": p.get("maxLeverage"),
-                    "status": p.get("symbolStatus"),
-                }
-                for p in pairs
-            ],
-        }
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Bitunix markets unavailable: {e}")
+        })
+    return {"exchanges": out}
+
+
+@app.get("/api/markets/{exchange_id}")
+def get_exchange_markets(exchange_id: str, force: bool = False):
+    """USDT-M / swap рынки: bybit|binance|okx|bitget|bingx|bitunix."""
+    eid = (exchange_id or "").lower().strip()
+    if eid not in data_layer._KNOWN_EXCHANGES:
+        raise HTTPException(status_code=404, detail=f"Unknown exchange: {exchange_id}")
+    return _markets_payload(eid, force=bool(force))
+
+
+def _markets_payload(exchange_id: str, force: bool = False):
+    symbols = data_layer.get_exchange_futures_symbols(exchange_id, force=force)
+    payload = {
+        "exchange": exchange_id,
+        "name": data_layer._EXCHANGE_LABELS.get(exchange_id, exchange_id),
+        "type": "futures_usdt_m",
+        "count": len(symbols),
+        "symbols": symbols,
+    }
+    if exchange_id == "bitunix":
+        import bitunix_client
+        pairs = bitunix_client.load_futures_pairs(force=force)
+        payload["pairs"] = [
+            {
+                "symbol": f"{(p.get('base') or '').upper()}/{(p.get('quote') or 'USDT').upper()}",
+                "id": p.get("symbol"),
+                "max_leverage": p.get("maxLeverage"),
+                "status": p.get("symbolStatus"),
+            }
+            for p in pairs
+        ]
+    return payload
 
 
 # ── Backtest ─────────────────────────────────────────────────────

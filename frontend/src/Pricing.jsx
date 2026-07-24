@@ -322,7 +322,7 @@ export default function Pricing({ user, onNeedAuth, onUserUpdate }) {
 
       <div className="pr-foot">
         <p className="pr-exchange">
-          {t('price.exchangeNotePrefix')} <strong>Bybit · Binance · Bitunix</strong> {t('price.exchangeNoteSuffix')}
+          {t('price.exchangeNotePrefix')} <strong>Bybit · Binance · OKX · Bitget · BingX · Bitunix</strong> {t('price.exchangeNoteSuffix')}
         </p>
         <div className="pr-support">
           <div className="pr-support-title">{t('price.supportTitle')}</div>

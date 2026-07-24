@@ -8,24 +8,34 @@ function formatListingsNote(listedOn, t) {
     .split(',')
     .map(s => s.trim().toLowerCase())
     .filter(Boolean)
-  const bybit = parts.includes('bybit')
-  const binance = parts.includes('binance')
-  const bitunix = parts.includes('bitunix')
-  const names = []
-  if (bybit) names.push('Bybit')
-  if (binance) names.push('Binance')
-  if (bitunix) names.push('Bitunix')
+  const label = {
+    bybit: 'Bybit',
+    binance: 'Binance',
+    okx: 'OKX',
+    bitget: 'Bitget',
+    bingx: 'BingX',
+    bitunix: 'Bitunix',
+  }
+  const names = parts.map(p => label[p]).filter(Boolean)
   if (names.length >= 2) {
     return names.join(t('signal.venuesJoin') || ' · ') + ' Futures'
   }
-  if (bitunix && !bybit && !binance) return t('signal.venuesBitunixOnly')
-  if (binance && !bybit) return t('signal.venuesBinanceOnly')
-  if (bybit && !binance && !bitunix) return t('signal.venuesBybitOnly')
-  if (bybit && binance && !bitunix) return t('signal.venuesBoth')
+  if (names.length === 1) {
+    const only = parts[0]
+    const key = {
+      bybit: 'signal.venuesBybitOnly',
+      binance: 'signal.venuesBinanceOnly',
+      okx: 'signal.venuesOkxOnly',
+      bitget: 'signal.venuesBitgetOnly',
+      bingx: 'signal.venuesBingxOnly',
+      bitunix: 'signal.venuesBitunixOnly',
+    }[only]
+    return key ? t(key) : `${names[0]} Futures`
+  }
   return t('signal.venuesDefault')
 }
 
-/** Живая цена с Bybit / Binance / Bitunix futures. */
+/** Живая цена с Bybit / Binance / OKX / Bitget / BingX / Bitunix futures. */
 function useLiveSignalPrice(symbol, exchange = 'bybit', fallback = null) {
   const [price, setPrice] = useState(fallback)
   useEffect(() => {
@@ -35,6 +45,7 @@ function useLiveSignalPrice(symbol, exchange = 'bybit', fallback = null) {
   useEffect(() => {
     if (!symbol) return
     const raw = String(symbol).replace('/', '').toUpperCase()
+    const base = raw.replace(/USDT$/, '')
     const ex = String(exchange || 'bybit').toLowerCase()
     let dead = false
 
@@ -52,6 +63,24 @@ function useLiveSignalPrice(symbol, exchange = 'bybit', fallback = null) {
           const data = await res.json()
           const row = data?.data?.[0]
           p = parseFloat(row?.lastPrice || row?.last || row?.markPrice)
+        } else if (ex === 'okx') {
+          const res = await fetch(
+            `https://www.okx.com/api/v5/market/ticker?instId=${base}-USDT-SWAP`
+          )
+          const data = await res.json()
+          p = parseFloat(data?.data?.[0]?.last)
+        } else if (ex === 'bitget') {
+          const res = await fetch(
+            `https://api.bitget.com/api/v2/mix/market/ticker?productType=USDT-FUTURES&symbol=${raw}`
+          )
+          const data = await res.json()
+          p = parseFloat(data?.data?.[0]?.lastPr || data?.data?.[0]?.last)
+        } else if (ex === 'bingx') {
+          const res = await fetch(
+            `https://open-api.bingx.com/openApi/swap/v2/quote/ticker?symbol=${base}-USDT`
+          )
+          const data = await res.json()
+          p = parseFloat(data?.data?.lastPrice || data?.data?.last)
         } else {
           for (const category of ['linear', 'spot']) {
             const res = await fetch(

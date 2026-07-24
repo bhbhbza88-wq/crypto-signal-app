@@ -1,6 +1,6 @@
 """
-Data Layer — OHLCV/тикеры с Bybit (linear), Binance USDM, Bitunix futures + индикаторы.
-По умолчанию Bybit; иначе Binance / Bitunix по exchange_id.
+Data Layer — OHLCV/тикеры: Bybit, Binance USDM, Bitunix, OKX, Bitget, BingX + индикаторы.
+По умолчанию Bybit; иначе exchange_id из списка venues.
 """
 
 import os
@@ -10,6 +10,7 @@ import ccxt
 import pandas as pd
 
 import bitunix_client
+import futures_venues
 
 exchange = ccxt.bybit({
     'options': {'defaultType': 'linear'},
@@ -22,15 +23,30 @@ binance = ccxt.binanceusdm({
     'timeout': 15000,
 })
 
+okx = futures_venues.build_okx()
+bitget = futures_venues.build_bitget()
+bingx = futures_venues.build_bingx()
+
 _EXCHANGES = {
     'bybit': exchange,
     'binance': binance,
     'bitunix': bitunix_client.bitunix,
+    'okx': okx,
+    'bitget': bitget,
+    'bingx': bingx,
 }
 
 # Порядок предпочтения при листинге на нескольких биржах
-_EXCHANGE_PREFERENCE = ('bybit', 'binance', 'bitunix')
+_EXCHANGE_PREFERENCE = ('bybit', 'binance', 'okx', 'bitget', 'bingx', 'bitunix')
 _KNOWN_EXCHANGES = frozenset(_EXCHANGE_PREFERENCE)
+_EXCHANGE_LABELS = {
+    'bybit': 'Bybit',
+    'binance': 'Binance',
+    'okx': 'OKX',
+    'bitget': 'Bitget',
+    'bingx': 'BingX',
+    'bitunix': 'Bitunix',
+}
 
 CACHE_TTL = 180
 _data_cache = {}
@@ -53,7 +69,7 @@ def api_call(func, *args, retries=3, delay=2, **kwargs):
 
 
 def get_exchange(exchange_id=None):
-    """bybit | binance | bitunix; неизвестный id → bybit."""
+    """bybit | binance | okx | bitget | bingx | bitunix; неизвестный id → bybit."""
     if not exchange_id:
         return exchange
     return _EXCHANGES.get(str(exchange_id).lower().strip(), exchange)
@@ -89,31 +105,40 @@ def listings_label(listed_on) -> str:
     listed = parse_listed_on(listed_on)
     if not listed:
         return 'Bybit Futures'
-    names = {
-        'bybit': 'Bybit',
-        'binance': 'Binance',
-        'bitunix': 'Bitunix',
-    }
-    labels = [names[x] for x in listed if x in names]
+    labels = [_EXCHANGE_LABELS[x] for x in listed if x in _EXCHANGE_LABELS]
     if len(labels) == 1:
-        only = listed[0]
-        if only == 'bybit':
-            return 'только Bybit Futures'
-        if only == 'binance':
-            return 'только Binance Futures'
-        if only == 'bitunix':
-            return 'только Bitunix Futures'
-    return ' и '.join(labels) + ' Futures'
+        return f'только {labels[0]} Futures'
+    if len(labels) == 2:
+        return f'{labels[0]} и {labels[1]} Futures'
+    return ' · '.join(labels) + ' Futures'
+
+
+def _venue_may_have(ex_id: str, symbol: str) -> bool:
+    """Быстрый precheck по кэшу рынков (без ticker), если умеем."""
+    ex = get_exchange(ex_id)
+    if hasattr(ex, 'has_symbol'):
+        try:
+            return bool(ex.has_symbol(symbol))
+        except Exception:
+            return True
+    if ex_id == 'bitunix':
+        try:
+            return bitunix_client.has_symbol(symbol)
+        except Exception:
+            return True
+    return True
 
 
 def probe_listings(symbol):
-    """Проверяет Bybit / Binance / Bitunix. (listed_ids, preferred_id, ticker).
+    """Проверяет все venues. (listed_ids, preferred_id, ticker).
 
-    preferred: Bybit → Binance → Bitunix. ([], None, None) если нигде нет.
+    preferred по _EXCHANGE_PREFERENCE. ([], None, None) если нигде нет.
     """
     listed = []
     tickers = {}
     for ex_id in _EXCHANGE_PREFERENCE:
+        if not _venue_may_have(ex_id, symbol):
+            continue
         ticker = api_call(get_exchange(ex_id).fetch_ticker, symbol)
         if _ticker_ok(ticker):
             listed.append(ex_id)
@@ -125,7 +150,7 @@ def probe_listings(symbol):
 
 
 def resolve_listed_exchange(symbol):
-    """Bybit → Binance → Bitunix. None если нигде нет тикера с last."""
+    """Preferred venue или None."""
     _, preferred, _ = probe_listings(symbol)
     return preferred
 
@@ -294,21 +319,46 @@ CANDIDATES = [
 ]
 
 
-def get_bitunix_futures_symbols(force: bool = False):
-    """Все OPEN USDT-M фьючерсы Bitunix в формате BTC/USDT."""
+def get_exchange_futures_symbols(exchange_id: str, force: bool = False) -> list[str]:
+    """USDT-M / swap символы биржи в формате BTC/USDT."""
+    ex_id = (exchange_id or "").lower().strip()
     try:
-        return bitunix_client.list_unified_symbols(force=force)
+        if ex_id == "bitunix":
+            return bitunix_client.list_unified_symbols(force=force)
+        ex = get_exchange(ex_id)
+        if hasattr(ex, "list_unified_symbols"):
+            return ex.list_unified_symbols(force=force)
+        markets = api_call(ex.load_markets, True) if force else api_call(ex.load_markets)
+        if not markets:
+            return []
+        out = []
+        for sym, m in markets.items():
+            if not isinstance(m, dict) or m.get("active") is False:
+                continue
+            if ex_id == "binance":
+                if not (m.get("swap") or m.get("linear") or m.get("contract")):
+                    continue
+            elif ex_id == "bybit":
+                if m.get("spot") and not (m.get("swap") or m.get("linear")):
+                    continue
+                if m.get("linear") is False and not m.get("swap"):
+                    continue
+            uni = futures_venues._unified_base_quote(m.get("symbol") or sym)
+            if uni.endswith("/USDT") and uni not in out:
+                out.append(uni)
+        return sorted(out)
     except Exception as e:
-        print(f"[data_layer] bitunix symbols: {e}")
+        print(f"[data_layer] {ex_id} symbols: {e}")
         return []
 
 
-def get_active_symbols():
-    """Сканнер: CANDIDATES, опционально ∪ все Bitunix futures (BITUNIX_MERGE_UNIVERSE=1).
+def get_bitunix_futures_symbols(force: bool = False):
+    """Все OPEN USDT-M фьючерсы Bitunix в формате BTC/USDT."""
+    return get_exchange_futures_symbols("bitunix", force=force)
 
-    По умолчанию merge выключен — полный список Bitunix (~600+) слишком тяжёлый
-    для NFI/overview; он доступен через get_bitunix_futures_symbols / API.
-    """
+
+def get_active_symbols():
+    """Сканнер: CANDIDATES (+ опциональный Bitunix merge через env)."""
     merge = (os.getenv("BITUNIX_MERGE_UNIVERSE", "0") or "0").strip().lower()
     if merge not in ("1", "true", "yes", "on"):
         return list(CANDIDATES)
@@ -322,6 +372,13 @@ def get_active_symbols():
             seen.add(s)
             out.append(s)
     return out
+
+
+def list_supported_exchanges():
+    return [
+        {"id": eid, "name": _EXCHANGE_LABELS.get(eid, eid)}
+        for eid in _EXCHANGE_PREFERENCE
+    ]
 
 
 # ── Обзор рынка (Скринер) ────────────────────────────────────────

@@ -52,7 +52,7 @@ def open_signal(symbol, signal, entry, stop, tp1, tp2, tp3, trader_id, regime,
         elif not exchange:
             exchange = 'bybit'
     exchange = (exchange or 'bybit').lower().strip()
-    if exchange not in ('bybit', 'binance', 'bitunix'):
+    if exchange not in data_layer._KNOWN_EXCHANGES:
         exchange = 'bybit'
     if not listed:
         listed = [exchange]
