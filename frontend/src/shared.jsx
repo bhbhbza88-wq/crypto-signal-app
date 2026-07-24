@@ -24,7 +24,7 @@ export function resultLabel(t, key) {
 }
 
 export const APP_SECTIONS = [
-  'overview', 'chart_analyze', 'history', 'ai_assistant',
+  'overview', 'chart_analyze', 'history', 'telegram', 'ai_assistant',
   'pricing', 'admin', 'channel_analyzer',
 ]
 

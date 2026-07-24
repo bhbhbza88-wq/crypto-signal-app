@@ -10,6 +10,7 @@ import './App.css'
 
 const Pricing = lazy(() => import('./Pricing'))
 const HistoryTable = lazy(() => import('./HistoryTable'))
+const Telegram = lazy(() => import('./Telegram'))
 const AIChat = lazy(() => import('./AIChat'))
 const ChartAnalyze = lazy(() => import('./ChartAnalyze'))
 const Admin = lazy(() => import('./Admin'))
@@ -50,6 +51,7 @@ const NAV_SECTIONS = [
     { key: 'overview',      labelKey: 'nav.dashboard', icon: '◈' },
     { key: 'chart_analyze', labelKey: 'nav.chart',     icon: '▣', badge: 'NEW' },
     { key: 'history',       labelKey: 'nav.history',   icon: '≡' },
+    { key: 'telegram',      labelKey: 'nav.telegram',  icon: '✈' },
     { key: 'ai_assistant',  labelKey: 'nav.ai',        icon: '✦', badge: 'BETA' },
   ]},
   { titleKey: 'nav.account', items: [
@@ -448,6 +450,15 @@ export default function App() {
                 </div>
               </div>
             </div>
+          )}
+          {tab === 'telegram' && (
+            <section className="section animate-in">
+              <Telegram
+                user={user}
+                onNeedAuth={() => { setAuthMode('login'); setShowAuth(true) }}
+                onOpenPricing={() => setTab('pricing')}
+              />
+            </section>
           )}
           {tab === 'pricing' && <section className="section animate-in"><Pricing user={user} onNeedAuth={() => { setAuthMode('login'); setShowAuth(true) }} onUserUpdate={setUser} /></section>}
           {tab === 'admin' && user?.is_admin && <Admin />}
