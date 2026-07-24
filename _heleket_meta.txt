@@ -1,0 +1,3 @@
+uuid=03719a7e-a2fc-4421-93c6-7e2df9ad8b22
+meta=03719a7e
+url=https://dash.heleket.com/business/create?merchant_uuid=03719a7e-a2fc-4421-93c6-7e2df9ad8b22

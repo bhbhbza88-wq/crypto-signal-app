@@ -1,0 +1,11 @@
+{
+  "url": "https://dash.heleket.com/business/merchants",
+  "title": "Heleket",
+  "body": "English\n\nВойти\n\nЗабыли пароль?\n\nВойти\n\nНет аккаунта? Зарегистрироваться\n\nВойти с помощью",
+  "clickables": [
+    "English",
+    "Забыли пароль?",
+    "Войти",
+    "Зарегистрироваться"
+  ]
+}
