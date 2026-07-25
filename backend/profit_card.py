@@ -332,7 +332,8 @@ def render_template_card(
     exit_str = _fmt_share_price(exit_price)
     fake_user = _fake_username(f"{template_file}:{pair}:{side}:{leverage}")
 
-    use_ai = os.getenv("PROFIT_CARD_AI", "1").strip().lower() in ("1", "true", "yes", "on")
+    # Default OFF: Gemini/Flux image-edit burns OpenRouter credits fast.
+    use_ai = os.getenv("PROFIT_CARD_AI", "0").strip().lower() in ("1", "true", "yes", "on")
     if use_ai:
         try:
             import ai_client

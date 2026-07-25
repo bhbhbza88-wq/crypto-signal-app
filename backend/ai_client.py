@@ -207,7 +207,8 @@ MODEL_VISION = (
 # Image edit (replace text on PnL share cards) — Gemini Flash Image via OpenRouter
 MODEL_IMAGE_EDIT = (
     os.getenv("OPENROUTER_MODEL_IMAGE_EDIT")
-    or "google/gemini-2.5-flash-image"
+    # Gemini Flash Image дорогой на карточках; Flux Kontext Dev обычно дешевле.
+    or "black-forest-labs/flux-1-kontext-dev"
 ).strip()
 MODEL_CHAT_ENGAGE = (
     os.getenv("OPENROUTER_MODEL_ENGAGE")
