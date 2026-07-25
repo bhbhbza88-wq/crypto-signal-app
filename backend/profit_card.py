@@ -232,25 +232,9 @@ def _fake_username(seed: str = "") -> str:
     return _FAKE_USERS[h % len(_FAKE_USERS)]
 
 
-# Обрезка низа: реф-код / QR / invite / partner strip (доли высоты, что ОСТАВЛЯЕМ)
-_CROP_KEEP_TOP = {
-    "binance": 0.84,   # без BINANCE FUTURES footer + QR + реф
-    "bingx": 0.86,     # без чёрной плашки с кодом/QR
-    "bitunix": 0.88,   # без белого футера / partner code / QR
-}
-
-
+# Footer crop отключён — оставляем карточку целиком (реф/QR как на шаблоне).
 def _crop_share_footer(img: Image.Image, family: str) -> Image.Image:
-    keep = float(
-        os.getenv(f"PROFIT_CARD_CROP_{family.upper()}", "")
-        or _CROP_KEEP_TOP.get(family, 0.88)
-    )
-    keep = max(0.70, min(0.95, keep))
-    h = img.height
-    cut = int(round(h * keep))
-    if cut >= h - 4:
-        return img
-    return img.crop((0, 0, img.width, cut))
+    return img
 
 
 def _pnl_edit_prompt(
@@ -282,8 +266,8 @@ def _pnl_edit_prompt(
         "\n"
         "PRIVACY / IDENTITY:\n"
         f"- Replace ANY username, User-XXXX, email, masked email, or nickname with exactly: {fake_user}\n"
-        "- Remove or blank out referral / invite / partner codes and QR codes if present "
-        "(do not invent a new code).\n"
+        "- Keep the footer / referral / QR / invite strip exactly as on the template "
+        "(do not crop, blank, or redraw it).\n"
         "- Do not keep original personal identifiers from the template.\n"
         "\n"
         f"Set the trade fields to EXACTLY these values:\n"
@@ -309,7 +293,7 @@ def render_template_card(
     exit_price: float | None = None,
     leverage: int | None = None,
 ) -> bytes:
-    """Шаблон: AI меняет текст/ник, затем обрезаем футер с реф/QR."""
+    """Шаблон: AI меняет текст/ник (карточка целиком, без обрезки футера)."""
     side = (side or "LONG").upper()
     leverage = leverage or SHARE_LEVERAGE
     entry = float(entry)
