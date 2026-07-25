@@ -84,19 +84,28 @@ async def _pricing_nudge_loop():
 async def lifespan(app: FastAPI):
     db.init_db()
     start_background_scanner()
+    # Keep strong refs: event loop only weakly references create_task() results,
+    # otherwise GC can destroy telegram_ingest mid-flight ("Task was destroyed").
+    bg_tasks: list[asyncio.Task] = []
     if telegram_ingest.is_configured():
-        asyncio.create_task(telegram_ingest.run())
+        bg_tasks.append(asyncio.create_task(telegram_ingest.run(), name="telegram_ingest"))
     # Отдельный клиент только если TELEGRAM_CHAT_SESSION ≠ ingest.
     # Иначе chat_engage цепляется к клиенту ingest (один аккаунт).
     if chat_engage.needs_own_client():
-        asyncio.create_task(chat_engage.run())
-    asyncio.create_task(telegram_bot.set_webhook())
-    asyncio.create_task(_pricing_nudge_loop())
+        bg_tasks.append(asyncio.create_task(chat_engage.run(), name="chat_engage"))
+    bg_tasks.append(asyncio.create_task(telegram_bot.set_webhook(), name="telegram_webhook"))
+    bg_tasks.append(asyncio.create_task(_pricing_nudge_loop(), name="pricing_nudge"))
     if heleket_pay.is_configured():
-        asyncio.create_task(heleket_pay.recover_pending_paid_orders())
+        bg_tasks.append(
+            asyncio.create_task(heleket_pay.recover_pending_paid_orders(), name="heleket_recover")
+        )
     # Crypto Pay webhook URL ставится вручную в @CryptoBot → My Apps → Webhooks
     # (API-метода setWebhook у Crypto Pay нет).
     yield
+    for t in bg_tasks:
+        t.cancel()
+    if bg_tasks:
+        await asyncio.gather(*bg_tasks, return_exceptions=True)
 
 
 app = FastAPI(title="Crypto Signal App V8", lifespan=lifespan)
