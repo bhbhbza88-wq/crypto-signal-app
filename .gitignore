@@ -32,6 +32,7 @@ Thumbs.db
 backend/_tmp*
 backend/_tg_*
 backend/_chat_*
+backend/_news_*
 backend/_jambo_*
 backend/_send_*
 backend/_test_*
