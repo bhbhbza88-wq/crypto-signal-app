@@ -216,10 +216,16 @@ async def _run_once() -> None:
         TELEGRAM_API_HASH,
     )
 
+    source_by_id: dict[int, str] = {}
+
     @client.on(events.NewMessage(chats=sources))
     async def _on_message(event):
         chat = await event.get_chat()
-        username = (getattr(chat, "username", "") or "").lstrip("@") or sources[0]
+        username = (getattr(chat, "username", "") or "").lstrip("@")
+        if not username:
+            username = source_by_id.get(int(getattr(chat, "id", 0) or 0), "")
+        if not username:
+            username = sources[0]
         try:
             await _handle_message(client, username, event.message, target=target)
         except Exception as e:
@@ -231,6 +237,14 @@ async def _run_once() -> None:
         f"[news_relay] authorized as @{getattr(me, 'username', None) or me.id}",
         flush=True,
     )
+
+    # Map channel ids → configured usernames (some chats return username=None).
+    for username in sources:
+        try:
+            ent = await client.get_entity(username)
+            source_by_id[int(ent.id)] = username
+        except Exception as e:
+            print(f"[news_relay] resolve @{username}: {e}", flush=True)
 
     for username in sources:
         try:
