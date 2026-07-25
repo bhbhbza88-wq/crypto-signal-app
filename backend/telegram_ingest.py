@@ -751,6 +751,10 @@ async def _run_once():
     from telethon.sessions import StringSession
 
     channels = _parse_channel_config(TELEGRAM_SOURCE_CHANNELS)
+    print(
+        f"[telegram_ingest] connect… channels={len(channels)} session_len={len(TELEGRAM_SESSION or '')}",
+        flush=True,
+    )
     client = TelegramClient(StringSession(TELEGRAM_SESSION), int(TELEGRAM_API_ID), TELEGRAM_API_HASH)
 
     @client.on(events.NewMessage(chats=list(channels.keys())))
@@ -764,6 +768,11 @@ async def _run_once():
             print(f"[telegram_ingest] Ошибка обработки сообщения из {display_name}: {e}")
 
     await client.start()
+    me = await client.get_me()
+    print(
+        f"[telegram_ingest] authorized as @{getattr(me, 'username', None) or me.id}",
+        flush=True,
+    )
     try:
         db.prune_processed_messages(keep_days=14)
     except Exception as e:
@@ -803,7 +812,10 @@ async def _run_once():
     backfill_task = asyncio.create_task(_backfill_loop(client, channels, last_ids))
     retry_task = asyncio.create_task(_retry_loop(channels))
     health_task = asyncio.create_task(_health_loop(channels))
-    print(f"[telegram_ingest] Запущен, слушаю каналы: {', '.join(channels.values())}")
+    print(
+        f"[telegram_ingest] Запущен, слушаю каналы: {', '.join(channels.values())}",
+        flush=True,
+    )
     try:
         await client.run_until_disconnected()
     finally:
@@ -839,7 +851,7 @@ async def run():
             await _run_once()
             delay = 5
         except Exception as e:
-            print(f"[telegram_ingest] Упал: {e}")
-        print(f"[telegram_ingest] Переподключение через {delay}с…")
+            print(f"[telegram_ingest] Упал: {e}", flush=True)
+        print(f"[telegram_ingest] Переподключение через {delay}с…", flush=True)
         await asyncio.sleep(delay)
         delay = min(delay * 2, 120)
