@@ -43,7 +43,7 @@ OPENROUTER_CHAT_URL = f"{OPENROUTER_BASE}/chat/completions"
 OR_FAST_DEFAULT = "google/gemini-2.5-flash-lite"
 OR_INGEST_DEFAULT = "google/gemini-2.5-flash"  # умнее lite для разбора каналов
 OR_CHAT_DEFAULT = "google/gemini-2.5-flash"
-OR_VISION_DEFAULT = "google/gemini-2.5-flash"  # multimodal: скрины сигналов из каналов
+OR_VISION_DEFAULT = "google/gemini-2.5-flash-lite"  # дешевле flash на скринах сигналов
 
 COMETAPI_KEY = os.getenv("COMETAPI_KEY", "").strip()
 COMETAPI_BASE = (
