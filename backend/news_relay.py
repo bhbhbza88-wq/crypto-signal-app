@@ -87,10 +87,12 @@ _SIGNAL_PACK = re.compile(
 
 def is_configured() -> bool:
     sources = TELEGRAM_NEWS_SOURCE_CHANNELS or DEFAULT_NEWS_SOURCES
+    # Telethon StringSession usually starts with "1"; reject placeholders.
+    session_ok = bool(TELEGRAM_NEWS_SESSION) and len(TELEGRAM_NEWS_SESSION) > 50
     return bool(
         TELEGRAM_API_ID
         and TELEGRAM_API_HASH
-        and TELEGRAM_NEWS_SESSION
+        and session_ok
         and sources
         and TELEGRAM_NEWS_TARGET_CHANNEL
     )
