@@ -1,14 +1,14 @@
 """
-Ретрансляция лучших crypto-новостей из TG-источников → наш новостной канал.
+Ретрансляция рыночной картины / outlook из EN TG-источников → @nowicki_news.
 
 Отдельная Telethon-сессия (TELEGRAM_NEWS_SESSION), не смешивать с сигнальным ingest.
 
 Env:
   TELEGRAM_API_ID / TELEGRAM_API_HASH
-  TELEGRAM_NEWS_SESSION          — StringSession новостного аккаунта
+  TELEGRAM_NEWS_SESSION          — StringSession новостного аккаунта (@garadaw)
   TELEGRAM_NEWS_SOURCE_CHANNELS  — CSV usernames источников (без @)
-  TELEGRAM_NEWS_TARGET_CHANNEL   — username или @username целевого канала
-  NEWS_RELAY_MAX_PER_HOUR        — лимит постов (default 6)
+  TELEGRAM_NEWS_TARGET_CHANNEL   — username целевого канала (nowicki_news)
+  NEWS_RELAY_MAX_PER_HOUR        — лимит постов (default 8)
   NEWS_RELAY_MIN_SCORE           — порог AI 1–10 (default 7)
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import ai_client
 import database as db
@@ -27,9 +27,23 @@ TELEGRAM_NEWS_SESSION = os.getenv("TELEGRAM_NEWS_SESSION", "").strip()
 TELEGRAM_NEWS_SOURCE_CHANNELS = os.getenv("TELEGRAM_NEWS_SOURCE_CHANNELS", "").strip()
 TELEGRAM_NEWS_TARGET_CHANNEL = os.getenv("TELEGRAM_NEWS_TARGET_CHANNEL", "").strip()
 
-MAX_PER_HOUR = int(os.getenv("NEWS_RELAY_MAX_PER_HOUR", "6") or "6")
+MAX_PER_HOUR = int(os.getenv("NEWS_RELAY_MAX_PER_HOUR", "8") or "8")
 MIN_SCORE = int(os.getenv("NEWS_RELAY_MIN_SCORE", "7") or "7")
 STARTUP_LOOKBACK = int(os.getenv("NEWS_RELAY_STARTUP_LOOKBACK", "8") or "8")
+
+# Curated market-outlook sources (EN). Override via TELEGRAM_NEWS_SOURCE_CHANNELS.
+DEFAULT_NEWS_SOURCES = (
+    "rektchat,"
+    "cryptoquant_official,"
+    "lookonchainchannel,"
+    "glassnode,"
+    "WatcherGuru,"
+    "wublockchainenglish,"
+    "the_block_crypto,"
+    "cointelegraph,"
+    "TreeNewsFeed,"
+    "messaricrypto"
+)
 
 # Prefixed so signal ingest processed_messages don't collide.
 _PROC_PREFIX = "news:"
@@ -39,18 +53,19 @@ _hour_count = 0
 
 
 def is_configured() -> bool:
+    sources = TELEGRAM_NEWS_SOURCE_CHANNELS or DEFAULT_NEWS_SOURCES
     return bool(
         TELEGRAM_API_ID
         and TELEGRAM_API_HASH
         and TELEGRAM_NEWS_SESSION
-        and TELEGRAM_NEWS_SOURCE_CHANNELS
+        and sources
         and TELEGRAM_NEWS_TARGET_CHANNEL
     )
 
 
 def _parse_sources(raw: str) -> list[str]:
     out = []
-    for part in raw.split(","):
+    for part in (raw or DEFAULT_NEWS_SOURCES).split(","):
         u = part.strip().lstrip("@")
         if u:
             out.append(u)
@@ -86,28 +101,36 @@ def _plain_text(msg) -> str:
 
 
 def _looks_like_noise(text: str) -> bool:
-    if len(text) < 80:
+    if len(text) < 60:
         return True
     low = text.lower()
-    # Сигналы / трейдинг-коллы — не новости
-    if re.search(r"\b(long|short|entry|tp\s*\d|sl\b|leverage|сигнал)\b", low):
+    # Чистые trade-сигналы (entry/TP/SL), не рыночный outlook
+    if re.search(r"\b(entry|leverage|liq(uidation)?\s*price|маржин)\b", low):
         return True
-    if re.search(r"\$?\d[\d,]*(?:\.\d+)?\s*[-–]\s*\$?\d", text) and "tp" in low:
+    if re.search(r"\b(tp\s*[1-3]|take[\s-]?profit|stop[\s-]?loss|\bsl\b)\b", low) and re.search(
+        r"\b(entry|long|short)\b", low
+    ):
+        return True
+    if re.search(r"\$?\d[\d,]*(?:\.\d+)?\s*[-–]\s*\$?\d", text) and re.search(r"\btp\s*\d\b", low):
+        return True
+    if re.search(r"(ref(erral)?\s*link|promo code|airdrop claim|dm me for|сигнал(ы)?\s+vip)", low):
         return True
     return False
 
 
 async def _score_and_rewrite(text: str, source: str) -> dict | None:
-    """AI: keep only high-value market news; rewrite cleanly in Russian."""
+    """AI: market outlook / narratives; translate & rewrite in Russian."""
     system = (
-        "Ты редактор крипто-новостного канала. Оцени пост источника.\n"
-        "Бери ТОЛЬКО важные рыночные новости: регуляторика, крупные листинги/делистинги, "
-        "ETF, хаки/эксплойты с ущербом, макровлияние на crypto, крупные M&A, "
-        "заявления SEC/Fed/крупных банков/бирж, on-chain события с реальным эффектом.\n"
-        "ОТКЛОНЯЙ: сигналы/трейдинг, прайсинговые спам-посты, мем-шутки без факта, "
-        "рекламу курсов/рефералок, дубликаты слухов без источника, «GM» и мотивацию.\n"
-        "Если берёшь — перепиши кратко и нейтрально на русском, 2–5 предложений, "
-        "без эмодзи-спама, без упоминания исходного канала, без призывов к сделкам.\n"
+        "Ты редактор канала Nowicki News. Из EN-источника отбери полезный рыночный контент.\n"
+        "БЕРИ (высокий score): картина рынка; что ждать от Bitcoin/ETH; доминирующие нарративы; "
+        "какие сектора/монеты могут расти и ПОЧЕМУ; on-chain/ETF/flows; макро (ставки, ликвидность); "
+        "циклы/позиционирование; крупные новости, которые двигают рынок.\n"
+        "ОТКЛОНЯЙ: торговые сигналы с entry/TP/SL; рефералки/реклама; пустой хайп без факта; "
+        "мемы; дубликаты; узкий проектный PR без рыночного эффекта; «GM».\n"
+        "Если берёшь — ПЕРЕВЕДИ и перепиши на русском: ясно, коротко, нейтрально. "
+        "2–6 предложений. Можно 1–2 уместных эмодзи максимум. "
+        "Не упоминай исходный канал. Не давай прямых инструкций «покупай/продавай». "
+        "Можно писать сценарии («если удержит уровень…», «вероятна коррекция…»).\n"
         "JSON: {\"keep\":bool,\"score\":1-10,\"headline\":str,\"body\":str,\"reason\":str}"
     )
     user = f"Источник: @{source}\n\n{text[:3500]}"
@@ -115,7 +138,7 @@ async def _score_and_rewrite(text: str, source: str) -> dict | None:
         parsed = await ai_client.fast_json_completion(
             system=system,
             user_text=user,
-            max_tokens=320,
+            max_tokens=420,
         )
     except Exception as e:
         print(f"[news_relay] AI fail: {e}", flush=True)
@@ -179,7 +202,7 @@ async def _run_once() -> None:
     from telethon import TelegramClient, events
     from telethon.sessions import StringSession
 
-    sources = _parse_sources(TELEGRAM_NEWS_SOURCE_CHANNELS)
+    sources = _parse_sources(TELEGRAM_NEWS_SOURCE_CHANNELS or DEFAULT_NEWS_SOURCES)
     target = _target()
     print(
         f"[news_relay] connect… sources={len(sources)} target={target} "
