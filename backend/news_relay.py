@@ -31,18 +31,19 @@ MAX_PER_HOUR = int(os.getenv("NEWS_RELAY_MAX_PER_HOUR", "8") or "8")
 MIN_SCORE = int(os.getenv("NEWS_RELAY_MIN_SCORE", "7") or "7")
 STARTUP_LOOKBACK = int(os.getenv("NEWS_RELAY_STARTUP_LOOKBACK", "8") or "8")
 
-# Curated market-outlook sources (EN). Override via TELEGRAM_NEWS_SOURCE_CHANNELS.
+# Top sources: TGStat citation/reach among quality market news+outlook (not exchange/airdrop spam).
+# Override via TELEGRAM_NEWS_SOURCE_CHANNELS.
 DEFAULT_NEWS_SOURCES = (
-    "rektchat,"
-    "cryptoquant_official,"
-    "lookonchainchannel,"
-    "glassnode,"
-    "WatcherGuru,"
-    "wublockchainenglish,"
-    "the_block_crypto,"
-    "cointelegraph,"
-    "TreeNewsFeed,"
-    "messaricrypto"
+    "WatcherGuru,"          # TGStat CI~1630, ~626k — EN breaking crypto/macro
+    "headlines,"            # TGStat CI~930, ~400k — Crypto Headlines wire
+    "cointelegraph,"        # TGStat CI~580, ~346k — markets & Web3 news
+    "TreeNewsFeed,"         # BBG/RTRS-style market-moving wires
+    "wublockchainenglish,"  # Asia ETF/flows / China crypto news
+    "the_block_crypto,"     # institutional / The Block
+    "rektchat,"             # BTC cycle + alt watchlists (outlook)
+    "cryptoquant_official," # on-chain BTC positioning
+    "lookonchainchannel,"   # whales / flows that move coins
+    "glassnode"             # on-chain structure / BTC supply dynamics
 )
 
 # Prefixed so signal ingest processed_messages don't collide.
