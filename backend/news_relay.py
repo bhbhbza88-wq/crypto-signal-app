@@ -1,17 +1,15 @@
 """
-Ретрансляция рыночной картины / outlook из EN TG-источников → @nowicki_news.
+Ретрансляция market-analysis (график + разбор монеты) → @nowicki_news.
 
-Отдельная Telethon-сессия (TELEGRAM_NEWS_SESSION), не смешивать с сигнальным ingest.
+Формат как у Fed. Russian Insiders: chart + $TICKER ANALYSIS + уровни/сценарии.
+Не лента headline-новостей.
 
 Env:
-  TELEGRAM_API_ID / TELEGRAM_API_HASH
-  TELEGRAM_NEWS_SESSION          — StringSession новостного аккаунта (@garadaw)
-  TELEGRAM_NEWS_SOURCE_CHANNELS  — CSV usernames источников (без @)
-  TELEGRAM_NEWS_TARGET_CHANNEL   — username целевого канала (nowicki_news)
-  NEWS_RELAY_MAX_PER_HOUR        — лимит постов (default 3)
-  NEWS_RELAY_MIN_SCORE           — порог AI 1–10 (default 9)
-  NEWS_RELAY_MIN_GAP_SEC         — мин. пауза между постами (default 1200 = 20 мин)
-  NEWS_RELAY_STARTUP_LOOKBACK    — догон при старте (default 0 — только live)
+  TELEGRAM_NEWS_SESSION / TELEGRAM_NEWS_SOURCE_CHANNELS / TELEGRAM_NEWS_TARGET_CHANNEL
+  NEWS_RELAY_MAX_PER_HOUR     default 4
+  NEWS_RELAY_MIN_SCORE        default 8
+  NEWS_RELAY_MIN_GAP_SEC      default 900 (15 мин)
+  NEWS_RELAY_STARTUP_LOOKBACK default 0
 """
 from __future__ import annotations
 
@@ -20,6 +18,7 @@ import os
 import re
 import time
 from datetime import datetime
+from io import BytesIO
 
 import ai_client
 import database as db
@@ -30,33 +29,41 @@ TELEGRAM_NEWS_SESSION = os.getenv("TELEGRAM_NEWS_SESSION", "").strip()
 TELEGRAM_NEWS_SOURCE_CHANNELS = os.getenv("TELEGRAM_NEWS_SOURCE_CHANNELS", "").strip()
 TELEGRAM_NEWS_TARGET_CHANNEL = os.getenv("TELEGRAM_NEWS_TARGET_CHANNEL", "").strip()
 
-MAX_PER_HOUR = int(os.getenv("NEWS_RELAY_MAX_PER_HOUR", "3") or "3")
-MIN_SCORE = int(os.getenv("NEWS_RELAY_MIN_SCORE", "9") or "9")
-MIN_GAP_SEC = int(os.getenv("NEWS_RELAY_MIN_GAP_SEC", "1200") or "1200")  # 20 мин
+MAX_PER_HOUR = int(os.getenv("NEWS_RELAY_MAX_PER_HOUR", "4") or "4")
+MIN_SCORE = int(os.getenv("NEWS_RELAY_MIN_SCORE", "8") or "8")
+MIN_GAP_SEC = int(os.getenv("NEWS_RELAY_MIN_GAP_SEC", "900") or "900")
 STARTUP_LOOKBACK = int(os.getenv("NEWS_RELAY_STARTUP_LOOKBACK", "0") or "0")
 
-# Top sources: TGStat citation/reach among quality market news+outlook (not exchange/airdrop spam).
-# Override via TELEGRAM_NEWS_SOURCE_CHANNELS.
+# Analysis-first sources (Fed-style TA / coin outlook). Override via env.
 DEFAULT_NEWS_SOURCES = (
-    "WatcherGuru,"          # TGStat CI~1630, ~626k — EN breaking crypto/macro
-    "headlines,"            # TGStat CI~930, ~400k — Crypto Headlines wire
-    "cointelegraph,"        # TGStat CI~580, ~346k — markets & Web3 news
-    "TreeNewsFeed,"         # BBG/RTRS-style market-moving wires
-    "wublockchainenglish,"  # Asia ETF/flows / China crypto news
-    "the_block_crypto,"     # institutional / The Block
-    "rektchat,"             # BTC cycle + alt watchlists (outlook)
+    "FedRussianInsiders,"   # chart + $TICKER ANALYSIS (эталон формата)
+    "rektchat,"             # BTC/alt cycle & watchlists
+    "CryptoBusy,"           # market structure commentary
+    "lookonchainchannel,"   # whale/flow charts that move coins
     "cryptoquant_official," # on-chain BTC positioning
-    "lookonchainchannel,"   # whales / flows that move coins
-    "glassnode"             # on-chain structure / BTC supply dynamics
+    "glassnode,"            # supply / regime structure
+    "WatcherGuru,"          # only strong market-moving (AI still filters hard)
+    "TreeNewsFeed,"         # BBG/RTRS wires with price impact
+    "wublockchainenglish,"  # Asia ETF/flows
+    "the_block_crypto"      # institutional
 )
 
-# Prefixed so signal ingest processed_messages don't collide.
 _PROC_PREFIX = "news:"
 
 _hour_bucket: str | None = None
 _hour_count = 0
 _last_publish_ts = 0.0
 _recent_fingerprints: list[tuple[float, frozenset[str]]] = []
+
+_VIP_RE = re.compile(
+    r"(?im)(?:👉\s*)?(?:join\s+our\s+vip|vip\s*->|@\w*vip\w*|t\.me/\w*vip\w*).*$"
+)
+_ANALYSIS_HINT = re.compile(
+    r"(?i)(\$[A-Z0-9]{2,15}\s+ANALYSIS|analysis\s*-{3,}|"
+    r"trendline|higher\s+lows|support|resistance|"
+    r"price\s+discovery|bull\s+trend|bear\s+trend|"
+    r"trading\s+at\s+\$?\d|breaking\s+\$?\d|losing\s+\$?\d)"
+)
 
 
 def is_configured() -> bool:
@@ -92,9 +99,7 @@ def _allow_hour_slot() -> bool:
     if _hour_bucket != bucket:
         _hour_bucket = bucket
         _hour_count = 0
-    if _hour_count >= MAX_PER_HOUR:
-        return False
-    return True
+    return _hour_count < MAX_PER_HOUR
 
 
 def _bump_hour() -> None:
@@ -110,30 +115,31 @@ def _gap_ok() -> bool:
 
 
 def _fingerprint(text: str) -> frozenset[str]:
-    """Coarse topic tokens for near-duplicate suppression across sources."""
-    words = re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9$]{4,}", (text or "").lower())
+    words = re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9$]{3,}", (text or "").lower())
     stop = {
         "this", "that", "with", "from", "have", "will", "just", "about", "after",
-        "before", "into", "over", "under", "their", "there", "which", "would",
-        "could", "should", "crypto", "bitcoin", "market", "price", "today",
-        "новость", "рынок", "биткоин", "крипта", "сегодня", "может", "если",
+        "analysis", "trading", "trend", "price", "market", "support", "resistance",
+        "разбор", "анализ", "уровень", "цена", "рынок", "если", "тогд",
     }
-    tokens = {w for w in words if w not in stop and not w.isdigit()}
-    return frozenset(list(tokens)[:24])
+    return frozenset(w for w in words if w not in stop) 
 
 
 def _is_near_duplicate(text: str) -> bool:
     global _recent_fingerprints
     now = time.time()
-    # keep 6h window
-    _recent_fingerprints = [(ts, fp) for ts, fp in _recent_fingerprints if now - ts < 6 * 3600]
+    _recent_fingerprints = [(ts, fp) for ts, fp in _recent_fingerprints if now - ts < 8 * 3600]
     fp = _fingerprint(text)
-    if len(fp) < 3:
-        return False
+    tickers = {w for w in fp if w.startswith("$") or (w.isalpha() and w.upper() == w and 2 <= len(w) <= 6)}
     for _, prev in _recent_fingerprints:
+        # same ticker recently = dup
+        prev_tickers = {w for w in prev if w.startswith("$") or (len(w) <= 6 and w.isalpha())}
+        if tickers and prev_tickers and (tickers & prev_tickers):
+            overlap = len(fp & prev)
+            if overlap >= 4:
+                return True
         overlap = len(fp & prev)
         union = len(fp | prev) or 1
-        if overlap / union >= 0.45 or overlap >= 5:
+        if overlap / union >= 0.4 or overlap >= 6:
             return True
     return False
 
@@ -143,72 +149,99 @@ def _remember_fingerprint(text: str) -> None:
 
 
 def _plain_text(msg) -> str:
-    text = (getattr(msg, "message", None) or getattr(msg, "text", None) or "").strip()
-    return text
+    return (getattr(msg, "message", None) or getattr(msg, "text", None) or "").strip()
+
+
+def _strip_promo(text: str) -> str:
+    text = _VIP_RE.sub("", text)
+    text = re.sub(r"(?im)^.*(?:join our vip|@\w*bot).*$", "", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _looks_like_noise(text: str) -> bool:
-    if len(text) < 90:
+    text = _strip_promo(text)
+    if len(text) < 70:
         return True
     low = text.lower()
-    # Чистые trade-сигналы (entry/TP/SL), не рыночный outlook
-    if re.search(r"\b(entry|leverage|liq(uidation)?\s*price|маржин)\b", low):
+    # Hard signal spam (entry/TP/SL packs), not scenario TA
+    if re.search(r"\b(entry\s*[:=]|leverage\s*\d|liq(uidation)?\s*price)\b", low):
         return True
-    if re.search(r"\b(tp\s*[1-3]|take[\s-]?profit|stop[\s-]?loss|\bsl\b)\b", low) and re.search(
-        r"\b(entry|long|short)\b", low
-    ):
-        return True
-    if re.search(r"\$?\d[\d,]*(?:\.\d+)?\s*[-–]\s*\$?\d", text) and re.search(r"\btp\s*\d\b", low):
+    if re.search(r"\b(tp\s*[1-3]\s*[:=]|take[\s-]?profit\s*[:=]|stop[\s-]?loss\s*[:=])\b", low):
         return True
     if re.search(
-        r"(ref(erral)?\s*link|promo code|airdrop claim|dm me for|сигнал(ы)?\s+vip|"
-        r"claim bonus|first deposit|sponsored|партн[её]р)",
+        r"(ref(erral)?\s*link|promo code|airdrop claim|claim bonus|first deposit|"
+        r"sponsored|партн[её]р|сигнал(ы)?\s+vip)",
         low,
     ):
         return True
-    # Soft noise: celeb/AI fluff without crypto market impact
-    if re.search(r"\b(openai|anthropic|claude|gpt|spacex|starlink)\b", low) and not re.search(
-        r"\b(bitcoin|btc|ethereum|eth|crypto|etf|sec|fed|stablecoin|defi)\b", low
-    ):
+    # Pure headline fluff without levels/analysis
+    if re.search(r"^\s*(just in|breaking|🚨)", low) and not _ANALYSIS_HINT.search(text):
+        if not re.search(r"\b(etf|fed|sec|hack|exploit|outflow|inflow)\b", low):
+            return True
+    return False
+
+
+def _is_analysis_shaped(text: str, has_media: bool) -> bool:
+    if _ANALYSIS_HINT.search(text):
+        return True
+    if has_media and re.search(r"\$[A-Z]{2,10}", text) and re.search(r"\$?\d", text):
         return True
     return False
 
 
-async def _score_and_rewrite(text: str, source: str) -> dict | None:
-    """AI: only must-read market posts; translate & rewrite in Russian."""
+async def _score_and_rewrite(text: str, source: str, *, has_chart: bool) -> dict | None:
+    """Prefer Fed-style coin TA; rewrite in Russian without VIP spam."""
     system = (
-        "Ты жёсткий редактор Nowicki News. Пропускай ТОЛЬКО must-read посты.\n"
-        "Цель канала: редкие, сильные материалы про рынок — не лента всех новостей.\n\n"
-        "БЕРИ (score 9–10) только если есть ЯВНЫЙ рыночный эффект:\n"
-        "• BTC/ETH: крупный on-chain/ETF flow, ключевой уровень цикла, смена режима рынка;\n"
-        "• регуляторика USA/EU/Asia, которая реально двигает цены;\n"
-        "• хак/банкротство/листинги топ-активов с масштабом;\n"
-        "• сильный outlook: какие сектора/монеты и ПОЧЕМУ могут вырасти (не просто тикер);\n"
-        "• макро (Fed/ставки/ликвидность), напрямую бьющее по crypto risk appetite.\n\n"
-        "ОТКЛОНЯЙ (keep=false, score≤6):\n"
-        "• обычные headlines без последствий; AI/tech/политика без crypto-связи;\n"
-        "• реклама, рефералки, мемы, мотивация, дубликаты;\n"
-        "• слабые мнения без данных; мелкий PR проектов;\n"
-        "• «JUST IN» про знаменитостей/гаджеты/акции вне crypto.\n\n"
-        "Правило: если сомневаешься — НЕ бери. Лучше 0 постов, чем шум.\n"
-        "Score 7–8 = интересно, но не публикуем. Публикуем только 9–10.\n"
-        "Если берёшь — ПЕРЕВЕДИ и адаптируй на русском: 2–5 предложений, нейтрально, "
-        "без упоминания источника, без «покупай/продавай».\n"
-        "JSON: {\"keep\":bool,\"score\":1-10,\"headline\":str,\"body\":str,\"reason\":str}"
+        "Ты редактор Nowicki News. Эталон формата — разбор монеты как у Fed. Russian Insiders:\n"
+        "график + заголовок $TICKER ANALYSIS + цена сейчас + тренд + уровни вверх/вниз + короткий вывод.\n\n"
+        "БЕРИ (score 8–10) если это КАЧЕСТВЕННЫЙ market analysis:\n"
+        "• разбор конкретной монеты/BTC/ETH с уровнями (support/resistance/targets);\n"
+        "• сценарии «если пробьёт X → Y», «если потеряет X → Z»;\n"
+        "• структура тренда (higher lows, trendline, discovery mode) с цифрами;\n"
+        "• сильный on-chain/flow outlook, который объясняет, куда может пойти цена.\n\n"
+        "ОТКЛОНЯЙ:\n"
+        "• голые headlines без уровней; мемы; VIP/реклама; сигналы entry/TP/SL пакетом;\n"
+        "• новости про AI/политику без цены; дубликаты; пустой хайп без цифр.\n\n"
+        f"У поста {'ЕСТЬ' if has_chart else 'НЕТ'} графика — при наличии графика повышай score для TA.\n"
+        "Если берёшь — ПЕРЕВЕДИ и адаптируй на русском в том же стиле:\n"
+        "headline вида «$TICKER — разбор» или «$TICKER ANALYSIS»,\n"
+        "body 3–7 предложений: цена → тренд → цели вверх → риски вниз → короткий вывод.\n"
+        "Без упоминания исходного канала, без VIP/ботов, без «покупай сейчас».\n"
+        "JSON: {\"keep\":bool,\"score\":1-10,\"headline\":str,\"body\":str,\"ticker\":str,\"reason\":str}"
     )
-    user = f"Источник: @{source}\n\n{text[:3500]}"
+    user = f"Источник: @{source}\n\n{_strip_promo(text)[:3500]}"
     try:
-        parsed = await ai_client.fast_json_completion(
+        return await ai_client.fast_json_completion(
             system=system,
             user_text=user,
-            max_tokens=420,
+            max_tokens=480,
         )
     except Exception as e:
         print(f"[news_relay] AI fail: {e}", flush=True)
         return None
-    if not isinstance(parsed, dict):
-        return None
-    return parsed
+
+
+async def _download_chart(msg) -> bytes | None:
+    try:
+        if not getattr(msg, "photo", None) and not getattr(msg, "media", None):
+            return None
+        # Prefer photo; skip huge videos/docs
+        if getattr(msg, "video", None) or getattr(msg, "document", None):
+            # allow image documents
+            doc = getattr(msg, "document", None)
+            mime = ""
+            if doc is not None:
+                mime = getattr(doc, "mime_type", "") or ""
+            if mime and not mime.startswith("image/"):
+                return None
+            if getattr(msg, "video", None):
+                return None
+        data = await msg.download_media(file=bytes)
+        if isinstance(data, (bytes, bytearray)) and len(data) > 1000:
+            return bytes(data)
+    except Exception as e:
+        print(f"[news_relay] chart download: {e}", flush=True)
+    return None
 
 
 async def _handle_message(client, source: str, msg, *, target: str) -> None:
@@ -219,27 +252,29 @@ async def _handle_message(client, source: str, msg, *, target: str) -> None:
     if db.is_message_processed(key_ch, msg_id):
         return
 
-    text = _plain_text(msg)
+    text = _strip_promo(_plain_text(msg))
+    has_media = bool(getattr(msg, "photo", None) or getattr(msg, "media", None))
     if not text or _looks_like_noise(text):
         db.mark_message_processed(key_ch, msg_id)
         return
 
+    # Soft prefer analysis shape from Fed-like sources; still allow strong wires via AI
+    analysis_shaped = _is_analysis_shaped(text, has_media)
+
     if not _allow_hour_slot():
         print(f"[news_relay] hour cap ({MAX_PER_HOUR}), skip @{source}/{msg_id}", flush=True)
         return
-
     if not _gap_ok():
         left = int(MIN_GAP_SEC - (time.time() - _last_publish_ts))
         print(f"[news_relay] gap {left}s left, skip @{source}/{msg_id}", flush=True)
         return
-
     if _is_near_duplicate(text):
         db.mark_message_processed(key_ch, msg_id)
         print(f"[news_relay] near-dup skip @{source}/{msg_id}", flush=True)
         return
 
-    verdict = await _score_and_rewrite(text, source)
-    if not verdict:
+    verdict = await _score_and_rewrite(text, source, has_chart=has_media and analysis_shaped)
+    if not verdict or not isinstance(verdict, dict):
         return
 
     keep = bool(verdict.get("keep"))
@@ -247,27 +282,50 @@ async def _handle_message(client, source: str, msg, *, target: str) -> None:
         score = int(verdict.get("score") or 0)
     except (TypeError, ValueError):
         score = 0
+    # Non-analysis posts need a higher bar
+    need = MIN_SCORE if analysis_shaped else max(MIN_SCORE, 9)
     headline = (verdict.get("headline") or "").strip()
     body = (verdict.get("body") or "").strip()
     reason = (verdict.get("reason") or "").strip()
+    ticker = (verdict.get("ticker") or "").strip().upper()
 
-    # Strict gate: only top-tier
-    if not keep or score < MIN_SCORE or not body:
+    if not keep or score < need or not body:
         db.mark_message_processed(key_ch, msg_id)
         print(
-            f"[news_relay] skip @{source}/{msg_id} score={score} keep={keep} ({reason[:80]})",
+            f"[news_relay] skip @{source}/{msg_id} score={score}/{need} "
+            f"analysis={analysis_shaped} ({reason[:80]})",
             flush=True,
         )
         return
 
-    post = f"<b>{headline}</b>\n\n{body}" if headline else body
-    post = post[:3900]
+    if ticker and not headline.upper().startswith("$"):
+        headline = f"${ticker} — разбор" if "разбор" not in headline.lower() else headline
+    caption = f"<b>{headline}</b>\n\n{body}" if headline else body
+    caption = _strip_promo(caption)[:1024]  # Telegram caption limit for photos
+
+    chart = await _download_chart(msg) if has_media else None
     try:
-        await client.send_message(target, post, parse_mode="html", link_preview=False)
+        if chart:
+            bio = BytesIO(chart)
+            bio.name = "chart.jpg"
+            await client.send_file(
+                target,
+                file=bio,
+                caption=caption,
+                parse_mode="html",
+                force_document=False,
+            )
+        else:
+            long_post = (f"<b>{headline}</b>\n\n{body}" if headline else body)[:3900]
+            await client.send_message(target, long_post, parse_mode="html", link_preview=False)
         _bump_hour()
         _remember_fingerprint(f"{headline}\n{body}\n{text[:500]}")
         db.mark_message_processed(key_ch, msg_id)
-        print(f"[news_relay] published score={score} from @{source}: {headline[:80]}", flush=True)
+        print(
+            f"[news_relay] published score={score} chart={bool(chart)} "
+            f"from @{source}: {headline[:80]}",
+            flush=True,
+        )
     except Exception as e:
         print(f"[news_relay] publish fail @{source}/{msg_id}: {e}", flush=True)
 
@@ -280,8 +338,7 @@ async def _run_once() -> None:
     target = _target()
     print(
         f"[news_relay] connect… sources={len(sources)} target={target} "
-        f"min_score={MIN_SCORE} max/h={MAX_PER_HOUR} gap={MIN_GAP_SEC}s "
-        f"session_len={len(TELEGRAM_NEWS_SESSION)}",
+        f"mode=analysis min_score={MIN_SCORE} max/h={MAX_PER_HOUR} gap={MIN_GAP_SEC}s",
         flush=True,
     )
     client = TelegramClient(
@@ -289,7 +346,6 @@ async def _run_once() -> None:
         int(TELEGRAM_API_ID),
         TELEGRAM_API_HASH,
     )
-
     source_by_id: dict[int, str] = {}
 
     @client.on(events.NewMessage(chats=sources))
@@ -307,15 +363,17 @@ async def _run_once() -> None:
 
     await client.start()
     me = await client.get_me()
-    print(
-        f"[news_relay] authorized as @{getattr(me, 'username', None) or me.id}",
-        flush=True,
-    )
+    print(f"[news_relay] authorized as @{getattr(me, 'username', None) or me.id}", flush=True)
 
     for username in sources:
         try:
             ent = await client.get_entity(username)
             source_by_id[int(ent.id)] = username
+            from telethon.tl.functions.channels import JoinChannelRequest
+            try:
+                await client(JoinChannelRequest(ent))
+            except Exception:
+                pass
         except Exception as e:
             print(f"[news_relay] resolve @{username}: {e}", flush=True)
 
@@ -328,14 +386,11 @@ async def _run_once() -> None:
                         await _handle_message(client, username, msg, target=target)
                     except Exception as e:
                         print(f"[news_relay] startup @{username}: {e}", flush=True)
-                print(
-                    f"[news_relay] startup lookback @{username}: {len(recent or [])}",
-                    flush=True,
-                )
+                print(f"[news_relay] startup lookback @{username}: {len(recent or [])}", flush=True)
             except Exception as e:
                 print(f"[news_relay] cannot read @{username}: {e}", flush=True)
     else:
-        print("[news_relay] startup lookback disabled — только live-посты", flush=True)
+        print("[news_relay] startup lookback disabled — только live", flush=True)
 
     print(
         f"[news_relay] listening: {', '.join('@'+s for s in sources)} → {target}",
@@ -355,7 +410,6 @@ async def run() -> None:
             flush=True,
         )
         return
-
     delay = 5
     while True:
         try:
