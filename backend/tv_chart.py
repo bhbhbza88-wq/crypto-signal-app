@@ -1,8 +1,12 @@
 """
 График для outlook-постов.
 
-1) Если задан CHART_IMG_API_KEY — реальный скрин TradingView (chart-img.com).
+1) Если задан CHART_IMG_API_KEY + OUTLOOK_FORCE_TV=1 — скрин TradingView.
 2) Иначе — TradingView-like dark chart по Bybit OHLCV (свечи + трендлайны).
+
+Точность:
+  - OHLC / объём / даты / цена справа = сырые данные Bybit (ccxt).
+  - Синие трендлайны = авто (экстремумы левой/правой половины окна), не ручной TV drawing.
 """
 
 from __future__ import annotations
@@ -19,14 +23,14 @@ from PIL import Image, ImageDraw, ImageFont
 from data_layer import build_features, fetch_ohlcv_raw
 
 CHART_IMG_API_KEY = (os.getenv("CHART_IMG_API_KEY") or "").strip()
-CHART_INTERVAL = (os.getenv("OUTLOOK_CHART_INTERVAL", "360") or "360").strip()  # TV: 360 = 6h
+CHART_INTERVAL = (os.getenv("OUTLOOK_CHART_INTERVAL", "240") or "240").strip()  # TV: 240 = 4h
 CHART_THEME = (os.getenv("OUTLOOK_CHART_THEME", "dark") or "dark").strip()
 CHART_WIDTH = int(os.getenv("OUTLOOK_CHART_WIDTH", "1200") or "1200")
 CHART_HEIGHT = int(os.getenv("OUTLOOK_CHART_HEIGHT", "675") or "675")
 EXCHANGE_TV = (os.getenv("OUTLOOK_TV_EXCHANGE", "BYBIT") or "BYBIT").strip().upper()
 WATERMARK = (os.getenv("OUTLOOK_CHART_WATERMARK") or "Telegram: nowicki_news").strip()
-# Bybit ccxt TF for our renderer (6h ≈ Fed-style)
-RENDER_TF = (os.getenv("OUTLOOK_CHART_TF", "6h") or "6h").strip()
+RENDER_TF = (os.getenv("OUTLOOK_CHART_TF", "4h") or "4h").strip()
+RENDER_BARS = int(os.getenv("OUTLOOK_CHART_BARS", "120") or "120")
 
 
 def _tv_symbol(unified: str) -> str:
@@ -106,7 +110,7 @@ def _pretty_name(symbol: str) -> str:
 
 
 def _macro_trendline(df: pd.DataFrame, kind: str) -> tuple[int, float, int, float] | None:
-    """Две точки: экстремум левой половины + правой → трендлайн как у Fed."""
+    """Две точки: экстремум левой половины + правой (реальные high/low свечей)."""
     n = len(df)
     if n < 20:
         return None
@@ -133,14 +137,16 @@ def render_candle_png(
     *,
     exchange_id: str = "bybit",
     levels: dict[str, Any] | None = None,
-    bars: int = 80,
+    bars: int | None = None,
     timeframe: str | None = None,
 ) -> bytes | None:
-    """TradingView-like dark chart: свечи, OHLC, трендлайны, правая шкала, watermark."""
+    """Dark TV-like chart. OHLC/объём/даты = Bybit; трендлайны = авто по экстремумам."""
     tf = timeframe or RENDER_TF
+    n_bars = int(bars if bars is not None else RENDER_BARS)
+    n_bars = max(60, min(200, n_bars))
     raw = None
     for try_tf in (tf, "4h", "1h"):
-        raw = fetch_ohlcv_raw(symbol, try_tf, limit=max(140, bars + 50), exchange_id=exchange_id)
+        raw = fetch_ohlcv_raw(symbol, try_tf, limit=max(n_bars + 30, 100), exchange_id=exchange_id)
         if raw and len(raw) >= 40:
             tf = try_tf
             break
@@ -148,11 +154,10 @@ def render_candle_png(
         return None
 
     cols = ["timestamp", "open", "high", "low", "close", "volume"]
-    df = build_features(pd.DataFrame(raw, columns=cols)).tail(bars).reset_index(drop=True)
+    df = build_features(pd.DataFrame(raw, columns=cols)).tail(n_bars).reset_index(drop=True)
     if len(df) < 25:
         return None
 
-    # 2× supersample → smoother lines (TV look)
     scale = 2
     W = max(1000, CHART_WIDTH) * scale
     H = max(560, CHART_HEIGHT) * scale
@@ -182,11 +187,6 @@ def render_candle_png(
         n = max(1, len(df) - 1)
         return int(pad_l + (float(i) / n) * plot_w)
 
-    def line_y_at(i1, y1, i2, y2, i):
-        if i2 == i1:
-            return y1
-        return y1 + (y2 - y1) * (i - i1) / (i2 - i1)
-
     bg = (19, 23, 34)
     grid = (42, 46, 57)
     text_muted = (120, 130, 150)
@@ -208,8 +208,7 @@ def render_candle_png(
         yy = pad_t + int(plot_h * frac)
         draw.line([(pad_l, yy), (W - pad_r, yy)], fill=grid, width=scale)
         price = y_max - (y_max - y_min) * frac
-        label = _fmt(price)
-        draw.text((W - pad_r + 8 * scale, yy - 7 * scale), label, font=font_xs, fill=text_muted)
+        draw.text((W - pad_r + 8 * scale, yy - 7 * scale), _fmt(price), font=font_xs, fill=text_muted)
 
     ts_col = df["timestamp"]
     step = max(1, len(df) // 6)
@@ -220,8 +219,7 @@ def render_candle_png(
             ts = int(ts_col.iloc[i])
             if ts > 10_000_000_000:
                 ts //= 1000
-            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-            lbl = dt.strftime("%d %b")
+            lbl = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%d %b")
         except Exception:
             lbl = ""
         if lbl:
@@ -241,24 +239,22 @@ def render_candle_png(
             fill=vol_color,
         )
 
-    # Fed-style blue trendlines (upper highs + lower lows), extended right
+    # Трендлайны через 2 реальных экстремума, продление в пикселях (наклон без искажения)
     for kind in ("high", "low"):
         tl = _macro_trendline(df, kind)
         if not tl:
             continue
         i1, y1, i2, y2 = tl
-        i_end = len(df) - 1 + 12
-        y_end = line_y_at(i1, y1, i2, y2, i_end)
-        # start a bit before first anchor for longer line
-        i_start = max(0, i1 - 2)
-        y_start = line_y_at(i1, y1, i2, y2, i_start)
-        draw.line(
-            [(xx(i_start), yx(y_start)), (W - pad_r, yx(y_end))],
-            fill=line_blue,
-            width=2 * scale,
-        )
+        x1, yy1 = xx(i1), yx(y1)
+        x2, yy2 = xx(i2), yx(y2)
+        if x2 == x1:
+            continue
+        slope_px = (yy2 - yy1) / (x2 - x1)
+        x_left, x_right = pad_l, W - pad_r
+        y_left = yy1 + slope_px * (x_left - x1)
+        y_right = yy2 + slope_px * (x_right - x2)
+        draw.line([(x_left, y_left), (x_right, y_right)], fill=line_blue, width=2 * scale)
 
-    # invalidation hairline
     inv = (levels or {}).get("invalidation")
     if inv is not None:
         try:
@@ -296,8 +292,7 @@ def render_candle_png(
         fill=badge_color,
     )
     draw.text((W - pad_r + 11 * scale, py - 8 * scale), badge, font=font_price, fill=(255, 255, 255))
-    lx = xx(len(df) - 1)
-    x0 = lx
+    x0 = xx(len(df) - 1)
     while x0 < W - pad_r:
         draw.line([(x0, py), (min(x0 + 6 * scale, W - pad_r), py)], fill=badge_color, width=scale)
         x0 += 11 * scale
@@ -311,8 +306,7 @@ def render_candle_png(
     ohlc = f"O{_fmt(o)}  H{_fmt(h)}  L{_fmt(l)}  C{_fmt(c)}  "
     draw.text((pad_l, 30 * scale), ohlc, font=font_sm, fill=text_muted)
     chg_s = f"{chg:+.2f} ({chg_pct:+.2f}%)" if c >= 1 else f"{chg:+.6f} ({chg_pct:+.2f}%)"
-    ohlc_w = draw.textlength(ohlc, font=font_sm)
-    draw.text((pad_l + ohlc_w, 30 * scale), chg_s, font=font_sm, fill=chg_color)
+    draw.text((pad_l + draw.textlength(ohlc, font=font_sm), 30 * scale), chg_s, font=font_sm, fill=chg_color)
 
     if WATERMARK:
         tw = draw.textlength(WATERMARK, font=font_wm)
@@ -323,7 +317,6 @@ def render_candle_png(
 
     draw.text((pad_l, H - 18 * scale), "TV", font=font_xs, fill=(60, 68, 88))
 
-    # downsample for antialias
     out = img.resize((W // scale, H // scale), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
     out.save(buf, format="PNG", optimize=True)
@@ -336,8 +329,6 @@ def chart_for_symbol(
     exchange_id: str = "bybit",
     levels: dict[str, Any] | None = None,
 ) -> tuple[bytes | None, str]:
-    # Prefer our styled renderer for consistent Fed-like look (dark + trendlines).
-    # Real TV screenshot only if OUTLOOK_FORCE_TV=1 and API key set.
     force_tv = (os.getenv("OUTLOOK_FORCE_TV", "0") or "0").strip().lower() in (
         "1", "true", "yes", "on",
     )
