@@ -417,6 +417,8 @@ def _in_active_window(now: datetime | None = None) -> bool:
 
 def _required_gap_h() -> float:
     """Base gap ± ~25 min, stable for current day post count (not re-rolled every scan)."""
+    if MIN_GAP_H <= 0:
+        return 0.0  # При нулевом gap публикуем сразу когда нашли качество
     jitter_min = ((hash(f"{_day_key()}:{_posts_today()}") % 51) - 25)
     return max(1.5, MIN_GAP_H + jitter_min / 60.0)
 
