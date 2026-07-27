@@ -18,7 +18,7 @@ import random
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -46,7 +46,26 @@ SYMBOL_COOLDOWN_H = float(os.getenv("MARKET_OUTLOOK_SYMBOL_COOLDOWN_H", "18") or
 WORKERS = int(os.getenv("MARKET_OUTLOOK_WORKERS", "8") or "8")
 EXCHANGE_ID = (os.getenv("MARKET_OUTLOOK_EXCHANGE", "bybit") or "bybit").strip().lower()
 
+# Human-like posting window (local wall clock). Default: Europe/Kyiv 09:00–23:30.
+ACTIVE_TZ = (os.getenv("MARKET_OUTLOOK_TZ") or "Europe/Kyiv").strip() or "Europe/Kyiv"
+
+
+def _parse_hhmm(raw: str, default_h: int, default_m: int = 0) -> int:
+    """Return minutes since midnight."""
+    try:
+        parts = (raw or "").strip().split(":")
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+        return max(0, min(24 * 60, h * 60 + m))
+    except (TypeError, ValueError, IndexError):
+        return default_h * 60 + default_m
+
+
+ACTIVE_FROM_MIN = _parse_hhmm(os.getenv("MARKET_OUTLOOK_ACTIVE_FROM", "09:00"), 9, 0)
+ACTIVE_UNTIL_MIN = _parse_hhmm(os.getenv("MARKET_OUTLOOK_ACTIVE_UNTIL", "23:30"), 23, 30)
+
 _last_gap_skip_log_ts = 0.0
+_last_quiet_log_ts = 0.0
 
 TARGET = (
     os.getenv("TELEGRAM_NEWS_TARGET_CHANNEL")
@@ -357,7 +376,63 @@ def _global_gap_ok() -> bool:
     age = _hours_since_any_post()
     if age is None:
         return True
-    return age >= max(0.25, MIN_GAP_H)
+    return age >= _required_gap_h()
+
+
+def _tzinfo():
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(ACTIVE_TZ)
+    except Exception:
+        # Fallback UTC+2 if tzdata / zone name unavailable.
+        return timezone(timedelta(hours=2))
+
+
+def _local_now() -> datetime:
+    return datetime.now(_tzinfo())
+
+
+def _local_minutes(now: datetime | None = None) -> int:
+    n = now or _local_now()
+    return n.hour * 60 + n.minute
+
+
+def _in_active_window(now: datetime | None = None) -> bool:
+    """True only during the human posting window (e.g. 09:00–23:30 local)."""
+    mins = _local_minutes(now)
+    start, end = ACTIVE_FROM_MIN, ACTIVE_UNTIL_MIN
+    if start == end:
+        return True
+    if start < end:
+        return start <= mins < end
+    # Overnight window (e.g. 22:00–06:00) — not our default, but supported.
+    return mins >= start or mins < end
+
+
+def _required_gap_h() -> float:
+    """Base gap ± ~25 min, stable for current day post count (not re-rolled every scan)."""
+    jitter_min = ((hash(f"{_day_key()}:{_posts_today()}") % 51) - 25)
+    return max(1.5, MIN_GAP_H + jitter_min / 60.0)
+
+
+def _seconds_until_active() -> int:
+    """Seconds until the next ACTIVE_FROM in local TZ (0 if already active)."""
+    now = _local_now()
+    if _in_active_window(now):
+        return 0
+    start_h, start_m = divmod(ACTIVE_FROM_MIN, 60)
+    target = now.replace(hour=start_h, minute=start_m, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return max(60, int((target - now).total_seconds()))
+
+
+def _fmt_window() -> str:
+    def _hm(m: int) -> str:
+        return f"{m // 60:02d}:{m % 60:02d}"
+
+    return f"{_hm(ACTIVE_FROM_MIN)}–{_hm(ACTIVE_UNTIL_MIN)} {ACTIVE_TZ}"
 
 
 def _infer_bias(row: dict) -> str:
@@ -922,19 +997,31 @@ async def _publish_row(
 
 async def run_once() -> int:
     """Один проход: scan → shortlist → AI → publish. Возвращает число постов."""
+    global _last_quiet_log_ts, _last_gap_skip_log_ts
     _maybe_reset_day_cap_from_env()
+
+    if not _in_active_window():
+        now = time.time()
+        if now - _last_quiet_log_ts >= 1800:
+            loc = _local_now().strftime("%H:%M")
+            print(
+                f"[market_outlook] quiet hours (now {loc} local, window {_fmt_window()})",
+                flush=True,
+            )
+            _last_quiet_log_ts = now
+        return 0
+
     left_day = MAX_PER_DAY - _posts_today()
     if left_day <= 0:
         print(f"[market_outlook] day cap ({MAX_PER_DAY}) reached", flush=True)
         return 0
 
     if not _global_gap_ok():
-        global _last_gap_skip_log_ts
         age = _hours_since_any_post()
         now = time.time()
         if now - _last_gap_skip_log_ts >= 1800:
             print(
-                f"[market_outlook] skip: gap {age:.1f}h < {MIN_GAP_H}h "
+                f"[market_outlook] skip: gap {age:.1f}h < {_required_gap_h():.1f}h "
                 f"(posts_today={_posts_today()}/{MAX_PER_DAY})",
                 flush=True,
             )
@@ -961,6 +1048,15 @@ async def run_once() -> int:
             f"(best={top[0]['symbol']}={top[0]['score']})",
             flush=True,
         )
+        return 0
+
+    # Human-like: don't fire exactly on the 5-minute tick.
+    delay = random.randint(40, 240)
+    print(f"[market_outlook] human delay {delay}s before publish…", flush=True)
+    await asyncio.sleep(delay)
+    # Re-check window after delay (near 23:30 edge).
+    if not _in_active_window():
+        print("[market_outlook] skipped: left active window during delay", flush=True)
         return 0
 
     published = 0
@@ -1030,13 +1126,25 @@ async def run() -> None:
     print(
         f"[market_outlook] start → @{TARGET} every {INTERVAL_SEC}s "
         f"max/day={MAX_PER_DAY} max/run={MAX_PER_RUN} min_score={MIN_INTERNAL_SCORE} "
-        f"min_gap={MIN_GAP_H}h",
+        f"min_gap={MIN_GAP_H}h window={_fmt_window()}",
         flush=True,
     )
     # небольшой стартовый джиттер, чтобы не биться с ingest при рестарте
     await asyncio.sleep(45)
     while True:
         try:
+            if not _in_active_window():
+                wait = _seconds_until_active()
+                # Wake periodically so config/redeploys aren't stuck all night.
+                sleep_for = min(wait, 1800)
+                loc = _local_now().strftime("%H:%M")
+                print(
+                    f"[market_outlook] quiet ({loc} local) — sleep {sleep_for}s "
+                    f"until {_fmt_window()}",
+                    flush=True,
+                )
+                await asyncio.sleep(sleep_for)
+                continue
             await run_once()
         except asyncio.CancelledError:
             raise
