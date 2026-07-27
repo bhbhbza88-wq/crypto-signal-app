@@ -385,6 +385,7 @@ export default function SignalCard({ signal, onNeedPremium }) {
               {livePnlPct != null && (
                 <span className={`tv-pnl ${livePnlPct >= 0 ? 'pos' : 'neg'}`}>
                   {livePnlPct >= 0 ? '▲' : '▼'}{Math.abs(livePnlPct).toFixed(2)}%
+                  <span className="tv-lev"> 15x</span>
                 </span>
               )}
             </span>
@@ -493,6 +494,7 @@ export default function SignalCard({ signal, onNeedPremium }) {
         .tv-price { margin-left: auto; font-family: var(--font-mono); font-size: 12px; font-weight: 650; color: var(--text); display: flex; align-items: center; gap: 7px; }
         .tv-pnl { font-size: 11px; font-weight: 650; }
         .tv-pnl.pos { color: var(--long); } .tv-pnl.neg { color: var(--short); }
+        .tv-lev { font-size: 9px; font-weight: 600; opacity: 0.75; margin-left: 2px; }
         .tv-chart-canvas { width: 100%; height: 240px; }
         .tv-empty { height: 240px; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); font-size: 12px; }
         .tv-legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-hover) 70%, transparent); }

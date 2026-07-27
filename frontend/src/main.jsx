@@ -6,6 +6,7 @@ import AnalyticsListener from './AnalyticsListener'
 import { initSentry, SentryErrorBoundary } from './sentry'
 import './index.css'
 
+// cache-bust 2026-07-27: 15x leverage display
 initSentry()
 
 const Landing = lazy(() => import('./Landing.jsx'))

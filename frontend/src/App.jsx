@@ -104,6 +104,7 @@ function RecentSignals({ history, isPremium, onUpgrade, onSeeAll, t }) {
               <span className="rs-res mono">{resultLabel(t, row.result)}</span>
               <span className={`rs-pnl mono ${row.pnl > 0 ? 'pos' : row.pnl < 0 ? 'neg' : ''}`}>
                 {row.pnl > 0 ? '+' : ''}{row.pnl}%
+                <span style={{ opacity: 0.55, fontSize: '0.85em' }}> 15x</span>
               </span>
             </div>
           ))}

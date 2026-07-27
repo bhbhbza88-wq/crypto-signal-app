@@ -2,6 +2,7 @@
 Витринный polish PnL / winrate для публичных постов (сайт зеркалит те же константы).
 
 Сырые значения в БД и админке не трогаем — только отображение / Telegram.
+PnL всегда показывается с плечом 15x (как открытие в ТВХ).
 """
 from __future__ import annotations
 
@@ -10,11 +11,12 @@ import os
 PNL_WIN_MULT = float(os.getenv("PNL_WIN_MULT", "1.22") or "1.22")
 PNL_LOSS_MULT = float(os.getenv("PNL_LOSS_MULT", "0.42") or "0.42")
 WR_CAP = int(float(os.getenv("PNL_WR_CAP", "92") or "92"))
+LEVERAGE = int(float(os.getenv("OPEN_POS_LEVERAGE", os.getenv("PROFIT_CARD_LEVERAGE", "15")) or "15"))
 
 
 def polish_pnl(pnl: float, decimals: int = 2) -> float:
     try:
-        n = float(pnl)
+        n = float(pnl) * LEVERAGE
     except (TypeError, ValueError):
         return 0.0
     if n > 0:

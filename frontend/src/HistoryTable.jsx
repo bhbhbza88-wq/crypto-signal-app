@@ -210,7 +210,7 @@ export default function HistoryTable({ history, stats = null, isPremium = true, 
                   <th>{t('hist.col.signal')}</th>
                   <th className="num-right">{t('hist.col.entry')}</th>
                   <th>{t('hist.col.result')}</th>
-                  <th className="num-right">{t('hist.col.pnl')}</th>
+                  <th className="num-right">{t('hist.col.pnl')} · 15x</th>
                 </tr>
               </thead>
               <tbody>
