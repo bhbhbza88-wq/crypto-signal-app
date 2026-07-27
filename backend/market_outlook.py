@@ -39,9 +39,10 @@ ENABLED = (os.getenv("MARKET_OUTLOOK_ENABLED", "1") or "1").strip().lower() in (
 INTERVAL_SEC = int(os.getenv("MARKET_OUTLOOK_INTERVAL_SEC", "300") or "300")  # 5m continuous scan
 MAX_PER_DAY = int(os.getenv("MARKET_OUTLOOK_MAX_PER_DAY", "5") or "5")
 MAX_PER_RUN = int(os.getenv("MARKET_OUTLOOK_MAX_PER_RUN", "1") or "1")
-MIN_INTERNAL_SCORE = float(os.getenv("MARKET_OUTLOOK_MIN_SCORE", "65") or "65")
-# Min hours between ANY posts (keeps 4–5/day evenly when scanning every 5m).
-MIN_GAP_H = float(os.getenv("MARKET_OUTLOOK_MIN_GAP_H", "2.5") or "2.5")
+# Высокий порог качества — публикуем только топ-сетапы
+MIN_INTERNAL_SCORE = float(os.getenv("MARKET_OUTLOOK_MIN_SCORE", "78") or "78")
+# Убираем gap — публикуем сразу когда нашли качественное (0 = disabled)
+MIN_GAP_H = float(os.getenv("MARKET_OUTLOOK_MIN_GAP_H", "0") or "0")
 SYMBOL_COOLDOWN_H = float(os.getenv("MARKET_OUTLOOK_SYMBOL_COOLDOWN_H", "18") or "18")
 WORKERS = int(os.getenv("MARKET_OUTLOOK_WORKERS", "8") or "8")
 EXCHANGE_ID = (os.getenv("MARKET_OUTLOOK_EXCHANGE", "bybit") or "bybit").strip().lower()
