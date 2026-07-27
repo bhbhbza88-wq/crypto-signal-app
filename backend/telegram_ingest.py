@@ -51,6 +51,13 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)) or str(default))
+    except (TypeError, ValueError):
+        return default
+
+
 def _env_slip_pct(name: str, default_pct: float = 2.5) -> float:
     """Env в процентах (2.5 = 2.5%) → доля (0.025) для сравнения с ценой."""
     raw = os.getenv(name, str(default_pct))
@@ -102,9 +109,9 @@ CHANNEL_WEIGHTS = {
     "Aggregated Stream: Golf": 1.05,
 }
 MIN_QUALITY_SCORE = _env_int("INGEST_MIN_QUALITY_SCORE", 58)  # ниже — не открываем
-MIN_RR = 1.15                   # TP1 / риск
+MIN_RR = _env_float("INGEST_MIN_RR", 0.95)  # TP1 / риск (было 1.15 — резало почти всё)
 MIN_RISK_PCT = 0.004            # стоп ближе 0.4% — шум
-MAX_RISK_PCT = 0.09             # стоп шире 9% — мусор
+MAX_RISK_PCT = _env_slip_pct("INGEST_MAX_RISK_PCT", 12.0)  # стоп шире N% — мусор (default 12%)
 MAX_ENTRY_SLIP_PCT = _env_slip_pct("INGEST_MAX_ENTRY_SLIP_PCT", 2.5)  # цена ушла >N% от entry — поздно
 MAX_PER_CHANNEL_DAY = _env_int("INGEST_MAX_PER_CHANNEL_DAY", 4)  # чтобы один канал не забил слоты
 
