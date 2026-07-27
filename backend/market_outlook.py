@@ -11,8 +11,11 @@ invalidation, score 1–10) → пост ботом в TELEGRAM_NEWS_TARGET_CHAN
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import os
+import random
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -54,41 +57,46 @@ UPDATE_MIN_AGE_H = float(os.getenv("MARKET_OUTLOOK_UPDATE_MIN_AGE_H", "6") or "6
 UPDATE_MAX_AGE_H = float(os.getenv("MARKET_OUTLOOK_UPDATE_MAX_AGE_H", "48") or "48")
 
 OUTLOOK_SYSTEM_ANALYSIS = """
-Ты пишешь короткий разбор для Telegram-канала NOWICKI в стиле «Торговый Букварь».
+Ты пишешь короткий разбор для Telegram-канала NOWICKI.
 
-Язык: русский. Тон: живой трейдер, коротко и по делу.
-Пиши: ликвидность, зона спроса/предложения, реакция, закрепление, цель.
-Обязательно один раз естественно вставь KEY_LEVEL из фактов (тот же уровень, что на графике).
-Часто уместно: «заходить без подтверждения рано», «жду закрепление ниже/выше».
-Без канцелярита, без «покупай сейчас», без эмодзи.
+Главное: текст должен быть ПОНЯТНЫМ обычному человеку.
+- короткие предложения (макс 12–15 слов)
+- простые слова: вверх/вниз, поддержка, сопротивление, жду, цель
+- без канцелярита и без сложного жаргона подряд
+- можно 1–2 трейдерских слова (ликвидность, зона), но сразу простым смыслом
 
-Формат body: 2 коротких абзаца через \\n\\n.
-Цены только из фактов, KEY_LEVEL пиши так же, как в фактах (human_key_level).
+Структура body (строго 2 абзаца через \\n\\n):
+1) Что сейчас происходит по монете (факт с графика/уровней).
+2) Что жду дальше + цель. Обязательно один раз human_key_level как «ключевой уровень».
+
+Тон: спокойный трейдер, без «покупай сейчас», без эмодзи, без воды.
+Цены только из фактов. Когда упоминаешь ключевой уровень — пиши его числом
+(как в human_key_level из фактов), а не слово "human_key_level" буквально.
 
 Верни JSON:
 {
   "ticker": "SOL",
-  "body": "...",
+  "body": "абзац1\\n\\nабзац2",
   "score_1_10": 7,
   "bias": "long"
 }
-body 260–480 символов.
+body 220–400 символов.
 """.strip()
 
 OUTLOOK_SYSTEM_UPDATE = """
-Ты пишешь короткий апдейт к уже вышедшему разбору (стиль «Торговый Букварь»).
+Короткий понятный апдейт к прошлому разбору.
 
-Формат: 1 короткий абзац. Примеры тона:
-- «По SOL сходили ровно по нашему сценарию: … Ключевой уровень — X.»
-- «Дошли до зоны, получили реакцию. Дальше жду …»
+1 абзац, простые слова. Пример тона:
+«По SOL сценарий отрабатывает: сходили вниз и получили реакцию. Ключевой уровень — 74.88, дальше смотрю выше.»
 
-Обязательно упомяни KEY_LEVEL (human_key_level из фактов).
-Без эмодзи, без «покупай», без воды.
+Обязательно упомяни ключевой уровень числом (значение human_key_level из
+фактов) — не пиши слово "human_key_level" буквально.
+Без эмодзи, без «покупай», без сложных терминов.
 
 Верни JSON:
 {
   "ticker": "SOL",
-  "body": "один абзац 120–280 символов",
+  "body": "один абзац 110–240 символов",
   "score_1_10": 7,
   "bias": "long"
 }
@@ -96,6 +104,78 @@ OUTLOOK_SYSTEM_UPDATE = """
 
 # backward-compatible alias
 OUTLOOK_SYSTEM = OUTLOOK_SYSTEM_ANALYSIS
+
+# Rotated "angle" hints so consecutive posts don't all follow the exact same
+# sentence pattern, while the JSON contract / length limits stay fixed.
+_VARIATION_HINTS_ANALYSIS = [
+    "Схема: что сейчас -> что жду -> ключевой уровень human_key_level.",
+    "Схема: где стоим сейчас -> сценарий на ближайшие часы -> ключевой уровень.",
+    "Начни с того, как цена отреагировала на уровень, потом сценарий, в конце ключевой уровень.",
+    "Начни с движения за последние часы (рост/падение/объём), затем ожидание и ключевой уровень.",
+    "Начни с того, у какой зоны сейчас цена, потом что это значит, в конце ключевой уровень.",
+]
+_VARIATION_HINTS_UPDATE = [
+    "Скажи, отработал ли прошлый сценарий, и что дальше с ключевым уровнем.",
+    "Коротко: где сейчас цена относительно прошлого разбора и что жду дальше.",
+    "Начни с факта (дошли/не дошли до уровня), заверши ожиданием и ключевым уровнем.",
+]
+
+_PRICE_NUM_RE = re.compile(r"\d[\d\s]*\.\d+")
+
+
+def _price_numbers_in_text(text: str) -> list[float]:
+    out: list[float] = []
+    for m in _PRICE_NUM_RE.findall(text):
+        try:
+            out.append(float(m.replace(" ", "")))
+        except ValueError:
+            pass
+    return out
+
+
+def _facts_price_pool(row: dict, key_level: float) -> list[float]:
+    """All prices the AI is allowed to cite — used to catch hallucinated numbers."""
+    keys = (
+        "close", "support", "resistance", "invalidation",
+        "target_1", "target_2", "fail_zone", "ema21", "ema50",
+    )
+    pool: list[float] = []
+    try:
+        pool.append(float(key_level))
+    except (TypeError, ValueError):
+        pass
+    for k in keys:
+        v = row.get(k)
+        try:
+            if v is not None:
+                pool.append(float(v))
+        except (TypeError, ValueError):
+            pass
+    return pool
+
+
+def _body_prices_sane(body: str, pool: list[float], *, tol: float = 0.015) -> bool:
+    """Reject text that cites a price-looking number not backed by any fact."""
+    nums = _price_numbers_in_text(body)
+    if not nums:
+        return True
+    for n in nums:
+        if n <= 0:
+            continue
+        if not any(p > 0 and abs(n - p) / p <= tol for p in pool):
+            return False
+    return True
+
+
+def _too_similar(new_body: str, prev_body: str | None, *, ratio_hi: float = 0.82) -> bool:
+    """Catches near-duplicate consecutive posts (same wording, barely reworded)."""
+    if not prev_body:
+        return False
+    a = " ".join(new_body.lower().split())
+    b = " ".join(prev_body.lower().split())
+    if not a or not b:
+        return False
+    return difflib.SequenceMatcher(None, a, b).ratio() >= ratio_hi
 
 
 
@@ -143,7 +223,7 @@ def _fmt_price(v: float) -> str:
 
 
 def _recent_posts() -> dict[str, dict]:
-    """{ symbol: {ts, bias, key_level, close, post_type} } — tolerates legacy float map."""
+    """{ symbol: {ts, bias, key_level, close, post_type, body} } — tolerates legacy float map."""
     try:
         data = json.loads(db.get_setting(_SETTING_RECENT, "{}") or "{}")
         if not isinstance(data, dict):
@@ -157,6 +237,7 @@ def _recent_posts() -> dict[str, dict]:
                     "key_level": None,
                     "close": None,
                     "post_type": "analysis",
+                    "body": None,
                 }
             elif isinstance(v, dict) and "ts" in v:
                 out[str(k)] = {
@@ -165,6 +246,7 @@ def _recent_posts() -> dict[str, dict]:
                     "key_level": v.get("key_level"),
                     "close": v.get("close"),
                     "post_type": v.get("post_type") or "analysis",
+                    "body": v.get("body"),
                 }
         return out
     except (TypeError, ValueError, json.JSONDecodeError):
@@ -178,6 +260,7 @@ def _remember_post(
     key_level: float | None,
     close: float,
     post_type: str,
+    body: str | None = None,
 ) -> None:
     m = _recent_posts()
     now = time.time()
@@ -189,6 +272,7 @@ def _remember_post(
         "key_level": key_level,
         "close": close,
         "post_type": post_type,
+        "body": (body or "")[:600],
     }
     db.set_setting(_SETTING_RECENT, json.dumps(m))
 
@@ -449,7 +533,15 @@ def _pick_shortlist(rows: list[dict], limit: int) -> list[dict]:
     return picked
 
 
-def _facts_block(row: dict, *, key_level: float, bias: str, post_type: str, prev: dict | None = None) -> str:
+def _facts_block(
+    row: dict,
+    *,
+    key_level: float,
+    bias: str,
+    post_type: str,
+    prev: dict | None = None,
+    mtf_confirmed: bool = False,
+) -> str:
     base = (
         f"symbol: {row['symbol']}\n"
         f"ticker: ${row['symbol'].replace('/USDT', '')}\n"
@@ -472,6 +564,7 @@ def _facts_block(row: dict, *, key_level: float, bias: str, post_type: str, prev
         f"fail_zone: {_fmt_price(row.get('fail_zone') or row['invalidation'])}\n"
         f"internal_score_0_100: {row['score']}\n"
         f"btc_phase: {row.get('btc_phase')}\n"
+        f"mtf_confluence_1d: {'yes' if mtf_confirmed else 'no'}\n"
     )
     if prev:
         base += (
@@ -490,26 +583,39 @@ async def _ai_write_post(
     bias: str | None = None,
     key_level: float | None = None,
     prev: dict | None = None,
+    mtf_confirmed: bool = False,
+    extra_hint: str | None = None,
 ) -> dict | None:
     bias_n = (bias or _infer_bias(row)).strip().lower()
     if bias_n not in ("long", "short"):
         bias_n = "long"
     kl = float(key_level) if key_level is not None else _pick_key_level(row, bias_n)
     system = OUTLOOK_SYSTEM_UPDATE if post_type == "update" else OUTLOOK_SYSTEM_ANALYSIS
+    mtf_note = (
+        " Уровень совпадает и на дневном таймфрейме — если уместно, упомяни это одной фразой."
+        if mtf_confirmed
+        else ""
+    )
+    hint_suffix = f"\n\n{extra_hint}" if extra_hint else ""
     if post_type == "update":
+        variation = random.choice(_VARIATION_HINTS_UPDATE)
         user = (
             "Короткий апдейт по уже вышедшему сценарию. "
-            "Обязательно упомяни human_key_level. Цены не выдумывай.\n\n"
-            + _facts_block(row, key_level=kl, bias=bias_n, post_type=post_type, prev=prev)
+            f"{variation} "
+            "Обязательно упомяни human_key_level. Цены только из фактов, не выдумывай новые числа."
+            f"{mtf_note}{hint_suffix}\n\n"
+            + _facts_block(row, key_level=kl, bias=bias_n, post_type=post_type, prev=prev, mtf_confirmed=mtf_confirmed)
         )
         max_tokens = 280
         temperature = 0.7
     else:
+        variation = random.choice(_VARIATION_HINTS_ANALYSIS)
         user = (
-            "Короткий пост в стиле Торгового Букваря по фактам. "
-            "Обязательно один раз вставь human_key_level как ключевой уровень. "
-            "Цены не выдумывай. Без отчёта бота.\n\n"
-            + _facts_block(row, key_level=kl, bias=bias_n, post_type=post_type, prev=prev)
+            "Напиши понятный пост простыми словами по фактам. "
+            f"{variation} "
+            "Цены только из фактов, не выдумывай новые числа."
+            f"{mtf_note}{hint_suffix}\n\n"
+            + _facts_block(row, key_level=kl, bias=bias_n, post_type=post_type, prev=prev, mtf_confirmed=mtf_confirmed)
         )
         max_tokens = 420
         temperature = 0.78
@@ -530,6 +636,10 @@ async def _ai_write_post(
         return None
     # Ensure key level appears in analysis/update text.
     human_kl = _fmt_price(kl)
+    # Guard against the AI literally echoing the field name instead of its value
+    # (e.g. "уровень human_key_level" or "KEY_LEVEL зафиксирован").
+    for placeholder in ("human_key_level", "HUMAN_KEY_LEVEL", "KEY_LEVEL"):
+        body = body.replace(placeholder, human_kl)
     if human_kl not in body and human_kl.replace(" ", "") not in body.replace(" ", ""):
         if post_type == "update":
             body = f"{body.rstrip()} Ключевой уровень — {human_kl}."
@@ -591,15 +701,65 @@ async def _publish_row(
     if key_level is None:
         key_level = _pick_key_level(row, bias_hint)
 
+    atr_abs = float(row.get("close") or 0) * float(row.get("atr_pct") or 0) / 100.0
+    mtf_confirmed = False
+    try:
+        mtf_confirmed = await asyncio.to_thread(
+            tv_chart.key_level_mtf_confirmed,
+            row["symbol"],
+            key_level,
+            atr=atr_abs,
+            exchange_id=row.get("exchange") or "bybit",
+        )
+    except Exception as e:
+        print(f"[market_outlook] mtf check fail {row['symbol']}: {e}", flush=True)
+
     ai = await _ai_write_post(
         row,
         post_type=post_type,
         bias=bias_hint,
         key_level=key_level,
         prev=prev,
+        mtf_confirmed=mtf_confirmed,
     )
     if not ai:
         return False
+
+    prev_body = (prev or {}).get("body")
+    pool = _facts_price_pool(row, float(ai.get("key_level") or key_level))
+    if not _body_prices_sane(ai["body"], pool) or _too_similar(ai["body"], prev_body):
+        print(
+            f"[market_outlook] retrying AI text for {row['symbol']} "
+            "(sanity/duplicate check failed)",
+            flush=True,
+        )
+        retry = await _ai_write_post(
+            row,
+            post_type=post_type,
+            bias=bias_hint,
+            key_level=key_level,
+            prev=prev,
+            mtf_confirmed=mtf_confirmed,
+            extra_hint=(
+                "Важно: используй только числа из фактов ниже, ни одной новой цифры. "
+                "Сформулируй иначе, не повторяй прошлый текст."
+            ),
+        )
+        retry_pool = _facts_price_pool(row, float((retry or {}).get("key_level") or key_level)) if retry else []
+        if (
+            retry
+            and _body_prices_sane(retry["body"], retry_pool)
+            and not _too_similar(retry["body"], prev_body)
+        ):
+            ai = retry
+        else:
+            print(
+                f"[market_outlook] dropping post for {row['symbol']}: "
+                "failed sanity/duplicate check twice",
+                flush=True,
+            )
+            return False
+
     bias = ai.get("bias") or bias_hint
     key_level = float(ai.get("key_level") or key_level)
     levels = {
@@ -612,6 +772,7 @@ async def _publish_row(
         "target_2": row.get("target_2"),
         "fail_zone": row.get("fail_zone"),
         "key_level": key_level,
+        "mtf_confirmed": mtf_confirmed,
     }
     png, chart_tag = await asyncio.to_thread(
         tv_chart.chart_for_symbol,
@@ -620,6 +781,15 @@ async def _publish_row(
         levels=levels,
         bias=bias,
     )
+    if not png:
+        print(f"[market_outlook] WARNING: no chart rendered for {row['symbol']}", flush=True)
+        try:
+            await telegram_bot._notify_admins(
+                f"[outlook] no chart rendered for {row['symbol']} "
+                f"({row.get('exchange') or 'bybit'}) — posting text only."
+            )
+        except Exception as e:
+            print(f"[market_outlook] admin alert fail: {e}", flush=True)
     text = _format_post(row, ai, chart_tag=chart_tag)
     try:
         await telegram_bot.publish_news(text, photo_png=png)
@@ -632,6 +802,7 @@ async def _publish_row(
         key_level=key_level,
         close=float(row["close"]),
         post_type=post_type,
+        body=ai.get("body"),
     )
     if count_toward_cap:
         _bump_posts_today(1)

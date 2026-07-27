@@ -29,6 +29,12 @@ RENDER_BARS = int(os.getenv("OUTLOOK_CHART_BARS", "100") or "100")
 FUTURE_RATIO = float(os.getenv("OUTLOOK_CHART_FUTURE_RATIO", "0.22") or "0.22")
 FUTURE_RATIO = min(0.35, max(0.16, FUTURE_RATIO))
 
+_ICON_DIR = os.path.join(os.getenv("DATA_DIR", "."), "coin_icons")
+_ICON_BYTES_CACHE: dict[str, bytes | None] = {}
+_ICON_CDN = (
+    "https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/{sym}.png"
+)
+
 
 def _tv_symbol(unified: str) -> str:
     base = unified.replace("/USDT", "").replace("USDT", "").upper().strip()
@@ -98,6 +104,83 @@ def _pretty_name(symbol: str) -> str:
         "APT": "Aptos", "WLD": "Worldcoin", "ARB": "Arbitrum", "OP": "Optimism",
     }
     return f"{names.get(base, base)} / TetherUS"
+
+
+def _fetch_coin_icon_bytes(base: str) -> bytes | None:
+    """PNG bytes for a coin logo ? disk cache under DATA_DIR, then CDN, memoized."""
+    base = base.lower().strip()
+    if base in _ICON_BYTES_CACHE:
+        return _ICON_BYTES_CACHE[base]
+    path = os.path.join(_ICON_DIR, f"{base}.png")
+    data: bytes | None = None
+    try:
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                data = f.read()
+    except OSError:
+        data = None
+    if not data:
+        try:
+            with httpx.Client(timeout=6) as client:
+                r = client.get(_ICON_CDN.format(sym=base))
+                if r.status_code == 200 and r.content and len(r.content) > 200:
+                    data = r.content
+                    try:
+                        os.makedirs(_ICON_DIR, exist_ok=True)
+                        with open(path, "wb") as f:
+                            f.write(data)
+                    except OSError:
+                        pass
+        except Exception:
+            data = None
+    _ICON_BYTES_CACHE[base] = data
+    return data
+
+
+def _draw_coin_icon(img: Image.Image, symbol: str, *, x: int, y: int, size: int) -> None:
+    """Paste the coin logo at (x, y); fall back to an initials badge if unavailable."""
+    base = symbol.replace("/USDT", "").upper().strip()
+    data = _fetch_coin_icon_bytes(base)
+    if data:
+        try:
+            icon = Image.open(io.BytesIO(data)).convert("RGBA").resize(
+                (size, size), Image.Resampling.LANCZOS
+            )
+            img.paste(icon, (x, y), icon)
+            return
+        except Exception:
+            pass
+    fallback = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    fd = ImageDraw.Draw(fallback)
+    palette = [
+        (60, 120, 220), (220, 120, 60), (120, 80, 220),
+        (50, 180, 140), (220, 70, 120), (200, 170, 40),
+    ]
+    col = palette[sum(ord(c) for c in base) % len(palette)]
+    fd.ellipse([0, 0, size, size], fill=(*col, 255))
+    letter = base[:1] or "?"
+    lf = _font(int(size * 0.55), bold=True)
+    tw = fd.textlength(letter, font=lf)
+    fd.text(((size - tw) / 2, size * 0.16), letter, font=lf, fill=(255, 255, 255, 255))
+    img.paste(fallback, (x, y), fallback)
+
+
+def _draw_dashed_hline(
+    draw: ImageDraw.ImageDraw,
+    x0: int,
+    x1: int,
+    y: int,
+    color: tuple[int, int, int, int],
+    *,
+    dash: int,
+    gap: int,
+    width: int,
+) -> None:
+    x = x0
+    while x < x1:
+        xe = min(x + dash, x1)
+        draw.line([(x, y), (xe, y)], fill=color, width=width)
+        x += dash + gap
 
 
 def _swing_pivots(
@@ -364,6 +447,8 @@ def _build_zones(
                         "bot": float(bot),
                         "start_i": int(max(0, i - 3)),
                         "mid": float(mid),
+                        "score": float(sc),
+                        "fallback": False,
                     },
                 )
             )
@@ -390,6 +475,8 @@ def _build_zones(
             "bot": float(bot),
             "start_i": int(max(0, i - 3)),
             "mid": float(mid),
+            "score": -99.0,
+            "fallback": True,
         }
     if demand is None and lows:
         i, p = min(lows[-8:], key=lambda t: t[1])
@@ -405,6 +492,8 @@ def _build_zones(
             "bot": float(bot),
             "start_i": int(max(0, i - 3)),
             "mid": float(mid),
+            "score": -99.0,
+            "fallback": True,
         }
 
     if supply:
@@ -424,17 +513,38 @@ def _structure_from_df(
 ) -> dict[str, Any]:
     """Zones (1 supply + 1 demand) + single orange key level. No trendline clutter."""
     n = len(df)
-    order = 3 if n < 90 else 4
-    highs = _swing_pivots(df, "high", order=order)
-    lows = _swing_pivots(df, "low", order=order)
-    highs = highs[-14:]
-    lows = lows[-14:]
+    default_order = 3 if n < 90 else 4
+
+    # Try a few pivot resolutions and keep the one that yields real (non-fallback)
+    # zones with the strongest score ? avoids a single fixed `order` missing the
+    # cleanest swing on a given symbol/regime.
+    best: tuple[list[tuple[int, float]], list[tuple[int, float]], list[dict[str, Any]]] | None = None
+    best_rank: tuple[int, float, int] | None = None
+    for order in sorted({max(2, default_order - 1), default_order, default_order + 1, default_order + 2}):
+        h = _swing_pivots(df, "high", order=order)[-14:]
+        l = _swing_pivots(df, "low", order=order)[-14:]
+        if not h or not l:
+            continue
+        z = _build_zones(df, h, l, atr=atr, last_c=last_c)
+        fallback_n = sum(1 for x in z if x.get("fallback"))
+        total_score = sum(float(x.get("score") or 0.0) for x in z)
+        rank = (-fallback_n, total_score, len(h) + len(l))
+        if best_rank is None or rank > best_rank:
+            best_rank = rank
+            best = (h, l, z)
+
+    if best is not None:
+        highs, lows, zones = best
+    else:
+        highs = _swing_pivots(df, "high", order=default_order)[-14:]
+        lows = _swing_pivots(df, "low", order=default_order)[-14:]
+        zones = _build_zones(df, highs, lows, atr=atr, last_c=last_c)
+
     range_low = float(df["low"].astype(float).min())
     range_high = float(df["high"].astype(float).max())
 
     h_res = _cluster_levels(highs, atr=atr, last_c=last_c, kind="high", max_levels=1)
     h_sup = _cluster_levels(lows, atr=atr, last_c=last_c, kind="low", max_levels=1)
-    zones = _build_zones(df, highs, lows, atr=atr, last_c=last_c)
 
     swing_high = max((p for _, p in highs), default=range_high)
     swing_low = min((p for _, p in lows), default=range_low)
@@ -475,6 +585,35 @@ def _structure_from_df(
         "demand_mid": float(demand_mid),
         "supply_mid": float(supply_mid),
     }
+
+
+def key_level_mtf_confirmed(
+    symbol: str,
+    key_level: float,
+    *,
+    atr: float | None = None,
+    exchange_id: str = "bybit",
+) -> bool:
+    """True if the 4h key level also lines up with a swing high/low on the daily chart."""
+    try:
+        raw = fetch_ohlcv_raw(symbol, "1d", limit=120, exchange_id=exchange_id)
+        if not raw or len(raw) < 30:
+            return False
+        cols = ["timestamp", "open", "high", "low", "close", "volume"]
+        df = build_features(pd.DataFrame(raw, columns=cols)).reset_index(drop=True)
+        if len(df) < 20:
+            return False
+        last_c = float(df["close"].iloc[-1])
+        atr_d = _fnum(df.iloc[-1].get("atr")) if "atr" in df.columns else None
+        if atr_d is None:
+            atr_d = float((df["high"].astype(float) - df["low"].astype(float)).tail(14).mean())
+        tol = max(atr_d, _fnum(atr) or 0.0, last_c * 0.006)
+        highs = _swing_pivots(df, "high", order=3)
+        lows = _swing_pivots(df, "low", order=3)
+        levels = [p for _, p in highs] + [p for _, p in lows]
+        return any(abs(p - key_level) <= tol for p in levels)
+    except Exception:
+        return False
 
 
 def _tf_delta(tf: str) -> timedelta:
@@ -713,7 +852,7 @@ def render_candle_png(
     scale = 2
     W = max(1000, CHART_WIDTH) * scale
     H = max(560, CHART_HEIGHT) * scale
-    pad_l, pad_r, pad_t, pad_b = 18 * scale, 78 * scale, 52 * scale, 36 * scale
+    pad_l, pad_r, pad_t, pad_b = 18 * scale, 92 * scale, 52 * scale, 36 * scale
     # Bukvar charts are clean ? no volume strip (more room for zones + path).
     vol_h = 0
     plot_h = H - pad_t - pad_b - vol_h - 8 * scale
@@ -851,10 +990,13 @@ def render_candle_png(
     font_price = _font(13 * scale, bold=True)
     font_wm = _font(26 * scale)
 
-    for g in range(6):
-        frac = g / 5
+    n_grid = 7
+    for g in range(n_grid):
+        frac = g / (n_grid - 1)
         yy = pad_t + int(plot_h * frac)
-        draw.line([(pad_l, yy), (plot_right, yy)], fill=(*grid, 255), width=scale)
+        _draw_dashed_hline(
+            draw, pad_l, plot_right, yy, (*grid, 160), dash=6 * scale, gap=5 * scale, width=scale
+        )
         draw.text(
             (plot_right + 8 * scale, yy - 7 * scale),
             _fmt(y_max - (y_max - y_min) * frac),
@@ -873,7 +1015,12 @@ def render_candle_png(
     step = max(1, len(df) // 5)
     for i in range(0, len(df), step):
         x = xx(i)
-        draw.line([(x, pad_t), (x, pad_t + plot_h)], fill=(*grid, 255), width=scale)
+        for yy0 in range(pad_t, pad_t + plot_h, 9 * scale):
+            draw.line(
+                [(x, yy0), (x, min(yy0 + 5 * scale, pad_t + plot_h))],
+                fill=(*grid, 130),
+                width=scale,
+            )
         try:
             ts = int(ts_col.iloc[i])
             if ts > 10_000_000_000:
@@ -925,7 +1072,39 @@ def render_candle_png(
     img = Image.alpha_composite(img, zone_layer)
     draw = ImageDraw.Draw(img)
 
+    # Cyrillic labels via unicode escapes on purpose ? keeps them safe from
+    # encoding mangling regardless of how this file gets saved.
+    lbl_supply = "\u041f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"  # "Predlozhenie"
+    lbl_demand = "\u0421\u043f\u0440\u043e\u0441"  # "Spros"
+    lbl_target = "\u0446\u0435\u043b\u044c"  # "tsel'"
+    lbl_stop = "\u0441\u0442\u043e\u043f"  # "stop"
+    zone_label_ru = {"supply": lbl_supply, "demand": lbl_demand}
+    zone_label_col = {"supply": (235, 150, 150), "demand": (150, 210, 190)}
+
+    # Target / invalidation guide lines (thin dashed) ? visual match for the
+    # levels already cited in the post text.
+    guide_lines = [(lbl_target, float(target), green if bias_norm != "short" else red)]
+    if invalidation_v is not None:
+        guide_lines.append((lbl_stop, float(invalidation_v), red if bias_norm != "short" else green))
+    for label, price, col in guide_lines:
+        yy = yx(price)
+        if yy < pad_t + 2 or yy > pad_t + plot_h - 2:
+            continue
+        _draw_dashed_hline(
+            draw, hist_right, plot_right, yy, (*col, 150), dash=7 * scale, gap=5 * scale, width=scale
+        )
+        lbl = f"{label} {_fmt(price)}"
+        tw = int(draw.textlength(lbl, font=font_xs))
+        lx = hist_right + 8 * scale
+        ly = yy - 15 * scale if yy > pad_t + 16 * scale else yy + 4 * scale
+        draw.rectangle(
+            [lx - 3 * scale, ly - 2 * scale, lx + tw + 3 * scale, ly + 13 * scale],
+            fill=(10, 12, 16, 190),
+        )
+        draw.text((lx, ly), lbl, font=font_xs, fill=col)
+
     # Single orange key level (the one referenced in the post text).
+    mtf_confirmed = bool(lv.get("mtf_confirmed"))
     for p in structure.get("orange_levels") or []:
         yy = yx(float(p))
         if yy < pad_t or yy > pad_t + plot_h:
@@ -936,7 +1115,7 @@ def render_candle_png(
             fill=(*orange, 180),
             width=2 * scale,
         )
-        badge = _fmt(float(p))
+        badge = _fmt(float(p)) + (" 1D" if mtf_confirmed else "")
         bw = int(draw.textlength(badge, font=font_xs)) + 8 * scale
         draw.rectangle(
             [plot_right + 4 * scale, yy - 8 * scale, plot_right + 4 * scale + bw, yy + 8 * scale],
@@ -986,6 +1165,33 @@ def render_candle_png(
         timeframe=tf,
     )
 
+    # Zone labels drawn last (on top of candles/lines) so they stay legible
+    # even when a key/guide line crosses a thin zone.
+    for z in structure.get("zones") or []:
+        kind = z.get("kind")
+        ru = zone_label_ru.get(kind)
+        if not ru:
+            continue
+        y_top = yx(float(z["top"]))
+        y_bot = yx(float(z["bot"]))
+        if y_bot < y_top:
+            y_top, y_bot = y_bot, y_top
+        x0 = xx(float(z.get("start_i") or 0))
+        label = f"{ru}  {_fmt(float(z['bot']))}-{_fmt(float(z['top']))}"
+        tw = int(draw.textlength(label, font=font_xs))
+        lx = min(x0 + 6 * scale, plot_right - tw - 6 * scale)
+        lx = max(lx, pad_l + 4 * scale)
+        text_h = 16 * scale
+        if (y_bot - y_top) >= text_h + 6 * scale:
+            ly = y_top + 3 * scale
+        else:
+            ly = max(pad_t, y_top - text_h - 2 * scale)
+        draw.rectangle(
+            [lx - 3 * scale, ly - 2 * scale, lx + tw + 3 * scale, ly + 13 * scale],
+            fill=(10, 12, 16, 165),
+        )
+        draw.text((lx, ly), label, font=font_xs, fill=zone_label_col.get(kind, text_muted))
+
     last_o = float(last["open"])
     py = yx(last_c)
     badge = _fmt(last_c)
@@ -1009,12 +1215,19 @@ def render_candle_png(
     chg = c - o
     chg_pct = (chg / o * 100) if o else 0
     chg_color = green if chg >= 0 else red
+
+    icon_size = 20 * scale
+    icon_x, icon_y = pad_l, 8 * scale
+    _draw_coin_icon(img, symbol, x=icon_x, y=icon_y, size=icon_size)
+    draw = ImageDraw.Draw(img)
+    title_x = icon_x + icon_size + 8 * scale
+
     title = f"{_pretty_name(symbol)} | {tf} | {exchange_id.capitalize()}"
-    draw.text((pad_l, 10 * scale), title, font=font_lg, fill=text_main)
+    draw.text((title_x, 10 * scale), title, font=font_lg, fill=text_main)
     ohlc = f"O{_fmt(o)}  H{_fmt(h)}  L{_fmt(l)}  C{_fmt(c)}  "
-    draw.text((pad_l, 30 * scale), ohlc, font=font_sm, fill=text_muted)
+    draw.text((title_x, 30 * scale), ohlc, font=font_sm, fill=text_muted)
     chg_s = f"{chg:+.2f} ({chg_pct:+.2f}%)" if c >= 1 else f"{chg:+.6f} ({chg_pct:+.2f}%)"
-    draw.text((pad_l + draw.textlength(ohlc, font=font_sm), 30 * scale), chg_s, font=font_sm, fill=chg_color)
+    draw.text((title_x + draw.textlength(ohlc, font=font_sm), 30 * scale), chg_s, font=font_sm, fill=chg_color)
 
     if WATERMARK:
         tw = draw.textlength(WATERMARK, font=font_wm)

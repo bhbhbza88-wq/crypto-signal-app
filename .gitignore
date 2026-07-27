@@ -47,3 +47,7 @@ backend/_fetch_api_for_login.py
 backend/assets/pnl_templates/_preview/
 backend/assets/pnl_templates/_classify.py
 
+# Cached coin logos for outlook charts (fetched on demand, not versioned)
+backend/coin_icons/
+coin_icons/
+
