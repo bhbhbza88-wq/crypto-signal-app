@@ -263,22 +263,26 @@ def reset_posts_today() -> str:
 
 def _maybe_reset_day_cap_from_env() -> None:
     """
-    One-shot reset when MARKET_OUTLOOK_RESET_DAY=1.
-    Consumed once per UTC day (tracked in settings) so a sticky env
-    doesn't disable the daily cap entirely.
+    One-shot reset when MARKET_OUTLOOK_RESET_DAY is set to a non-empty
+    truthy token (e.g. "1", "2", "now"). Changing the token re-triggers
+    a reset even on the same UTC day.
+    Also clears recent-post timestamps so the global gap opens immediately.
     """
-    flag = (os.getenv("MARKET_OUTLOOK_RESET_DAY") or "").strip().lower()
-    if flag not in ("1", "true", "yes", "on"):
+    flag = (os.getenv("MARKET_OUTLOOK_RESET_DAY") or "").strip()
+    if not flag or flag.lower() in ("0", "false", "no", "off"):
         return
     day = _day_key()
     consumed_key = "outlook_day_reset_consumed"
-    if (db.get_setting(consumed_key, "") or "") == day:
+    token = f"{day}:{flag}"
+    if (db.get_setting(consumed_key, "") or "") == token:
         return
     before = db.get_setting(_SETTING_DAY, "") or ""
     reset_posts_today()
-    db.set_setting(consumed_key, day)
+    # Open the global posting gap right away (manual "let posts through again").
+    db.set_setting(_SETTING_RECENT, "{}")
+    db.set_setting(consumed_key, token)
     print(
-        f"[market_outlook] day cap reset via MARKET_OUTLOOK_RESET_DAY "
+        f"[market_outlook] day cap + gap reset via MARKET_OUTLOOK_RESET_DAY={flag!r} "
         f"(before={before!r} after={day}:0)",
         flush=True,
     )
