@@ -51,33 +51,26 @@ _SETTING_DAY = "outlook_posts_day"       # "YYYY-MM-DD:count"
 _SETTING_RECENT = "outlook_recent_syms"  # JSON { "BTC/USDT": unix_ts, ... }
 
 OUTLOOK_SYSTEM = """
-Ты пишешь разборы монет для Telegram-канала NOWICKI.
-Пиши как живой трейдер в чат: по-русски, спокойно, конкретно, без канцелярита.
+Ты пишешь короткие разборы для Telegram-канала NOWICKI в стиле «Торговый Букварь».
 
-КАК ЗВУЧИТ ЧЕЛОВЕК (делай так):
-- короткие фразы, можно «по сути», «смотри», «если снесут», «пока держит»
-- смешанный тон: чуть небрежно + по делу, без пафоса
-- объясняй структуру своими словами (канал, трендлайн, ретест, диапазон)
-- уровни вплетай в текст естественно, не списком-роботом
+Язык: русский. Тон: живой трейдер, коротко и по делу.
+Пиши как человек в канал: ликвидность, реакция, локальный лонг/шорт, зона, цель.
+Без канцелярита, без «на основании анализа», без сигналов «покупай сейчас», без эмодзи-спама.
 
-КАК ЗВУЧИТ БОТ (запрещено):
-- «на основании анализа», «следует отметить», «в заключение», «данный актив»
-- «вероятность роста», «рекомендую к покупке», «сигнал на вход»
-- шаблонные EN-кальки, эмодзи-спам, CAPS, VIP/рефки, «друзья»
-- guaranteed / moon / 100x
-
-Язык: только русский. Цены и уровни бери ТОЛЬКО из фактов — не выдумывай.
+Формат тела:
+- 2 коротких абзаца (можно 3, не больше)
+- в тексте естественно уровни из фактов (округлённо, по-человечески: 4 109, не 4109.395123)
+- можно слова: сняли ликвидность, реакция, пока интересно смотреть, цель в районе, если снесут
 
 Верни JSON:
 {
-  "title": "короткий заголовок с тикером, например $SOL — отбой от нижней границы",
-  "body": "весь текст поста: 4–8 коротких абзацев про цену, структуру, куда смотреть вверх, где идея ломается, одна живая мысль в конце. Без markdown. Можно пустые строки между абзацами.",
+  "ticker": "SOL",
+  "body": "два коротких абзаца через \\n\\n",
   "score_1_10": 7,
   "bias": "long"
 }
 
-score_1_10 — насколько чистая структура (не вероятность профита).
-body примерно 650–950 символов.
+body 280–520 символов. Цены только из фактов.
 """.strip()
 
 
@@ -363,16 +356,16 @@ def _facts_block(row: dict) -> str:
 
 async def _ai_write_post(row: dict) -> dict | None:
     user = (
-        "Напиши живой русскоязычный разбор по фактам ниже. "
-        "Цены не выдумывай. Не пиши как отчёт бота.\n\n"
+        "Короткий пост в стиле Торгового Букваря по фактам. "
+        "Цены не выдумывай. Без отчёта бота.\n\n"
         + _facts_block(row)
     )
     try:
         verdict = await ai_client.fast_json_completion(
             system=OUTLOOK_SYSTEM,
             user_text=user,
-            max_tokens=700,
-            temperature=0.72,
+            max_tokens=420,
+            temperature=0.78,
         )
     except Exception as e:
         print(f"[market_outlook] AI fail {row['symbol']}: {e}", flush=True)
@@ -380,46 +373,35 @@ async def _ai_write_post(row: dict) -> dict | None:
     if not isinstance(verdict, dict):
         return None
     body = (verdict.get("body") or verdict.get("narrative") or "").strip()
-    title = (verdict.get("title") or "").strip()
     if not body:
         return None
+    coin = row["symbol"].replace("/USDT", "")
+    ticker = (verdict.get("ticker") or coin).strip().lstrip("#$").upper() or coin
     try:
         s10 = int(verdict.get("score_1_10") or round(row["score"] / 10))
     except (TypeError, ValueError):
         s10 = max(1, min(10, round(row["score"] / 10)))
-    s10 = max(1, min(10, s10))
     bias = (verdict.get("bias") or "neutral").strip().lower()
     if bias not in ("long", "short", "neutral"):
         bias = "neutral"
     return {
-        "title": title,
+        "ticker": ticker,
         "body": body,
-        "score_1_10": s10,
+        "score_1_10": max(1, min(10, s10)),
         "bias": bias,
     }
 
 
 def _format_post(row: dict, ai: dict, chart_tag: str = "") -> str:
-    """Русский пост: заголовок + живой текст, минимум «бот-футера»."""
+    """Стиль Букваря: #TICKER + 2 коротких абзаца."""
     coin = row["symbol"].replace("/USDT", "")
-    title = (ai.get("title") or "").strip()
-    if not title:
-        title = f"${coin} — разбор"
-    if not title.startswith("$"):
-        title = f"${coin} — {title}"
+    ticker = (ai.get("ticker") or coin).strip().lstrip("#$").upper() or coin
     body = (ai.get("body") or "").strip()
-    # чуть подчистим AI-артефакты
     for bad in ("На основании анализа", "Следует отметить", "В заключение", "Данный актив"):
         body = body.replace(bad, "")
-    parts = [
-        f"<b>{title}</b>",
-        "———————",
-        "",
-        body,
-        "",
-        "<i>Не сигнал входа — просто разбор. Риск на тебе.</i>",
-    ]
-    return "\n".join(parts)[:3900]
+    # Telegram hashtag
+    text = f"#{ticker}\n\n{body}"
+    return text[:1020]  # лучше влезать в caption целиком
 
 
 async def _publish_row(row: dict, *, count_toward_cap: bool = True) -> bool:

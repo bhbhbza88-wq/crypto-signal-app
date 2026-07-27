@@ -1,12 +1,7 @@
 """
-График для outlook-постов.
-
-1) Если задан CHART_IMG_API_KEY + OUTLOOK_FORCE_TV=1 — скрин TradingView.
-2) Иначе — TradingView-like dark chart по Bybit OHLCV (свечи + трендлайны).
-
-Точность:
-  - OHLC / объём / даты / цена справа = сырые данные Bybit (ccxt).
-  - Синие трендлайны = авто (экстремумы левой/правой половины окна), не ручной TV drawing.
+График для outlook-постов — стиль «Торговый Букварь»:
+тёмный фон, синие/белые свечи, серые зоны, оранжевые уровни, зелёный путь.
+OHLC/объём/даты = Bybit; зоны/путь = авто по уровням сканера.
 """
 
 from __future__ import annotations
@@ -23,14 +18,14 @@ from PIL import Image, ImageDraw, ImageFont
 from data_layer import build_features, fetch_ohlcv_raw
 
 CHART_IMG_API_KEY = (os.getenv("CHART_IMG_API_KEY") or "").strip()
-CHART_INTERVAL = (os.getenv("OUTLOOK_CHART_INTERVAL", "240") or "240").strip()  # TV: 240 = 4h
-CHART_THEME = (os.getenv("OUTLOOK_CHART_THEME", "dark") or "dark").strip()
+CHART_INTERVAL = (os.getenv("OUTLOOK_CHART_INTERVAL", "60") or "60").strip()
 CHART_WIDTH = int(os.getenv("OUTLOOK_CHART_WIDTH", "1200") or "1200")
 CHART_HEIGHT = int(os.getenv("OUTLOOK_CHART_HEIGHT", "675") or "675")
 EXCHANGE_TV = (os.getenv("OUTLOOK_TV_EXCHANGE", "BYBIT") or "BYBIT").strip().upper()
 WATERMARK = (os.getenv("OUTLOOK_CHART_WATERMARK") or "Telegram: nowicki_news").strip()
-RENDER_TF = (os.getenv("OUTLOOK_CHART_TF", "4h") or "4h").strip()
-RENDER_BARS = int(os.getenv("OUTLOOK_CHART_BARS", "120") or "120")
+# 1h плотнее, как у «Букваря»; можно OUTLOOK_CHART_TF=4h
+RENDER_TF = (os.getenv("OUTLOOK_CHART_TF", "1h") or "1h").strip()
+RENDER_BARS = int(os.getenv("OUTLOOK_CHART_BARS", "100") or "100")
 
 
 def _tv_symbol(unified: str) -> str:
@@ -41,10 +36,9 @@ def _tv_symbol(unified: str) -> str:
 def fetch_tradingview_png(symbol: str) -> bytes | None:
     if not CHART_IMG_API_KEY:
         return None
-    tv_sym = _tv_symbol(symbol)
     url = "https://api.chart-img.com/v1/tradingview/advanced-chart"
     params = {
-        "symbol": tv_sym,
+        "symbol": _tv_symbol(symbol),
         "interval": CHART_INTERVAL,
         "theme": "dark",
         "width": str(min(1280, max(800, CHART_WIDTH))),
@@ -60,10 +54,6 @@ def fetch_tradingview_png(symbol: str) -> bytes | None:
         with httpx.Client(timeout=60) as client:
             r = client.get(url, params=params, headers=headers)
             if r.status_code != 200 or not r.content or len(r.content) < 500:
-                print(f"[tv_chart] chart-img {r.status_code}: {r.text[:200]}", flush=True)
-                return None
-            ctype = (r.headers.get("content-type") or "").lower()
-            if "image" not in ctype and r.content[:8] != b"\x89PNG\r\n\x1a\n":
                 return None
             return r.content
     except Exception as e:
@@ -103,33 +93,31 @@ def _pretty_name(symbol: str) -> str:
         "BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "BNB": "BNB",
         "XRP": "XRP", "DOGE": "Dogecoin", "ADA": "Cardano", "AVAX": "Avalanche",
         "LINK": "Chainlink", "DOT": "Polkadot", "NEAR": "NEAR", "SUI": "Sui",
-        "APT": "Aptos", "WLD": "Worldcoin", "PEPE": "Pepe", "ARB": "Arbitrum",
-        "OP": "Optimism", "INJ": "Injective", "TIA": "Celestia", "SEI": "Sei",
+        "APT": "Aptos", "WLD": "Worldcoin", "ARB": "Arbitrum", "OP": "Optimism",
     }
     return f"{names.get(base, base)} / TetherUS"
 
 
-def _macro_trendline(df: pd.DataFrame, kind: str) -> tuple[int, float, int, float] | None:
-    """Две точки: экстремум левой половины + правой (реальные high/low свечей)."""
+def _blend(base: tuple, overlay: tuple, alpha: float) -> tuple[int, int, int]:
+    a = max(0.0, min(1.0, alpha))
+    return tuple(int(base[i] * (1 - a) + overlay[i] * a) for i in range(3))
+
+
+def _zone_band(df: pd.DataFrame, kind: str) -> tuple[float, float, int, int] | None:
+    """Серая зона вокруг swing low/high в правой трети графика."""
     n = len(df)
-    if n < 20:
+    if n < 30:
         return None
-    mid = n // 2
-    left = df.iloc[:mid]
-    right = df.iloc[mid:]
-    if kind == "high":
-        i1 = int(left["high"].astype(float).idxmax())
-        i2 = int(right["high"].astype(float).idxmax())
-        y1 = float(df.loc[i1, "high"])
-        y2 = float(df.loc[i2, "high"])
-    else:
-        i1 = int(left["low"].astype(float).idxmin())
-        i2 = int(right["low"].astype(float).idxmin())
-        y1 = float(df.loc[i1, "low"])
-        y2 = float(df.loc[i2, "low"])
-    if abs(i2 - i1) < 5:
-        return None
-    return i1, y1, i2, y2
+    right = df.iloc[n // 2 :]
+    if kind == "low":
+        i = int(right["low"].astype(float).idxmin())
+        p = float(df.loc[i, "low"])
+        atr = float(df["atr"].iloc[-1]) if "atr" in df.columns and not pd.isna(df["atr"].iloc[-1]) else p * 0.008
+        return p - atr * 0.15, p + atr * 0.55, max(0, i - 8), min(n - 1, i + 18)
+    i = int(right["high"].astype(float).idxmax())
+    p = float(df.loc[i, "high"])
+    atr = float(df["atr"].iloc[-1]) if "atr" in df.columns and not pd.isna(df["atr"].iloc[-1]) else p * 0.008
+    return p - atr * 0.55, p + atr * 0.15, max(0, i - 8), min(n - 1, i + 18)
 
 
 def render_candle_png(
@@ -140,12 +128,10 @@ def render_candle_png(
     bars: int | None = None,
     timeframe: str | None = None,
 ) -> bytes | None:
-    """Dark TV-like chart. OHLC/объём/даты = Bybit; трендлайны = авто по экстремумам."""
     tf = timeframe or RENDER_TF
-    n_bars = int(bars if bars is not None else RENDER_BARS)
-    n_bars = max(60, min(200, n_bars))
+    n_bars = max(60, min(200, int(bars if bars is not None else RENDER_BARS)))
     raw = None
-    for try_tf in (tf, "4h", "1h"):
+    for try_tf in (tf, "1h", "4h"):
         raw = fetch_ohlcv_raw(symbol, try_tf, limit=max(n_bars + 30, 100), exchange_id=exchange_id)
         if raw and len(raw) >= 40:
             tf = try_tf
@@ -161,20 +147,28 @@ def render_candle_png(
     scale = 2
     W = max(1000, CHART_WIDTH) * scale
     H = max(560, CHART_HEIGHT) * scale
-    pad_l, pad_r, pad_t, pad_b = 18 * scale, 78 * scale, 52 * scale, 36 * scale
-    vol_h = int(H * 0.14)
-    plot_h = H - pad_t - pad_b - vol_h - 8 * scale
+    pad_l, pad_r, pad_t, pad_b = 14 * scale, 88 * scale, 44 * scale, 28 * scale
+    vol_h = int(H * 0.11)
+    plot_h = H - pad_t - pad_b - vol_h - 6 * scale
     plot_w = W - pad_l - pad_r
-    vol_top = pad_t + plot_h + 6 * scale
+    vol_top = pad_t + plot_h + 4 * scale
 
     highs = df["high"].astype(float)
     lows = df["low"].astype(float)
     closes = df["close"].astype(float)
     vols = df["volume"].astype(float)
 
+    lv = levels or {}
     y_min = float(lows.min())
     y_max = float(highs.max())
-    pad_y = (y_max - y_min) * 0.06 or y_max * 0.01
+    for k in ("support", "resistance", "invalidation", "target_1", "target_2"):
+        try:
+            if lv.get(k) is not None:
+                y_min = min(y_min, float(lv[k]))
+                y_max = max(y_max, float(lv[k]))
+        except (TypeError, ValueError):
+            pass
+    pad_y = (y_max - y_min) * 0.07 or y_max * 0.01
     y_min -= pad_y
     y_max += pad_y
     if y_max <= y_min:
@@ -187,28 +181,32 @@ def render_candle_png(
         n = max(1, len(df) - 1)
         return int(pad_l + (float(i) / n) * plot_w)
 
-    bg = (19, 23, 34)
-    grid = (42, 46, 57)
-    text_muted = (120, 130, 150)
-    text_main = (209, 212, 220)
-    green = (8, 153, 129)
-    red = (242, 54, 69)
-    line_blue = (41, 98, 255)
+    # TB palette
+    bg = (0, 0, 0)
+    grid = (28, 28, 32)
+    text_muted = (140, 140, 150)
+    text_main = (220, 220, 225)
+    bull = (90, 160, 255)       # blue up
+    bear = (230, 230, 235)      # white down
+    zone_c = (70, 70, 78)
+    orange = (255, 152, 0)
+    path_g = (46, 204, 113)
+    badge_now = (230, 230, 235)
 
     img = Image.new("RGB", (W, H), bg)
     draw = ImageDraw.Draw(img)
     font_xs = _font(12 * scale)
     font_sm = _font(13 * scale)
-    font_lg = _font(16 * scale, bold=True)
-    font_price = _font(13 * scale, bold=True)
-    font_wm = _font(22 * scale)
+    font_lg = _font(15 * scale, bold=True)
+    font_price = _font(12 * scale, bold=True)
+    font_wm = _font(20 * scale)
 
+    # grid
     for g in range(6):
         frac = g / 5
         yy = pad_t + int(plot_h * frac)
         draw.line([(pad_l, yy), (W - pad_r, yy)], fill=grid, width=scale)
-        price = y_max - (y_max - y_min) * frac
-        draw.text((W - pad_r + 8 * scale, yy - 7 * scale), _fmt(price), font=font_xs, fill=text_muted)
+        draw.text((W - pad_r + 8 * scale, yy - 7 * scale), _fmt(y_max - (y_max - y_min) * frac), font=font_xs, fill=text_muted)
 
     ts_col = df["timestamp"]
     step = max(1, len(df) // 6)
@@ -223,99 +221,139 @@ def render_candle_png(
         except Exception:
             lbl = ""
         if lbl:
-            draw.text((x - 14 * scale, H - 22 * scale), lbl, font=font_xs, fill=text_muted)
+            draw.text((x - 12 * scale, H - 20 * scale), lbl, font=font_xs, fill=text_muted)
 
+    # grey zones (liquidity / demand-supply)
+    def paint_zone(lo: float, hi: float, i0: int, i1: int, alpha: float = 0.35):
+        x0, x1 = xx(i0), xx(i1)
+        y0, y1 = yx(hi), yx(lo)
+        if x1 < x0:
+            x0, x1 = x1, x0
+        if y1 < y0:
+            y0, y1 = y1, y0
+        # simulate alpha by blending onto black
+        fill = _blend(bg, zone_c, alpha)
+        draw.rectangle([x0, y0, max(x0 + 2, x1), max(y0 + 2, y1)], fill=fill)
+
+    z_low = _zone_band(df, "low")
+    z_high = _zone_band(df, "high")
+    if z_low:
+        paint_zone(*z_low, alpha=0.45)
+    if z_high:
+        paint_zone(*z_high, alpha=0.35)
+    # zone from scanner support/resistance around last third
+    try:
+        if lv.get("support") is not None:
+            s = float(lv["support"])
+            atr = float(df["atr"].iloc[-1]) if not pd.isna(df["atr"].iloc[-1]) else s * 0.01
+            paint_zone(s - atr * 0.2, s + atr * 0.5, int(len(df) * 0.55), len(df) - 1, 0.4)
+        if lv.get("target_1") is not None:
+            t = float(lv["target_1"])
+            atr = float(df["atr"].iloc[-1]) if not pd.isna(df["atr"].iloc[-1]) else t * 0.01
+            paint_zone(t - atr * 0.45, t + atr * 0.2, int(len(df) * 0.7), len(df) - 1 + 5, 0.3)
+    except (TypeError, ValueError):
+        pass
+
+    # volume (subtle)
     vmax = float(vols.max()) or 1.0
-    candle_gap = plot_w / max(1, len(df))
-    candle_w = max(2 * scale, int(candle_gap * 0.68))
+    candle_w = max(2 * scale, int((plot_w / max(1, len(df))) * 0.65))
     for i, row in df.iterrows():
         o, c = float(row["open"]), float(row["close"])
-        v = float(row["volume"])
         x = xx(int(i))
-        vh = int((v / vmax) * (vol_h - 4 * scale))
-        vol_color = (8, 90, 80) if c >= o else (120, 40, 50)
-        draw.rectangle(
-            [x - candle_w // 2, vol_top + vol_h - vh, x + candle_w // 2, vol_top + vol_h],
-            fill=vol_color,
-        )
+        vh = int((float(row["volume"]) / vmax) * (vol_h - 3 * scale))
+        vc = (40, 70, 110) if c >= o else (90, 90, 95)
+        draw.rectangle([x - candle_w // 2, vol_top + vol_h - vh, x + candle_w // 2, vol_top + vol_h], fill=vc)
 
-    # Трендлайны через 2 реальных экстремума, продление в пикселях (наклон без искажения)
-    for kind in ("high", "low"):
-        tl = _macro_trendline(df, kind)
-        if not tl:
-            continue
-        i1, y1, i2, y2 = tl
-        x1, yy1 = xx(i1), yx(y1)
-        x2, yy2 = xx(i2), yx(y2)
-        if x2 == x1:
-            continue
-        slope_px = (yy2 - yy1) / (x2 - x1)
-        x_left, x_right = pad_l, W - pad_r
-        y_left = yy1 + slope_px * (x_left - x1)
-        y_right = yy2 + slope_px * (x_right - x2)
-        draw.line([(x_left, y_left), (x_right, y_right)], fill=line_blue, width=2 * scale)
-
-    inv = (levels or {}).get("invalidation")
-    if inv is not None:
-        try:
-            p = float(inv)
-            if y_min <= p <= y_max:
-                y = yx(p)
-                x0 = pad_l
-                while x0 < W - pad_r:
-                    draw.line([(x0, y), (min(x0 + 8 * scale, W - pad_r), y)], fill=(200, 60, 70), width=scale)
-                    x0 += 14 * scale
-        except (TypeError, ValueError):
-            pass
-
+    # candles blue / white
     for i, row in df.iterrows():
         o, h, l, c = float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"])
         x = xx(int(i))
-        color = green if c >= o else red
+        color = bull if c >= o else bear
         draw.line([(x, yx(h)), (x, yx(l))], fill=color, width=scale)
         y1, y2 = yx(max(o, c)), yx(min(o, c))
         if y2 <= y1:
             y2 = y1 + scale
         draw.rectangle([x - candle_w // 2, y1, x + candle_w // 2, y2], fill=color)
 
-    last = df.iloc[-1]
+    # green projected path → target
+    last_i = len(df) - 1
     last_c = float(closes.iloc[-1])
-    last_o = float(last["open"])
-    py = yx(last_c)
-    badge = _fmt(last_c)
-    bw = int(draw.textlength(badge, font=font_price)) + 14 * scale
-    bh = 22 * scale
-    badge_color = green if last_c >= last_o else red
-    draw.rounded_rectangle(
-        [W - pad_r + 4 * scale, py - bh // 2, W - pad_r + 4 * scale + bw, py + bh // 2],
-        radius=3 * scale,
-        fill=badge_color,
-    )
-    draw.text((W - pad_r + 11 * scale, py - 8 * scale), badge, font=font_price, fill=(255, 255, 255))
-    x0 = xx(len(df) - 1)
-    while x0 < W - pad_r:
-        draw.line([(x0, py), (min(x0 + 6 * scale, W - pad_r), py)], fill=badge_color, width=scale)
-        x0 += 11 * scale
+    try:
+        t1 = float(lv["target_1"]) if lv.get("target_1") is not None else last_c * 1.02
+    except (TypeError, ValueError):
+        t1 = last_c * 1.02
+    # zigzag: slight dip then push to target (visual scenario, not prediction claim on chart)
+    mid_i = last_i + (len(df) * 0.08)
+    tip_i = last_i + (len(df) * 0.18)
+    dip = last_c * 0.997
+    path = [
+        (xx(last_i), yx(last_c)),
+        (xx(min(last_i + 3, last_i + 1)), yx(dip)),
+        (xx(mid_i), yx((dip + t1) / 2)),
+        (xx(tip_i), yx(t1)),
+    ]
+    # clamp x to plot
+    path = [(min(max(p[0], pad_l), W - pad_r), p[1]) for p in path]
+    draw.line(path, fill=path_g, width=3 * scale)
+    # arrow head
+    ax, ay = path[-1]
+    draw.polygon([(ax, ay), (ax - 8 * scale, ay + 5 * scale), (ax - 8 * scale, ay - 5 * scale)], fill=path_g)
 
-    o = float(last["open"]); h = float(last["high"]); l = float(last["low"]); c = float(last["close"])
+    def price_badge(price: float, color: tuple, text_color=(0, 0, 0)):
+        y = yx(price)
+        label = _fmt(price)
+        bw = int(draw.textlength(label, font=font_price)) + 12 * scale
+        bh = 20 * scale
+        draw.rounded_rectangle(
+            [W - pad_r + 4 * scale, y - bh // 2, W - pad_r + 4 * scale + bw, y + bh // 2],
+            radius=3 * scale,
+            fill=color,
+        )
+        draw.text((W - pad_r + 10 * scale, y - 7 * scale), label, font=font_price, fill=text_color)
+        # hairline
+        x0 = xx(last_i)
+        while x0 < W - pad_r:
+            draw.line([(x0, y), (min(x0 + 5 * scale, W - pad_r), y)], fill=color, width=scale)
+            x0 += 10 * scale
+
+    # orange key levels + current
+    try:
+        if lv.get("support") is not None:
+            price_badge(float(lv["support"]), orange, (0, 0, 0))
+        if lv.get("invalidation") is not None and lv.get("support") is not None:
+            if abs(float(lv["invalidation"]) - float(lv["support"])) / last_c > 0.003:
+                price_badge(float(lv["invalidation"]), orange, (0, 0, 0))
+        if lv.get("target_1") is not None:
+            price_badge(float(lv["target_1"]), orange, (0, 0, 0))
+    except (TypeError, ValueError):
+        pass
+    price_badge(last_c, badge_now, (20, 20, 20))
+
+    # header
+    last = df.iloc[-1]
+    o, h, l, c = float(last["open"]), float(last["high"]), float(last["low"]), float(last["close"])
     chg = c - o
     chg_pct = (chg / o * 100) if o else 0
-    chg_color = green if chg >= 0 else red
     title = f"{_pretty_name(symbol)} · {tf} · {exchange_id.capitalize()}"
-    draw.text((pad_l, 10 * scale), title, font=font_lg, fill=text_main)
+    draw.text((pad_l, 8 * scale), title, font=font_lg, fill=text_main)
     ohlc = f"O{_fmt(o)}  H{_fmt(h)}  L{_fmt(l)}  C{_fmt(c)}  "
-    draw.text((pad_l, 30 * scale), ohlc, font=font_sm, fill=text_muted)
-    chg_s = f"{chg:+.2f} ({chg_pct:+.2f}%)" if c >= 1 else f"{chg:+.6f} ({chg_pct:+.2f}%)"
-    draw.text((pad_l + draw.textlength(ohlc, font=font_sm), 30 * scale), chg_s, font=font_sm, fill=chg_color)
+    draw.text((pad_l, 28 * scale), ohlc, font=font_sm, fill=text_muted)
+    chg_col = bull if chg >= 0 else (200, 80, 90)
+    draw.text(
+        (pad_l + draw.textlength(ohlc, font=font_sm), 28 * scale),
+        f"{chg:+.2f} ({chg_pct:+.2f}%)" if c >= 1 else f"{chg_pct:+.2f}%",
+        font=font_sm,
+        fill=chg_col,
+    )
 
     if WATERMARK:
         tw = draw.textlength(WATERMARK, font=font_wm)
         wx = int((W - tw) / 2)
-        wy = int(pad_t + plot_h * 0.52)
-        draw.text((wx + scale, wy + scale), WATERMARK, font=font_wm, fill=(28, 32, 44))
-        draw.text((wx, wy), WATERMARK, font=font_wm, fill=(72, 80, 100))
+        wy = int(pad_t + plot_h * 0.48)
+        draw.text((wx + scale, wy + scale), WATERMARK, font=font_wm, fill=(18, 18, 22))
+        draw.text((wx, wy), WATERMARK, font=font_wm, fill=(55, 55, 65))
 
-    draw.text((pad_l, H - 18 * scale), "TV", font=font_xs, fill=(60, 68, 88))
+    draw.text((pad_l, H - 16 * scale), "TV", font=font_xs, fill=(50, 50, 55))
 
     out = img.resize((W // scale, H // scale), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
