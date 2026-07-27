@@ -7,7 +7,12 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
+
+# railway run тянет DATA_DIR=/data — локально пишем рядом со скриптом
+if not os.path.isdir(os.getenv("DATA_DIR") or ""):
+    os.environ["DATA_DIR"] = os.path.dirname(os.path.abspath(__file__)) or "."
 
 import database as db
 import market_outlook
