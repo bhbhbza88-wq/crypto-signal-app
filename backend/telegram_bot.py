@@ -1021,9 +1021,12 @@ async def send_daily_summary(stats: dict):
 
 async def forward_last_signal_to_news() -> bool:
     """
-    Пересылает последнее опубликованное сообщение из премиум канала в news канал.
-    Ограничение: 1 раз в день (проверяется по UTC дате).
-    Возвращает True при успехе, False при ошибке.
+    Копирует последнее ТВХ-сообщение из премиум канала в news канал.
+
+    Важно: используем copyMessage (не forwardMessage) — иначе Telegram
+    ставит «Переслано из…» и НЕ показывает кнопку «Комментарии» у поста,
+    даже если к каналу привязан discussion-чат.
+    Ограничение: 1 раз в день (UTC).
     """
     global _last_premium_message, _last_forward_date
     
@@ -1059,7 +1062,7 @@ async def forward_last_signal_to_news() -> bool:
     if not news_channel.startswith("@") and not news_channel.startswith("-"):
         news_channel = f"@{news_channel.lstrip('@')}"
     
-    print(f"[telegram_bot] пересылаем сообщение {msg_id} из {chat_id} в {news_channel}")
+    print(f"[telegram_bot] копируем сообщение {msg_id} из {chat_id} → {news_channel} (copyMessage)")
     
     payload = {
         "chat_id": news_channel,
@@ -1067,24 +1070,14 @@ async def forward_last_signal_to_news() -> bool:
         "message_id": msg_id,
     }
     
-    data = await _api("forwardMessage", payload)
+    # Только copyMessage — нативная публикация канала → есть «Комментарии»
+    data = await _api("copyMessage", payload)
     
     if data and data.get("ok"):
-        print(f"[telegram_bot] ✅ сообщение переслано в {news_channel}")
-        # Очищаем, чтобы не пересылать это сообщение снова
+        print(f"[telegram_bot] ✅ сообщение скопировано в {news_channel} (без 'Forwarded')")
         _last_premium_message = None
         _last_forward_date = today
         return True
-    else:
-        print(f"[telegram_bot] ❌ ошибка пересылки: {data}")
-        # Fallback на copyMessage если forwardMessage не сработал
-        print("[telegram_bot] пробуем copyMessage...")
-        copy_data = await _api("copyMessage", payload)
-        if copy_data and copy_data.get("ok"):
-            print(f"[telegram_bot] ✅ сообщение скопировано в {news_channel} (без пометки 'Forwarded')")
-            _last_premium_message = None
-            _last_forward_date = today
-            return True
-        else:
-            print(f"[telegram_bot] ❌ copyMessage тоже не сработал: {copy_data}")
-            return False
+
+    print(f"[telegram_bot] ❌ copyMessage fail: {data}")
+    return False
