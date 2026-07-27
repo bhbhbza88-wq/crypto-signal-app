@@ -138,7 +138,7 @@ def _draw_direction_path(
         return
     dist = abs(target - last_c) / last_c
     if dist < 0.003 or dist > 0.12:
-        # ????????? ?????? ???? ±1.5%
+        # soft fallback target ~1.5%
         target = last_c * (1.015 if bias != "short" else 0.985)
 
     going_up = bias != "short"
@@ -381,7 +381,7 @@ def render_candle_png(
     chg = c - o
     chg_pct = (chg / o * 100) if o else 0
     chg_color = green if chg >= 0 else red
-    title = f"{_pretty_name(symbol)} · {tf} · {exchange_id.capitalize()}"
+    title = f"{_pretty_name(symbol)} ï¿½ {tf} ï¿½ {exchange_id.capitalize()}"
     draw.text((pad_l, 10 * scale), title, font=font_lg, fill=text_main)
     ohlc = f"O{_fmt(o)}  H{_fmt(h)}  L{_fmt(l)}  C{_fmt(c)}  "
     draw.text((pad_l, 30 * scale), ohlc, font=font_sm, fill=text_muted)
