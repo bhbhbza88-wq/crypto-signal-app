@@ -425,6 +425,7 @@ async def _publish_row(row: dict, *, count_toward_cap: bool = True) -> bool:
         row["symbol"],
         exchange_id=row.get("exchange") or "bybit",
         levels=levels,
+        bias=ai.get("bias") or "long",
     )
     text = _format_post(row, ai, chart_tag=chart_tag)
     try:
