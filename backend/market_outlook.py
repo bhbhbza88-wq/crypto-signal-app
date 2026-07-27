@@ -37,9 +37,9 @@ ENABLED = (os.getenv("MARKET_OUTLOOK_ENABLED", "1") or "1").strip().lower() in (
     "1", "true", "yes", "on",
 )
 INTERVAL_SEC = int(os.getenv("MARKET_OUTLOOK_INTERVAL_SEC", "10800") or "10800")  # 3h
-MAX_PER_DAY = int(os.getenv("MARKET_OUTLOOK_MAX_PER_DAY", "4") or "4")
-MAX_PER_RUN = int(os.getenv("MARKET_OUTLOOK_MAX_PER_RUN", "2") or "2")
-MIN_INTERNAL_SCORE = float(os.getenv("MARKET_OUTLOOK_MIN_SCORE", "55") or "55")
+MAX_PER_DAY = int(os.getenv("MARKET_OUTLOOK_MAX_PER_DAY", "5") or "5")
+MAX_PER_RUN = int(os.getenv("MARKET_OUTLOOK_MAX_PER_RUN", "1") or "1")
+MIN_INTERNAL_SCORE = float(os.getenv("MARKET_OUTLOOK_MIN_SCORE", "65") or "65")
 SYMBOL_COOLDOWN_H = float(os.getenv("MARKET_OUTLOOK_SYMBOL_COOLDOWN_H", "18") or "18")
 WORKERS = int(os.getenv("MARKET_OUTLOOK_WORKERS", "8") or "8")
 EXCHANGE_ID = (os.getenv("MARKET_OUTLOOK_EXCHANGE", "bybit") or "bybit").strip().lower()
