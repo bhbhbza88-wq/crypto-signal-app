@@ -51,24 +51,33 @@ _SETTING_DAY = "outlook_posts_day"       # "YYYY-MM-DD:count"
 _SETTING_RECENT = "outlook_recent_syms"  # JSON { "BTC/USDT": unix_ts, ... }
 
 OUTLOOK_SYSTEM = (
-    "You write Fed/CryptoCapo-style coin ANALYSIS posts for Telegram (NOWICKI).\n"
-    "Tone: calm, specific, technical narrative — NOT a signal call, NOT hype.\n"
-    "FORBIDDEN: win-rate %, 'guaranteed', moon/100x, emoji spam, VIP/referral CTAs, "
-    "'buy now', fake certainty.\n"
-    "Language: English (same style as Fed Russian Insiders coin analyses).\n"
-    "Use ONLY prices/levels from the input facts — do not invent levels.\n"
-    "Return JSON only:\n"
+    "Ты пишешь разборы монет для Telegram-канала NOWICKI.\n"
+    "Пиши как живой трейдер в чат: по-русски, спокойно, конкретно, без канцелярита.\n"
+    "\n"
+    "КАК ЗВУЧИТ ЧЕЛОВЕК (делай так):\n"
+    "- короткие фразы, можно «по сути», «смотри», «если снесут», «пока держит»\n"
+    "- смешанный тон: чуть небрежно + по делу, без пафоса\n"
+    "- объясняй структуру своими словами (канал, трендлайн, ретест, диапазон)\n"
+    "- уровни вплетай в текст естественно, не списком-роботом\n"
+    "\n"
+    "КАК ЗВУЧИТ БОТ (запрещено):\n"
+    "- «на основании анализа», «следует отметить», «в заключение», «данный актив»\n"
+    "- «вероятность роста», «рекомендую к покупке», «сигнал на вход»\n"
+    "- шаблонные EN-кальки, эмодзи-спам, CAPS, VIP/рефки, «друзья»\n"
+    "- Ideal/perfect/guaranteed / moon / 100x\n"
+    "\n"
+    "Язык: только русский. Цены/уровни бери ТОЛЬКО из фактов — не выдумывай.\n"
+    "Верни JSON:\n"
     "{\n"
-    '  "narrative": "2-4 short paragraphs: where price is, what structure did '
-    '(trendline/range/break/retest), what matters now",\n'
-    '  "targets": "one line with upside levels to watch, e.g. $0.10 then $0.11",\n'
-    '  "invalidation": "one line: breakout fails / thesis breaks below $X → then $Y",\n'
-    '  "insight": "one short closing observation (optional)",\n'
+    '  "title": "короткий заголовок с тикером, напр. $SOL — отбой от нижней границы",\n'
+    '  "body": "весь текст поста 4–8 коротких абзацев: где цена, что по структуре, '\n'
+    'куда смотреть вверх, где идея ломается, одна живая мысль в конце. '\n'
+    'Без markdown. Можно пустые строки между абзацами.",\n'
     '  "score_1_10": int,\n'
     '  "bias": "long"|"neutral"|"short"\n'
     "}\n"
-    "score_1_10 = confidence in the SETUP (structure quality), not probability of profit.\n"
-    "Keep total text tight — caption-friendly (~700-900 chars before formatting)."
+    "score_1_10 — насколько чистая структура (не вероятность профита).\n"
+    "body roughly 650–950 символов."
 )
 
 
@@ -353,22 +362,25 @@ def _facts_block(row: dict) -> str:
 
 async def _ai_write_post(row: dict) -> dict | None:
     user = (
-        "Write a Fed-style ANALYSIS from these facts. Do not invent prices.\n\n"
+        "Напиши живой русскоязычный разбор по фактам ниже. "
+        "Цены не выдумывай. Не пиши как отчёт бота.\n\n"
         + _facts_block(row)
     )
     try:
         verdict = await ai_client.fast_json_completion(
             system=OUTLOOK_SYSTEM,
             user_text=user,
-            max_tokens=650,
+            max_tokens=700,
+            temperature=0.72,
         )
     except Exception as e:
         print(f"[market_outlook] AI fail {row['symbol']}: {e}", flush=True)
         return None
     if not isinstance(verdict, dict):
         return None
-    narrative = (verdict.get("narrative") or verdict.get("body") or "").strip()
-    if not narrative:
+    body = (verdict.get("body") or verdict.get("narrative") or "").strip()
+    title = (verdict.get("title") or "").strip()
+    if not body:
         return None
     try:
         s10 = int(verdict.get("score_1_10") or round(row["score"] / 10))
@@ -379,42 +391,32 @@ async def _ai_write_post(row: dict) -> dict | None:
     if bias not in ("long", "short", "neutral"):
         bias = "neutral"
     return {
-        "narrative": narrative,
-        "targets": (verdict.get("targets") or "").strip(),
-        "invalidation": (verdict.get("invalidation") or "").strip(),
-        "insight": (verdict.get("insight") or "").strip(),
+        "title": title,
+        "body": body,
         "score_1_10": s10,
         "bias": bias,
     }
 
 
 def _format_post(row: dict, ai: dict, chart_tag: str = "") -> str:
-    """Fed-style: $TICKER ANALYSIS + narrative + targets + invalidation."""
+    """Русский пост: заголовок + живой текст, минимум «бот-футера»."""
     coin = row["symbol"].replace("/USDT", "")
-    price = _fmt_price(row["close"])
+    title = (ai.get("title") or "").strip()
+    if not title:
+        title = f"${coin} — разбор"
+    if not title.startswith("$"):
+        title = f"${coin} — {title}"
+    body = (ai.get("body") or "").strip()
+    # чуть подчистим AI-артефакты
+    for bad in ("На основании анализа", "Следует отметить", "В заключение", "Данный актив"):
+        body = body.replace(bad, "")
     parts = [
-        f"<b>${coin} ANALYSIS</b>",
+        f"<b>{title}</b>",
         "———————",
         "",
-        f"Trading around <b>${price}</b>.",
+        body,
         "",
-        ai["narrative"],
-    ]
-    targets = ai.get("targets") or (
-        f"${_fmt_price(row.get('target_1') or row['resistance'])} then "
-        f"${_fmt_price(row.get('target_2') or row['resistance'])}"
-    )
-    inval = ai.get("invalidation") or (
-        f"thesis breaks below ${_fmt_price(row['invalidation'])}"
-    )
-    parts += ["", f"<b>Levels to watch:</b> {targets}", f"<b>Invalidation:</b> {inval}"]
-    if ai.get("insight"):
-        parts += ["", ai["insight"]]
-    src = "TradingView" if chart_tag == "tradingview" else "Bybit 1H"
-    parts += [
-        "",
-        f"<i>Setup score {ai['score_1_10']}/10 · BTC {row.get('btc_phase') or '—'} · {src}</i>",
-        "<i>Not an entry signal. DYOR / own risk.</i>",
+        "<i>Не сигнал входа — просто разбор. Риск на тебе.</i>",
     ]
     return "\n".join(parts)[:3900]
 

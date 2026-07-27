@@ -345,10 +345,12 @@ async def fast_json_completion(
     user_text: str,
     max_tokens: int = 180,
     model: str | None = None,
+    temperature: float = 0.0,
 ) -> dict:
     """Дешёвый JSON (парсинг сигналов и прочий structured output)."""
     sys = system.rstrip() + "\n\nОтветь ТОЛЬКО валидным JSON-объектом. Без markdown и пояснений."
     use_model = (model or MODEL_FAST).strip()
+    temp = float(temperature)
 
     if openrouter_configured() or (GROQ_API_KEY and not claude_api_key()):
         # OpenRouter (или Groq) — OpenAI-совместимый путь
@@ -359,7 +361,7 @@ async def fast_json_completion(
                 {"role": "user", "content": user_text},
             ],
             max_tokens=max_tokens,
-            temperature=0.0,
+            temperature=temp,
             timeout=40,
         )
         return parse_json_content(raw)
@@ -369,7 +371,7 @@ async def fast_json_completion(
         user_content=user_text,
         model=use_model,
         max_tokens=max_tokens,
-        temperature=0.0,
+        temperature=temp,
     )
     return parse_json_content(raw)
 
