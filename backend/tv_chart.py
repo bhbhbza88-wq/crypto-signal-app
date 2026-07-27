@@ -407,12 +407,12 @@ def _build_zones(
         max_dist = max(7.0, (last_c * 0.08) / atr)
         if dist > max_dist:
             return None
-        # Prefer a clear band (~1-3 ATR), not a hairline under last price.
-        sweet = -abs(dist - 2.0) * 0.9
-        if 0.9 <= dist <= 3.5:
-            sweet += 1.6
-        if dist < 0.35:
-            sweet -= 0.8  # too glued to price unless it's the only option
+        # Prefer a clear band (~1.3-4 ATR), not a hairline under last price.
+        sweet = -abs(dist - 2.3) * 0.9
+        if 1.2 <= dist <= 4.0:
+            sweet += 1.8
+        if dist < 0.8:
+            sweet -= 1.4  # too glued to price unless it's the only option
         recency = i / max(1, n - 1)
         return sweet + recency * 1.2
 

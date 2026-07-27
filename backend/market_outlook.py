@@ -392,15 +392,37 @@ def _scan_symbol(symbol: str) -> dict | None:
     near_high = (hi_24 - close) / close < 0.008 if hi_24 > 0 else False
     breakout = bool(near_high and vol_trend >= 1.35 and chg_24h > 1.5)
 
-    # levels
+    # levels — keep meaningful air from price (not hairline 24h extremes)
     ema21 = float(last["ema21"]) if not pd.isna(last["ema21"]) else close
     ema50 = float(last["ema50"]) if not pd.isna(last["ema50"]) else close
-    support = min(lo_24, ema21)
-    resistance = hi_24
-    invalidation = min(ema50, support) * 0.995
-    # Fed-style levels to watch
     atr = float(last["atr"])
-    target_1 = max(resistance, close + atr)
+    window48 = df.iloc[-48:] if len(df) >= 48 else df
+    hi_48 = float(window48["high"].max())
+    lo_48 = float(window48["low"].min())
+    # Prefer ~1.3 ATR / ~1.2% of room so text/chart levels don't sit on price.
+    min_air = max(atr * 1.3, close * 0.012)
+
+    struct_below = sorted(
+        (float(p) for p in (lo_24, lo_48, ema21, ema50) if p < close - min_air * 0.95),
+        reverse=True,
+    )
+    if struct_below:
+        support = struct_below[0]
+    else:
+        support = close - max(min_air, atr * 1.6)
+
+    struct_above = sorted(
+        float(p) for p in (hi_24, hi_48) if p > close + min_air * 0.95
+    )
+    if struct_above:
+        resistance = struct_above[0]
+    else:
+        resistance = close + max(min_air, atr * 1.6)
+
+    invalidation = min(ema50, support) * 0.995
+    if close - invalidation < min_air:
+        invalidation = close - min_air
+    target_1 = max(resistance, close + atr * 1.5)
     target_2 = target_1 + atr * 1.2
     fail_zone = invalidation - atr * 0.5
 
