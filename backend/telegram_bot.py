@@ -357,36 +357,34 @@ def _channel_cta():
 
 
 async def _attach_discussion_cta(chat_id: int | str, message_id: int) -> bool:
-    """Вешает Сайт/Бот на дубликат поста в чате комментариев."""
+    """В чате комментов: ответ «👇» и под ним кнопки Сайт / Бот."""
     if not chat_id or not message_id:
         return False
     data = await _api(
-        "editMessageReplyMarkup",
-        {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "reply_markup": _json.dumps(_channel_cta()),
-        },
-    )
-    if data and data.get("ok"):
-        print(f"[telegram_bot] CTA в комменты chat={chat_id} msg={message_id}")
-        return True
-    # Fallback: ответ с кнопками, если edit авто-форварда запрещён
-    data2 = await _api(
         "sendMessage",
         {
             "chat_id": chat_id,
             "reply_to_message_id": message_id,
-            "text": "🔗",
+            "text": "👇",
+            "reply_markup": _channel_cta(),
+            "disable_notification": True,
+        },
+    )
+    if data and data.get("ok"):
+        print(f"[telegram_bot] CTA 👇 chat={chat_id} reply_to={message_id}")
+        return True
+    # без reply_to — если авто-форвард ещё не виден боту
+    data2 = await _api(
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": "👇",
             "reply_markup": _channel_cta(),
             "disable_notification": True,
         },
     )
     ok = bool(data2 and data2.get("ok"))
-    print(
-        f"[telegram_bot] CTA fallback reply chat={chat_id} msg={message_id} "
-        f"edit_err={data} reply_ok={ok}"
-    )
+    print(f"[telegram_bot] CTA 👇 plain chat={chat_id} reply_err={data} ok={ok}")
     return ok
 
 
