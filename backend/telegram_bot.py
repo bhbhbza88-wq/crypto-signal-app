@@ -184,7 +184,11 @@ async def publish_signal_closed(text: str, reply_markup: dict | None = None, pho
     await _send_to(cid, text, reply_markup)
 
 
-async def publish_news(text: str, reply_markup: dict | None = None):
+async def publish_news(
+    text: str,
+    reply_markup: dict | None = None,
+    photo_png: bytes | None = None,
+):
     """Аналитика / outlook → канал новостей (бот должен быть админом)."""
     raw = (
         os.getenv("TELEGRAM_NEWS_TARGET_CHANNEL")
@@ -195,6 +199,28 @@ async def publish_news(text: str, reply_markup: dict | None = None):
         print("[telegram_bot] TELEGRAM_NEWS_TARGET_CHANNEL не задан — news skip")
         return
     cid = raw if raw.startswith("@") or raw.lstrip("-").isdigit() else f"@{raw.lstrip('@')}"
+    # Telegram caption limit 1024
+    caption = text if len(text) <= 1024 else (text[:1000].rstrip() + "…")
+    if photo_png:
+        try:
+            data = await _api(
+                "sendPhoto",
+                {
+                    "chat_id": cid,
+                    "caption": caption,
+                    "parse_mode": "HTML",
+                    "reply_markup": _json.dumps(reply_markup) if reply_markup else None,
+                },
+                files={"photo": ("chart.png", photo_png, "image/png")},
+            )
+            if data and data.get("ok"):
+                # если текст длиннее caption — добить вторым сообщением
+                if len(text) > 1024:
+                    await _send_to(cid, text)
+                return
+            print(f"[telegram_bot] publish_news photo fail: {data}", flush=True)
+        except Exception as e:
+            print(f"[telegram_bot] publish_news photo: {e}", flush=True)
     await _send_to(cid, text, reply_markup)
 
 

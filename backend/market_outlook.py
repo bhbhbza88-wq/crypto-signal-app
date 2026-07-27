@@ -51,18 +51,24 @@ _SETTING_DAY = "outlook_posts_day"       # "YYYY-MM-DD:count"
 _SETTING_RECENT = "outlook_recent_syms"  # JSON { "BTC/USDT": unix_ts, ... }
 
 OUTLOOK_SYSTEM = (
-    "Ты аналитик NOWICKI. Пишешь короткий разбор монеты для Telegram-канала.\n"
-    "Стиль: спокойный, конкретный, без хайпа и без обещаний прибыли.\n"
-    "ЗАПРЕЩЕНО: «вероятность роста XX%», «гарантированно», «100x», эмодзи-спам, "
-    "призывы срочно купить, реферальные коды.\n"
-    "Можно: структура (тренд/флэт), ключевые уровни, сценарий вверх, "
-    "что ломает идею (invalidation), score 1–10 как уверенность в сетапе "
-    "(не вероятность прибыли).\n"
-    "Язык: русский. HTML: только <b> и <i>, без других тегов.\n"
-    "Верни JSON:\n"
-    '{"headline": string, "body": string, "score_1_10": int, "bias": "long"|"neutral"|"short"}\n'
-    "headline: коротко, с тикером ($SOL — …). body: 4–7 коротких абзацев/строк, "
-    "до ~900 символов. Уровни бери ТОЛЬКО из входных данных, не выдумывай."
+    "You write Fed/CryptoCapo-style coin ANALYSIS posts for Telegram (NOWICKI).\n"
+    "Tone: calm, specific, technical narrative — NOT a signal call, NOT hype.\n"
+    "FORBIDDEN: win-rate %, 'guaranteed', moon/100x, emoji spam, VIP/referral CTAs, "
+    "'buy now', fake certainty.\n"
+    "Language: English (same style as Fed Russian Insiders coin analyses).\n"
+    "Use ONLY prices/levels from the input facts — do not invent levels.\n"
+    "Return JSON only:\n"
+    "{\n"
+    '  "narrative": "2-4 short paragraphs: where price is, what structure did '
+    '(trendline/range/break/retest), what matters now",\n'
+    '  "targets": "one line with upside levels to watch, e.g. $0.10 then $0.11",\n'
+    '  "invalidation": "one line: breakout fails / thesis breaks below $X → then $Y",\n'
+    '  "insight": "one short closing observation (optional)",\n'
+    '  "score_1_10": int,\n'
+    '  "bias": "long"|"neutral"|"short"\n'
+    "}\n"
+    "score_1_10 = confidence in the SETUP (structure quality), not probability of profit.\n"
+    "Keep total text tight — caption-friendly (~700-900 chars before formatting)."
 )
 
 
@@ -171,6 +177,11 @@ def _scan_symbol(symbol: str) -> dict | None:
     support = min(lo_24, ema21)
     resistance = hi_24
     invalidation = min(ema50, support) * 0.995
+    # Fed-style levels to watch
+    atr = float(last["atr"])
+    target_1 = max(resistance, close + atr)
+    target_2 = target_1 + atr * 1.2
+    fail_zone = invalidation - atr * 0.5
 
     # ── internal score 0–100 ──
     score = 40.0
@@ -234,6 +245,9 @@ def _scan_symbol(symbol: str) -> dict | None:
         "support": support,
         "resistance": resistance,
         "invalidation": invalidation,
+        "target_1": target_1,
+        "target_2": target_2,
+        "fail_zone": fail_zone,
         "score": round(score, 1),
     }
 
@@ -317,6 +331,7 @@ def _pick_shortlist(rows: list[dict], limit: int) -> list[dict]:
 def _facts_block(row: dict) -> str:
     return (
         f"symbol: {row['symbol']}\n"
+        f"ticker: ${row['symbol'].replace('/USDT', '')}\n"
         f"exchange: {row.get('exchange')} ({row.get('listings')})\n"
         f"price: {_fmt_price(row['close'])}\n"
         f"chg_24h_pct: {row['chg_24h']}\n"
@@ -326,7 +341,10 @@ def _facts_block(row: dict) -> str:
         f"ema21: {_fmt_price(row['ema21'])} ema50: {_fmt_price(row['ema50'])}\n"
         f"support: {_fmt_price(row['support'])}\n"
         f"resistance: {_fmt_price(row['resistance'])}\n"
+        f"target_1: {_fmt_price(row.get('target_1') or row['resistance'])}\n"
+        f"target_2: {_fmt_price(row.get('target_2') or row['resistance'])}\n"
         f"invalidation: {_fmt_price(row['invalidation'])}\n"
+        f"fail_zone: {_fmt_price(row.get('fail_zone') or row['invalidation'])}\n"
         f"internal_score_0_100: {row['score']}\n"
         f"btc_phase: {row.get('btc_phase')}\n"
         f"btc_meta: {json.dumps(row.get('btc_meta') or {}, ensure_ascii=False)}\n"
@@ -335,23 +353,22 @@ def _facts_block(row: dict) -> str:
 
 async def _ai_write_post(row: dict) -> dict | None:
     user = (
-        "Сделай разбор по фактам ниже. Уровни и цифры не меняй.\n\n"
+        "Write a Fed-style ANALYSIS from these facts. Do not invent prices.\n\n"
         + _facts_block(row)
     )
     try:
         verdict = await ai_client.fast_json_completion(
             system=OUTLOOK_SYSTEM,
             user_text=user,
-            max_tokens=520,
+            max_tokens=650,
         )
     except Exception as e:
         print(f"[market_outlook] AI fail {row['symbol']}: {e}", flush=True)
         return None
     if not isinstance(verdict, dict):
         return None
-    body = (verdict.get("body") or "").strip()
-    headline = (verdict.get("headline") or "").strip()
-    if not body:
+    narrative = (verdict.get("narrative") or verdict.get("body") or "").strip()
+    if not narrative:
         return None
     try:
         s10 = int(verdict.get("score_1_10") or round(row["score"] / 10))
@@ -361,26 +378,84 @@ async def _ai_write_post(row: dict) -> dict | None:
     bias = (verdict.get("bias") or "neutral").strip().lower()
     if bias not in ("long", "short", "neutral"):
         bias = "neutral"
-    return {"headline": headline, "body": body, "score_1_10": s10, "bias": bias}
+    return {
+        "narrative": narrative,
+        "targets": (verdict.get("targets") or "").strip(),
+        "invalidation": (verdict.get("invalidation") or "").strip(),
+        "insight": (verdict.get("insight") or "").strip(),
+        "score_1_10": s10,
+        "bias": bias,
+    }
 
 
-def _format_post(row: dict, ai: dict) -> str:
+def _format_post(row: dict, ai: dict, chart_tag: str = "") -> str:
+    """Fed-style: $TICKER ANALYSIS + narrative + targets + invalidation."""
     coin = row["symbol"].replace("/USDT", "")
-    headline = ai["headline"] or f"${coin} — outlook"
-    if not headline.startswith("$"):
-        headline = f"${coin} — {headline}"
-    score = ai["score_1_10"]
-    bias = ai["bias"]
-    bias_ru = {"long": "бычий", "short": "медвежий", "neutral": "нейтральный"}.get(bias, bias)
-    phase = row.get("btc_phase") or "—"
-    footer = (
-        f"\n\n<i>Score сетапа: {score}/10 · bias: {bias_ru}</i>"
-        f"\n<i>BTC phase: {phase} · data: {row.get('exchange', 'bybit')} 1h</i>"
-        f"\n<i>Не сигнал входа. Своё решение и риск — на тебе.</i>"
+    price = _fmt_price(row["close"])
+    parts = [
+        f"<b>${coin} ANALYSIS</b>",
+        "———————",
+        "",
+        f"Trading around <b>${price}</b>.",
+        "",
+        ai["narrative"],
+    ]
+    targets = ai.get("targets") or (
+        f"${_fmt_price(row.get('target_1') or row['resistance'])} then "
+        f"${_fmt_price(row.get('target_2') or row['resistance'])}"
     )
-    body = ai["body"].strip()
-    text = f"<b>{headline}</b>\n\n{body}{footer}"
-    return text[:3900]
+    inval = ai.get("invalidation") or (
+        f"thesis breaks below ${_fmt_price(row['invalidation'])}"
+    )
+    parts += ["", f"<b>Levels to watch:</b> {targets}", f"<b>Invalidation:</b> {inval}"]
+    if ai.get("insight"):
+        parts += ["", ai["insight"]]
+    src = "TradingView" if chart_tag == "tradingview" else "Bybit 1H"
+    parts += [
+        "",
+        f"<i>Setup score {ai['score_1_10']}/10 · BTC {row.get('btc_phase') or '—'} · {src}</i>",
+        "<i>Not an entry signal. DYOR / own risk.</i>",
+    ]
+    return "\n".join(parts)[:3900]
+
+
+async def _publish_row(row: dict, *, count_toward_cap: bool = True) -> bool:
+    import telegram_bot
+    import tv_chart
+
+    ai = await _ai_write_post(row)
+    if not ai:
+        return False
+    levels = {
+        "support": row.get("support"),
+        "resistance": row.get("resistance"),
+        "invalidation": row.get("invalidation"),
+        "ema21": row.get("ema21"),
+        "ema50": row.get("ema50"),
+        "target_1": row.get("target_1"),
+        "target_2": row.get("target_2"),
+    }
+    png, chart_tag = await asyncio.to_thread(
+        tv_chart.chart_for_symbol,
+        row["symbol"],
+        exchange_id=row.get("exchange") or "bybit",
+        levels=levels,
+    )
+    text = _format_post(row, ai, chart_tag=chart_tag)
+    try:
+        await telegram_bot.publish_news(text, photo_png=png)
+    except Exception as e:
+        print(f"[market_outlook] publish fail {row['symbol']}: {e}", flush=True)
+        return False
+    if count_toward_cap:
+        _remember_symbol(row["symbol"])
+        _bump_posts_today(1)
+    print(
+        f"[market_outlook] published {row['symbol']} "
+        f"score={row['score']} ai={ai['score_1_10']}/10 chart={chart_tag or 'none'}",
+        flush=True,
+    )
+    return True
 
 
 async def run_once() -> int:
@@ -408,29 +483,53 @@ async def run_once() -> int:
         print("[market_outlook] nothing passed filters", flush=True)
         return 0
 
-    import telegram_bot
-
     published = 0
     for row in shortlist:
-        ai = await _ai_write_post(row)
-        if not ai:
-            continue
-        text = _format_post(row, ai)
-        try:
-            await telegram_bot.publish_news(text)
-        except Exception as e:
-            print(f"[market_outlook] publish fail {row['symbol']}: {e}", flush=True)
-            continue
-        _remember_symbol(row["symbol"])
-        _bump_posts_today(1)
-        published += 1
-        print(
-            f"[market_outlook] published {row['symbol']} "
-            f"score={row['score']} ai={ai['score_1_10']}/10",
-            flush=True,
-        )
-        await asyncio.sleep(1.2)
+        if await _publish_row(row):
+            published += 1
+            await asyncio.sleep(1.2)
     return published
+
+
+async def publish_test(symbol: str | None = None) -> bool:
+    """Тестовый пост в канал (без day-cap / cooldown). Для итераций по стилю."""
+    rows = await asyncio.to_thread(scan_candidates)
+    if not rows:
+        print("[market_outlook] test: empty scan", flush=True)
+        return False
+    row = None
+    if symbol:
+        raw = symbol.upper().replace("-", "/").strip()
+        if raw.endswith("USDT") and "/" not in raw:
+            want = raw[:-4] + "/USDT"
+        elif "/USDT" in raw:
+            want = raw.split("/USDT")[0] + "/USDT"
+        else:
+            want = f"{raw}/USDT"
+        for r in rows:
+            if r["symbol"] == want:
+                row = r
+                break
+        if row is None:
+            one = await asyncio.to_thread(_scan_symbol, want)
+            if one:
+                try:
+                    import trend_strategy
+                    phase = await asyncio.to_thread(trend_strategy.get_market_phase)
+                except Exception:
+                    phase = None
+                row = _apply_btc_phase([one], phase)[0]
+    if row is None:
+        # лучший не на cooldown
+        picked = _pick_shortlist(rows, 1) or rows[:1]
+        row = picked[0]
+    close = float(row["close"])
+    res = float(row["resistance"])
+    row.setdefault("target_1", res if res > close else close * 1.03)
+    row.setdefault("target_2", float(row["target_1"]) * 1.06)
+    row.setdefault("fail_zone", float(row["invalidation"]) * 0.97)
+    print(f"[market_outlook] TEST post → {row['symbol']} score={row['score']}", flush=True)
+    return await _publish_row(row, count_toward_cap=False)
 
 
 async def run() -> None:
