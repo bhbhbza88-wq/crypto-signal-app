@@ -36,13 +36,17 @@ from data_layer import (
 ENABLED = (os.getenv("MARKET_OUTLOOK_ENABLED", "1") or "1").strip().lower() in (
     "1", "true", "yes", "on",
 )
-INTERVAL_SEC = int(os.getenv("MARKET_OUTLOOK_INTERVAL_SEC", "10800") or "10800")  # 3h
+INTERVAL_SEC = int(os.getenv("MARKET_OUTLOOK_INTERVAL_SEC", "300") or "300")  # 5m continuous scan
 MAX_PER_DAY = int(os.getenv("MARKET_OUTLOOK_MAX_PER_DAY", "5") or "5")
 MAX_PER_RUN = int(os.getenv("MARKET_OUTLOOK_MAX_PER_RUN", "1") or "1")
 MIN_INTERNAL_SCORE = float(os.getenv("MARKET_OUTLOOK_MIN_SCORE", "65") or "65")
+# Min hours between ANY posts (keeps 4–5/day evenly when scanning every 5m).
+MIN_GAP_H = float(os.getenv("MARKET_OUTLOOK_MIN_GAP_H", "2.5") or "2.5")
 SYMBOL_COOLDOWN_H = float(os.getenv("MARKET_OUTLOOK_SYMBOL_COOLDOWN_H", "18") or "18")
 WORKERS = int(os.getenv("MARKET_OUTLOOK_WORKERS", "8") or "8")
 EXCHANGE_ID = (os.getenv("MARKET_OUTLOOK_EXCHANGE", "bybit") or "bybit").strip().lower()
+
+_last_gap_skip_log_ts = 0.0
 
 TARGET = (
     os.getenv("TELEGRAM_NEWS_TARGET_CHANNEL")
@@ -335,6 +339,25 @@ def _on_cooldown(symbol: str) -> bool:
     if not prev:
         return False
     return (time.time() - float(prev["ts"])) < SYMBOL_COOLDOWN_H * 3600
+
+
+def _hours_since_any_post() -> float | None:
+    """Age of the most recent outlook post across all symbols (hours)."""
+    recent = _recent_posts()
+    if not recent:
+        return None
+    latest = max(float(v.get("ts") or 0) for v in recent.values())
+    if latest <= 0:
+        return None
+    return (time.time() - latest) / 3600.0
+
+
+def _global_gap_ok() -> bool:
+    """Enough time since the last post of any coin (spaces 4–5 posts/day)."""
+    age = _hours_since_any_post()
+    if age is None:
+        return True
+    return age >= max(0.25, MIN_GAP_H)
 
 
 def _infer_bias(row: dict) -> str:
@@ -905,6 +928,19 @@ async def run_once() -> int:
         print(f"[market_outlook] day cap ({MAX_PER_DAY}) reached", flush=True)
         return 0
 
+    if not _global_gap_ok():
+        global _last_gap_skip_log_ts
+        age = _hours_since_any_post()
+        now = time.time()
+        if now - _last_gap_skip_log_ts >= 1800:
+            print(
+                f"[market_outlook] skip: gap {age:.1f}h < {MIN_GAP_H}h "
+                f"(posts_today={_posts_today()}/{MAX_PER_DAY})",
+                flush=True,
+            )
+            _last_gap_skip_log_ts = now
+        return 0
+
     limit = min(MAX_PER_RUN, left_day)
     print(f"[market_outlook] scan… candidates={len(CANDIDATES)} limit={limit}", flush=True)
     rows = await asyncio.to_thread(scan_candidates)
@@ -920,7 +956,11 @@ async def run_once() -> int:
     )
     shortlist = _pick_shortlist(rows, limit)
     if not shortlist:
-        print("[market_outlook] nothing passed filters", flush=True)
+        print(
+            f"[market_outlook] no setup ≥{MIN_INTERNAL_SCORE} "
+            f"(best={top[0]['symbol']}={top[0]['score']})",
+            flush=True,
+        )
         return 0
 
     published = 0
@@ -989,7 +1029,8 @@ async def run() -> None:
 
     print(
         f"[market_outlook] start → @{TARGET} every {INTERVAL_SEC}s "
-        f"max/day={MAX_PER_DAY} max/run={MAX_PER_RUN} min_score={MIN_INTERNAL_SCORE}",
+        f"max/day={MAX_PER_DAY} max/run={MAX_PER_RUN} min_score={MIN_INTERNAL_SCORE} "
+        f"min_gap={MIN_GAP_H}h",
         flush=True,
     )
     # небольшой стартовый джиттер, чтобы не биться с ingest при рестарте
@@ -1001,4 +1042,4 @@ async def run() -> None:
             raise
         except Exception as e:
             print(f"[market_outlook] Упал: {e}", flush=True)
-        await asyncio.sleep(max(600, INTERVAL_SEC))
+        await asyncio.sleep(max(60, INTERVAL_SEC))
