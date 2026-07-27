@@ -275,29 +275,30 @@ def render_candle_png(
             y2 = y1 + scale
         draw.rectangle([x - candle_w // 2, y1, x + candle_w // 2, y2], fill=color)
 
-    # green projected path → target
+    # green projected path → target (только если цель рядом, иначе криво)
     last_i = len(df) - 1
     last_c = float(closes.iloc[-1])
     try:
-        t1 = float(lv["target_1"]) if lv.get("target_1") is not None else last_c * 1.02
+        t1 = float(lv["target_1"]) if lv.get("target_1") is not None else last_c * 1.015
     except (TypeError, ValueError):
-        t1 = last_c * 1.02
-    # zigzag: slight dip then push to target (visual scenario, not prediction claim on chart)
-    mid_i = last_i + (len(df) * 0.08)
-    tip_i = last_i + (len(df) * 0.18)
-    dip = last_c * 0.997
-    path = [
-        (xx(last_i), yx(last_c)),
-        (xx(min(last_i + 3, last_i + 1)), yx(dip)),
-        (xx(mid_i), yx((dip + t1) / 2)),
-        (xx(tip_i), yx(t1)),
-    ]
-    # clamp x to plot
-    path = [(min(max(p[0], pad_l), W - pad_r), p[1]) for p in path]
-    draw.line(path, fill=path_g, width=3 * scale)
-    # arrow head
-    ax, ay = path[-1]
-    draw.polygon([(ax, ay), (ax - 8 * scale, ay + 5 * scale), (ax - 8 * scale, ay - 5 * scale)], fill=path_g)
+        t1 = last_c * 1.015
+    if last_c > 0 and abs(t1 - last_c) / last_c < 0.12:
+        mid_i = last_i + max(4, len(df) * 0.06)
+        tip_i = last_i + max(8, len(df) * 0.14)
+        dip = last_c - abs(t1 - last_c) * 0.12
+        path = [
+            (xx(last_i), yx(last_c)),
+            (xx(last_i + 2), yx(dip)),
+            (xx(mid_i), yx((dip + t1) / 2)),
+            (xx(tip_i), yx(t1)),
+        ]
+        path = [(min(max(p[0], pad_l), W - pad_r), min(max(p[1], pad_t), pad_t + plot_h)) for p in path]
+        draw.line(path, fill=path_g, width=3 * scale)
+        ax, ay = path[-1]
+        draw.polygon(
+            [(ax, ay), (ax - 8 * scale, ay + 5 * scale), (ax - 8 * scale, ay - 5 * scale)],
+            fill=path_g,
+        )
 
     def price_badge(price: float, color: tuple, text_color=(0, 0, 0)):
         y = yx(price)
