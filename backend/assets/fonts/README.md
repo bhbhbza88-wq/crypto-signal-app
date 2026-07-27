@@ -1,3 +1,9 @@
-﻿# Card fonts
+﻿# PnL card fonts
 
-`card-regular.ttf` and `card-bold.ttf` are [DejaVu Sans](https://dejavu-fonts.github.io/) (DejaVu Fonts 2.37), renamed for the app. Free license; includes Cyrillic.
+Prefer Noto Sans (Cyrillic + Latin):
+
+- `NotoSans-Regular.ttf`
+- `NotoSans-Medium.ttf`
+- `NotoSans-SemiBold.ttf`
+
+Legacy DejaVu fallbacks: `card-regular.ttf`, `card-bold.ttf`.

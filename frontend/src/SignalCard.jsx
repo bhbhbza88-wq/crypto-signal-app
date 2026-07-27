@@ -316,8 +316,12 @@ export default function SignalCard({ signal, onNeedPremium }) {
     signal.live_price ?? lastClose,
   )
   const displayPrice = livePrice ?? lastClose
+  // Как в ТВХ / open_position_card: профит сразу с плечом 15x
+  const OPEN_POS_LEVERAGE = 15
   const livePnlPct = (!levelsLocked && displayPrice != null && signal.entry != null)
-    ? (isLong ? (displayPrice - signal.entry) / signal.entry * 100 : (signal.entry - displayPrice) / signal.entry * 100)
+    ? (isLong
+        ? (displayPrice - signal.entry) / signal.entry
+        : (signal.entry - displayPrice) / signal.entry) * 100 * OPEN_POS_LEVERAGE
     : null
 
   const stage = levelsLocked

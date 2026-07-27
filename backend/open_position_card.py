@@ -14,8 +14,20 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 _ASSETS = Path(__file__).resolve().parent / "assets" / "open_position"
-BYBIT_PATH = _ASSETS / "bybit.jpg"
-BINGX_PATH = _ASSETS / "bingx.jpg"
+
+
+def _template_path(style: str) -> Path:
+    """Предпочитаем PNG-исходник; fallback на jpg."""
+    name = "bybit" if style == "bybit" else "bingx"
+    png = _ASSETS / f"{name}.png"
+    jpg = _ASSETS / f"{name}.jpg"
+    if png.exists():
+        return png
+    return jpg
+
+
+BYBIT_PATH = _template_path("bybit")
+BINGX_PATH = _template_path("bingx")
 
 # reuse fonts from profit_card assets
 _FONTS = Path(__file__).resolve().parent / "assets" / "fonts"
@@ -147,7 +159,7 @@ def build_position_metrics(
         "roi_pct": roi_pct,
         "margin_ratio": margin_ratio,
         "realized": realized,
-        "style": "bybit" if rng.random() < 0.55 else "bingx",
+        "style": "bingx",
     }
 
 
@@ -169,6 +181,8 @@ def _open_edit_prompt(m: dict, style: str) -> str:
             "- Do NOT redraw, move, or modify any UI elements, buttons, icons, layout, or background.\n"
             "- Do NOT add black boxes, rectangles, or overlays.\n"
             "- Keep all original fonts, sizes, spacing, and alignment EXACTLY as in the template.\n"
+            "- Keep the EXACT same resolution and sharpness as the input. Do NOT re-render, upscale, downscale, or redraw the screenshot.\n"
+            "- Change ONLY the glyph pixels of the listed numbers/labels; leave every other pixel untouched.\n"
             "- For color changes: Long/Лонг badge = bright green (#0ECB81). Short/Шорт badge = red/pink.\n"
             "- Positive PnL/ROI = green. Negative = red. Liquidation price = orange.\n"
             "\n"
@@ -223,13 +237,36 @@ def _open_edit_prompt(m: dict, style: str) -> str:
     )
 
 
-def _clear(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], fill=BG):
-    draw.rectangle(box, fill=fill)
+def _sample_bg(img: Image.Image, box: tuple[int, int, int, int]) -> tuple[int, int, int]:
+    """Цвет заливки из пикселей рамки бокса — без чёрных прямоугольников."""
+    x0, y0, x1, y1 = box
+    w, h = img.size
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(w, x1), min(h, y1)
+    pts = []
+    for x, y in (
+        (x0, y0), (x1 - 1, y0), (x0, y1 - 1), (x1 - 1, y1 - 1),
+        ((x0 + x1) // 2, y0), ((x0 + x1) // 2, y1 - 1),
+        (x0, (y0 + y1) // 2), (x1 - 1, (y0 + y1) // 2),
+    ):
+        if 0 <= x < w and 0 <= y < h:
+            pts.append(img.getpixel((x, y))[:3])
+    if not pts:
+        return BG
+    # медиана по каналам
+    pts.sort(key=lambda c: sum(c))
+    return pts[len(pts) // 2]
+
+
+def _clear_sampled(img: Image.Image, draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int]):
+    draw.rectangle(box, fill=_sample_bg(img, box))
 
 
 def _render_bybit_pil(m: dict) -> bytes:
-    """PIL overlay на Bybit-шаблоне (1179×996). Координаты откалиброваны по bands."""
-    img = Image.open(BYBIT_PATH).convert("RGB")
+    """PIL overlay на Bybit HQ-шаблоне — только цифры, фон сэмплируется с исходника."""
+    path = _template_path("bybit")
+    img = Image.open(path).convert("RGB")
+    base = img.copy()  # для сэмпла фона до правок
     draw = ImageDraw.Draw(img)
     is_long = m["side"] == "LONG"
     side_ru = "Лонг" if is_long else "Шорт"
@@ -242,56 +279,62 @@ def _render_bybit_pil(m: dict) -> bytes:
     dollar = f"≈ +${abs(pnl):.3f}" if pnl >= 0 else f"≈ −${abs(pnl):.3f}"
 
     def put(box, text, font, fill, align="left"):
-        _clear(draw, box)
+        _clear_sampled(base, draw, box)
         x0, y0, x1, y1 = box
         if align == "right":
             tw = draw.textlength(text, font=font)
-            draw.text((x1 - tw - 4, y0 + 2), text, font=font, fill=fill)
+            draw.text((x1 - tw - 3, y0 + 1), text, font=font, fill=fill)
         else:
-            draw.text((x0 + 2, y0 + 2), text, font=font, fill=fill)
+            draw.text((x0 + 3, y0 + 1), text, font=font, fill=fill)
 
-    # symbol
-    put((30, 30, 560, 95), m["pair"], _font(40, bold=True), WHITE)
+    # pair (XRPUSDT) — верхний левый угол
+    put((48, 32, 350, 78), m["pair"], _font(40, bold=True), WHITE)
 
-    # side badge — только бейдж, не трогаем «Кросс»
-    _clear(draw, (34, 105, 155, 155), fill=side_bg)
-    draw.text((50, 114), side_ru, font=_font(22, bold=True), fill=WHITE)
+    # side badge (Лонг/Шорт) зеленый/красный прямоугольник
+    badge = (48, 102, 144, 148)
+    draw.rectangle(badge, fill=side_bg)
+    font_b = _font(22, bold=True)
+    tw = draw.textlength(side_ru, font=font_b)
+    draw.text((48 + (96 - tw) / 2, 113), side_ru, font=font_b, fill=WHITE)
 
-    # leverage number only (оставляем «Кросс» и иконку карандаша)
-    put((248, 110, 340, 152), f"{m['leverage']}X", _font(22), GREY)
+    # leverage (15X) — справа от badge, только цифру меняем
+    put((288, 110, 348, 143), f"{m['leverage']}X", _font(20), (195, 195, 195))
 
-    # unrealized pnl + approx $
-    put((30, 215, 430, 285), pnl_s, _font(46, bold=True), pnl_color)
-    put((30, 288, 300, 325), dollar, _font(20), GREY)
+    # PnL (большая зеленая/красная цифра в центре)
+    put((48, 248, 330, 298), pnl_s, _font(46, bold=True), pnl_color)
+    # $ approximation (мелкий серый текст под PnL)
+    put((48, 302, 240, 336), dollar, _font(18), GREY)
 
-    # ROI right-aligned
-    put((780, 220, 1145, 285), roi_s, _font(34, bold=True), pnl_color, align="right")
+    # ROI (процент справа вверху)
+    put((855, 253, 1140, 302), roi_s, _font(34, bold=True), pnl_color, align="right")
 
-    # holdings / margin / ratio (values ~ y 430–475)
-    put((30, 425, 300, 480), _fmt_bybit(m["holdings"], 3), _font(28, bold=True), WHITE)
-    put((350, 425, 620, 480), _fmt_bybit(m["margin"], 4), _font(28, bold=True), WHITE)
-    put((820, 425, 1145, 480), f"{m['margin_ratio']:.2f}%", _font(28, bold=True), WHITE, align="right")
+    # holdings / margin / margin_ratio (первая строка цифр)
+    put((48, 448, 225, 488), _fmt_bybit(m["holdings"], 3), _font(26, bold=True), WHITE)
+    put((402, 448, 565, 488), _fmt_bybit(m["margin"], 4), _font(26, bold=True), WHITE)
+    put((982, 448, 1140, 488), f"{m['margin_ratio']:.2f}%", _font(26, bold=True), WHITE, align="right")
 
-    # entry / mark / liq (values ~ y 575–635)
-    put((30, 575, 320, 640), _fmt_bybit(m["entry"]), _font(28, bold=True), WHITE)
-    put((350, 575, 650, 640), _fmt_bybit(m["mark"]), _font(28, bold=True), WHITE)
-    put((800, 575, 1145, 640), _fmt_bybit(m["liq"]), _font(28, bold=True), ORANGE, align="right")
+    # entry / mark / liq (вторая строка цифр)
+    put((48, 588, 205, 628), _fmt_bybit(m["entry"]), _font(26, bold=True), WHITE)
+    put((402, 588, 565, 628), _fmt_bybit(m["mark"]), _font(26, bold=True), WHITE)
+    put((982, 588, 1140, 628), _fmt_bybit(m["liq"]), _font(26, bold=True), ORANGE, align="right")
 
-    # realized pnl
-    put((780, 665, 1145, 710), f"{m['realized']:.8f}", _font(20), RED, align="right")
+    # realized PnL (мелкий красный текст)
+    put((885, 703, 1110, 732), f"{m['realized']:.8f}", _font(18), RED, align="right")
 
-    # TP/SL
+    # TP/SL (последняя строка)
     tpsl = f"-- / {_fmt_bybit(m['sl'])}"
-    put((780, 730, 1100, 775), tpsl, _font(22), WHITE, align="right")
+    put((885, 758, 1065, 792), tpsl, _font(20), WHITE, align="right")
 
     buf = io.BytesIO()
-    img.save(buf, format="PNG", compress_level=6)
+    img.save(buf, format="PNG", compress_level=3)
     return buf.getvalue()
 
 
 def _render_bingx_pil(m: dict) -> bytes:
-    """Грубый PIL fallback для BingX (лучше AI)."""
-    img = Image.open(BINGX_PATH).convert("RGB")
+    """PIL overlay на BingX HQ-шаблоне."""
+    path = _template_path("bingx")
+    img = Image.open(path).convert("RGB")
+    base = img.copy()
     draw = ImageDraw.Draw(img)
     W, H = img.size
     is_long = m["side"] == "LONG"
@@ -304,26 +347,30 @@ def _render_bingx_pil(m: dict) -> bytes:
         else f"{pnl:.4f} [{roi:.2f}%]".replace(".", ",")
     )
 
-    # side letter box ~ top-left of position block
-    sx0, sy0 = int(W * 0.04), int(H * 0.18)
-    _clear(draw, (sx0, sy0, sx0 + 70, sy0 + 70), fill=GREEN if is_long else RED)
-    draw.text((sx0 + 18, sy0 + 12), "B" if is_long else "S", font=_font(42, bold=True), fill=WHITE)
+    def put(box, text, font, fill, align="left"):
+        _clear_sampled(base, draw, box)
+        x0, y0, x1, y1 = box
+        if align == "right":
+            tw = draw.textlength(text, font=font)
+            draw.text((x1 - tw - 3, y0 + 1), text, font=font, fill=fill)
+        else:
+            draw.text((x0 + 3, y0 + 1), text, font=font, fill=fill)
 
-    # title
-    _clear(draw, (sx0 + 90, sy0, int(W * 0.75), sy0 + 55))
-    draw.text((sx0 + 95, sy0 + 5), f"{m['pair']} Бессрочный", font=_font(40, bold=True), fill=WHITE)
+    # side letter (B/S в квадрате)
+    sx0, sy0 = 50, 50
+    draw.rectangle((sx0, sy0, sx0 + 54, sy0 + 54), fill=GREEN if is_long else RED)
+    draw.text((sx0 + 13, sy0 + 5), "B" if is_long else "S", font=_font(36, bold=True), fill=WHITE)
 
-    # leverage pill text
-    _clear(draw, (sx0 + 90, sy0 + 60, sx0 + 420, sy0 + 110))
-    draw.text((sx0 + 100, sy0 + 68), f"Кросс {m['leverage']}X >", font=_font(26), fill=GREY)
+    # заголовок и leverage
+    put((122, 50, 785, 98), f"{m['pair']} Бессрочный", _font(34, bold=True), WHITE)
+    put((122, 108, 385, 148), f"Кросс {m['leverage']}X >", _font(24), GREY)
 
-    # pnl
-    _clear(draw, (sx0, sy0 + 160, int(W * 0.85), sy0 + 260))
-    draw.text((sx0, sy0 + 170), pnl_line, font=_font(56, bold=True), fill=color)
+    # PnL line (right-aligned)
+    put((525, 203, 1160, 278), pnl_line, _font(40, bold=True), color, align="right")
 
-    # grid values — approximate thirds
-    cols = [sx0, int(W * 0.36), int(W * 0.66)]
-    y1, y2 = sy0 + 360, sy0 + 520
+    # три колонки данных
+    cols = [50, 432, 822]
+    y1, y2 = 382, 522
     row1 = [
         _fmt_bingx_price(m["holdings"]),
         _fmt_bingx_price(m["margin"]),
@@ -335,16 +382,14 @@ def _render_bingx_pil(m: dict) -> bytes:
         _fmt_bingx_price(m["liq"]),
     ]
     for i, text in enumerate(row1):
-        _clear(draw, (cols[i], y1, cols[i] + 280, y1 + 55))
-        draw.text((cols[i], y1 + 5), text, font=_font(34, bold=True), fill=WHITE)
+        put((cols[i], y1, cols[i] + 278, y1 + 48), text, _font(30, bold=True), WHITE)
     for i, text in enumerate(row2):
-        _clear(draw, (cols[i], y2, cols[i] + 280, y2 + 55))
-        draw.text((cols[i], y2 + 5), text, font=_font(34, bold=True), fill=WHITE)
+        fill = ORANGE if i == 2 else WHITE
+        put((cols[i], y2, cols[i] + 278, y2 + 48), text, _font(30, bold=True), fill)
 
     buf = io.BytesIO()
-    img.save(buf, format="PNG", compress_level=6)
+    img.save(buf, format="PNG", compress_level=3)
     return buf.getvalue()
-
 
 def render_open_position_card(
     symbol: str,
@@ -369,16 +414,19 @@ def render_open_position_card(
         mark_price=mark_price,
         margin=margin,
     )
-    use_style = (style or m["style"]).lower()
-    if use_style not in ("bybit", "bingx"):
-        use_style = "bybit"
+    # Только BingX (чёрный фон — без видимых артефактов AI)
+    forced = (os.getenv("OPEN_POS_STYLE", "bingx") or "bingx").strip().lower()
+    use_style = (style or forced or m["style"] or "bingx").lower()
+    if use_style != "bingx":
+        use_style = "bingx"
     m["style"] = use_style
 
-    path = BYBIT_PATH if use_style == "bybit" else BINGX_PATH
+    path = _template_path(use_style)
     if not path.exists():
         raise FileNotFoundError(f"Нет шаблона open position: {path}")
 
-    use_ai = os.getenv("OPEN_POS_AI", os.getenv("PROFIT_CARD_AI", "0")).strip().lower() in (
+    # AI по умолчанию включён — дешёвая flash-lite модель
+    use_ai = os.getenv("OPEN_POS_AI", "1").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -393,8 +441,9 @@ def render_open_position_card(
                 image_bytes=path.read_bytes(),
                 prompt=_open_edit_prompt(m, use_style),
                 media_type=media,
-                model="google/gemini-3.1-flash-image",  # full quality, not lite
+                model=os.getenv("OPENROUTER_MODEL_IMAGE_EDIT", "google/gemini-3.1-flash-lite-image"),
                 timeout=float(os.getenv("OPEN_POS_AI_TIMEOUT", "120") or "120"),
+                preserve_source=True,
             )
             img = Image.open(io.BytesIO(edited))
             if img.mode not in ("RGB", "RGBA"):

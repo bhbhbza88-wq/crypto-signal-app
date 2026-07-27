@@ -811,6 +811,7 @@ def _open_position_photo(signal: dict) -> bytes | None:
             stop=float(signal["stop"]) if signal.get("stop") else None,
             mark_price=mark_price,
             margin=12.0,  # типичная маржа для 15x
+            style="bingx",  # только BingX — чёрный фон, без пикселей
         )
     except Exception as e:
         print(f"[telegram_bot] open_position_card: {e}")
@@ -844,20 +845,33 @@ async def notify_new_signal(signal: dict):
     venues = _exchange_label(signal)
 
     text = (
-        f"<b>◈ NOWICKI SIGNAL</b>\n"
+        f"🎯 <b>{sym}</b>\n"
         f"{HR}\n"
         f"{side_emoji}\n"
         f"<b>{sym}</b>{conf_line}\n"
-        f"<i>доступно: {venues}</i>\n"
-        f"<i>Плечо · 15x</i>\n"
+        f"<i>{venues}</i>\n"
         f"{HR}\n"
         f"{_levels_block(entry, stop, tp1, tp2, tp3)}\n"
     )
     if reasons:
-        clean = [r for r in reasons[:3] if r and "агрегированн" not in r.lower()
-                 and "Aggregated" not in r and not str(r).startswith("Листинг:")]
+        # Фильтруем технические reason'ы — оставляем только человеческие
+        clean = []
+        for r in reasons[:4]:
+            r_lower = r.lower()
+            # Пропускаем технические маркеры
+            if any(skip in r_lower for skip in [
+                'parser:', 'quality filter', 'агрегированн', 'aggregated',
+                'листинг:', 'exit mode:', 'автоимпорт'
+            ]):
+                continue
+            # Пропускаем если начинается с листинга
+            if str(r).startswith('Листинг:'):
+                continue
+            clean.append(r)
+        
         if clean:
-            text += f"{HR}\n" + "\n".join(f"· {r}" for r in clean) + "\n"
+            text += f"{HR}\n" + "\n".join(f"💡 {r}" for r in clean) + "\n"
+    
     text += f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>  ·  <i>не фин. совет</i>"
     await publish_signal_open(text, _channel_cta(), photo_png=_open_position_photo(signal))
     
@@ -877,12 +891,11 @@ async def notify_manual_signal(signal: dict, source: str):
     venues = _exchange_label(signal)
 
     text = (
-        f"<b>◈ NOWICKI SIGNAL</b>\n"
+        f"🎯 <b>{sym}</b>\n"
         f"{HR}\n"
         f"{side_emoji}\n"
         f"<b>{sym}</b>\n"
-        f"<i>доступно: {venues}</i>\n"
-        f"<i>Плечо · 15x</i>\n"
+        f"<i>{venues}</i>\n"
         f"{HR}\n"
         f"{_levels_block(entry, stop, tp1, tp2, tp3)}\n"
         f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>  ·  <i>не фин. совет</i>"

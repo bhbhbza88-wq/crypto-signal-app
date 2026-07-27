@@ -27,8 +27,11 @@ BG_PATH = _ASSETS / "pnl_card_bg.png"
 BYBIT_BG_PATH = _ASSETS / "bybit_pnl_card_bg.png"
 TEMPLATES_DIR = _ASSETS / "pnl_templates"
 MANIFEST_PATH = TEMPLATES_DIR / "manifest.json"
-_FONT_REG = _ASSETS / "fonts" / "card-regular.ttf"
-_FONT_BOLD = _ASSETS / "fonts" / "card-bold.ttf"
+_FONT_REG = _ASSETS / "fonts" / "NotoSans-Regular.ttf"
+_FONT_MED = _ASSETS / "fonts" / "NotoSans-Medium.ttf"
+_FONT_SEMI = _ASSETS / "fonts" / "NotoSans-SemiBold.ttf"
+_FONT_REG_LEGACY = _ASSETS / "fonts" / "card-regular.ttf"
+_FONT_BOLD_LEGACY = _ASSETS / "fonts" / "card-bold.ttf"
 
 WHITE = (255, 255, 255)
 GREY = (132, 142, 156)
@@ -37,17 +40,31 @@ RED = (246, 70, 93)
 BINGX_PINK = (255, 77, 141)
 
 
-@lru_cache(maxsize=8)
-def _font(size: int, bold: bool = False):
-    """Всегда шрифт с кириллицей — иначе на Railway подписи превращаются в □□□."""
-    bundled = _FONT_BOLD if bold else _FONT_REG
+@lru_cache(maxsize=32)
+def _font(size: int, bold: bool = False, weight: str | None = None):
+    """Кириллица: Noto Sans. weight=regular|medium|semibold; bold=True → semibold (не Heavy)."""
+    w = (weight or ("semibold" if bold else "regular")).lower()
+    if w in ("bold", "heavy", "black"):
+        w = "semibold"
+    bundled = {
+        "regular": _FONT_REG,
+        "medium": _FONT_MED,
+        "semibold": _FONT_SEMI,
+    }.get(w, _FONT_REG)
+    legacy = _FONT_BOLD_LEGACY if w != "regular" else _FONT_REG_LEGACY
+    win = {
+        "regular": r"C:\Windows\Fonts\segoeui.ttf",
+        "medium": r"C:\Windows\Fonts\seguisb.ttf",
+        "semibold": r"C:\Windows\Fonts\seguisb.ttf",
+    }.get(w, r"C:\Windows\Fonts\segoeui.ttf")
     candidates = [
         str(bundled),
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-        r"C:\Windows\Fonts\arialbd.ttf" if bold else r"C:\Windows\Fonts\arial.ttf",
-        r"C:\Windows\Fonts\seguisb.ttf" if bold else r"C:\Windows\Fonts\segoeui.ttf",
+        str(legacy),
+        f"/usr/share/fonts/truetype/noto/NotoSans-{w.capitalize()}.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        win,
+        r"C:\Windows\Fonts\arial.ttf",
     ]
     for path in candidates:
         if path and os.path.exists(path):
@@ -57,7 +74,7 @@ def _font(size: int, bold: bool = False):
                 continue
     raise RuntimeError(
         "Нет TTF с кириллицей для profit_card. "
-        "Положи DejaVu в backend/assets/fonts/card-regular.ttf и card-bold.ttf"
+        "Нужны NotoSans-Regular/Medium/SemiBold в backend/assets/fonts/"
     )
 
 
@@ -147,20 +164,22 @@ def render_profit_card(
     text_max_w = max(120, int(W * 0.52) - pad)
     col2_x = int(W * 0.48)
 
-    def fit_font(text: str, start: int, bold: bool, min_size: int = 14) -> ImageFont.FreeTypeFont:
+    def fit_font(
+        text: str, start: int, bold: bool = False, min_size: int = 14, weight: str | None = None,
+    ) -> ImageFont.FreeTypeFont:
         size = start
         while size >= min_size:
-            f = _font(size, bold=bold)
+            f = _font(size, bold=bold, weight=weight)
             if draw.textlength(text, font=f) <= text_max_w:
                 return f
             size -= 1
-        return _font(min_size, bold=bold)
+        return _font(min_size, bold=bold, weight=weight)
 
-    font_pair = fit_font(pair_line, max(26, int(H * 0.040)), bold=True, min_size=16)
-    font_side = _font(max(18, int(H * 0.030)), bold=False)
-    font_roi = fit_font(roi_str, max(46, int(H * 0.095)), bold=True, min_size=22)
-    font_label = _font(max(16, int(H * 0.026)), bold=False)
-    font_val = _font(max(20, int(H * 0.033)), bold=True)
+    font_pair = fit_font(pair_line, max(22, int(H * 0.034)), bold=False, min_size=14)
+    font_side = _font(max(16, int(H * 0.026)), weight="regular")
+    font_roi = fit_font(roi_str, max(40, int(H * 0.082)), bold=True, min_size=20)
+    font_label = _font(max(14, int(H * 0.022)), weight="regular")
+    font_val = _font(max(18, int(H * 0.028)), weight="medium")
 
     y_pair = int(H * 0.235)
     y_side = int(H * 0.300)
@@ -406,10 +425,12 @@ def _render_template_card_pil(
     clear_x1 = _px(float(layout.get("clear_x1", 0.52)), W)
     clear_y0 = _px(float(layout.get("clear_y0", 0.10 if family != "binance" else 0.20)), H)
     clear_y1 = _px(float(layout.get("clear_y1", 0.78 if family != "binance" else 0.78)), H)
+    # Тёмный фон шарингов — чистый чёрный чище «жирной» подложки из сэмпла.
     fill = _sample_fill(img, (8, clear_y0, min(40, max(8, clear_x1 // 4)), clear_y1))
-    fill = tuple(max(0, min(255, c - 12)) for c in fill)
-    if sum(fill) / 3 > 35:
+    if sum(fill) / 3 < 48:
         fill = (0, 0, 0)
+    else:
+        fill = tuple(max(0, min(255, c - 8)) for c in fill)
 
     if family == "binance":
         upper_x1 = _px(float(layout.get("clear_x1", 0.72)), W)
@@ -417,20 +438,21 @@ def _render_template_card_pil(
         draw.rectangle((0, clear_y0, upper_x1, prices_y0), fill=fill)
         draw.rectangle((0, prices_y0, W - 1, clear_y1), fill=fill)
     else:
-        draw.rectangle((0, clear_y0, min(W - 1, clear_x1 + _px(0.04, W)), clear_y1), fill=fill)
+        draw.rectangle((0, clear_y0, min(W - 1, clear_x1), clear_y1), fill=fill)
 
     def fxy(key, default=(0.06, 0.2)):
         xy = layout.get(key) or default
         return _px(float(xy[0]), W), _px(float(xy[1]), H)
 
     def fsize(key, default=0.04):
-        return max(14, _px(float(layout.get(key, default)), H))
+        return max(12, _px(float(layout.get(key, default)), H))
 
-    font_pair = _font(fsize("pair_size", 0.045), bold=True)
-    font_side = _font(fsize("side_size", 0.032), bold=True)
-    font_roi = _font(fsize("roi_size", 0.11), bold=True)
-    font_price = _font(fsize("price_size", 0.028), bold=False)
-    font_price_val = _font(fsize("price_size", 0.028), bold=True)
+    # Лёгкий набор: Regular / Medium; ROI — SemiBold (не DejaVu Bold).
+    font_pair = _font(fsize("pair_size", 0.034), weight="medium")
+    font_side = _font(fsize("side_size", 0.024), weight="regular")
+    font_roi = _font(fsize("roi_size", 0.078), weight="semibold")
+    font_price = _font(fsize("price_size", 0.022), weight="regular")
+    font_price_val = _font(fsize("price_size", 0.022), weight="medium")
 
     px, py = fxy("pair_xy")
     sx, sy = fxy("side_xy")
@@ -445,7 +467,7 @@ def _render_template_card_pil(
         sw = draw.textlength(f"{side_ru} ", font=font_side)
         draw.text((sx + sw, sy), f"| {leverage}x", font=font_side, fill=GREY)
         draw.text((rx, ry), roi_str, font=font_roi, fill=roi_color)
-        font_lab = _font(fsize("label_size", 0.026), bold=False)
+        font_lab = _font(fsize("label_size", 0.022), weight="regular")
         l1 = layout.get("label1_xy") or [0.07, 0.665]
         l2 = layout.get("label2_xy") or [0.48, 0.665]
         draw.text((_px(l1[0], W), _px(l1[1], H)), "Цена входа", font=font_lab, fill=GREY)
@@ -465,18 +487,33 @@ def _render_template_card_pil(
         draw.text((p1x, p1y), f"Цена открытия {e_s}", font=font_price, fill=WHITE)
         draw.text((p2x, p2y), f"Цена закрытия {x_s}", font=font_price, fill=WHITE)
     else:
+        # BingX-style
         if "header_xy" in layout:
             hx, hy = fxy("header_xy")
-            font_h = _font(fsize("header_size", 0.028), bold=False)
-            draw.text((hx, hy), "Реализованная П/У", font=font_h, fill=WHITE)
+            font_h = _font(fsize("header_size", 0.022), weight="regular")
+            draw.text((hx, hy), "Реализованная П/У", font=font_h, fill=(168, 168, 168))
         draw.text((px, py), pair, font=font_pair, fill=WHITE)
         draw.text((sx, sy), side_ru, font=font_side, fill=side_color)
         sw = draw.textlength(side_ru, font=font_side)
-        draw.text((sx + sw + 10, sy), f"|  {leverage}X", font=font_side, fill=WHITE)
+        draw.text((sx + sw + 10, sy), f"|  {leverage}X", font=font_side, fill=(200, 200, 200))
         draw.text((rx, ry), roi_str, font=font_roi, fill=roi_color)
         e_s, x_s = _fmt_share_price(entry), _fmt_share_price(exit_price)
-        draw.text((p1x, p1y), f"Цена закрытия  {x_s}", font=font_price, fill=WHITE)
-        draw.text((p2x, p2y), f"Цена входа  {e_s}", font=font_price, fill=WHITE)
+        font_lab = _font(fsize("price_size", 0.022), weight="regular")
+        draw.text((p1x, p1y), "Цена закрытия", font=font_lab, fill=GREY)
+        lab_w = draw.textlength("Цена закрытия  ", font=font_lab)
+        draw.text((p1x + lab_w, p1y), x_s, font=font_price_val, fill=WHITE)
+        draw.text((p2x, p2y), "Цена входа", font=font_lab, fill=GREY)
+        lab2_w = draw.textlength("Цена входа  ", font=font_lab)
+        draw.text((p2x + lab2_w, p2y), e_s, font=font_price_val, fill=WHITE)
+
+        if layout.get("footer_clear") and layout.get("footer_clear_box"):
+            box = layout["footer_clear_box"]
+            fx0, fy0 = _px(float(box[0]), W), _px(float(box[1]), H)
+            fx1, fy1 = _px(float(box[2]), W), _px(float(box[3]), H)
+            draw.rectangle((fx0, fy0, fx1, fy1), fill=(0, 0, 0))
+            fpx, fpy = fxy("footer_xy", (0.11, 0.905))
+            font_f = _font(fsize("footer_size", 0.022), weight="medium")
+            draw.text((fpx, fpy), pair, font=font_f, fill=WHITE)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
@@ -605,11 +642,11 @@ def render_bybit_card(
     img = _load_bybit_bg().copy()
     draw = ImageDraw.Draw(img)
 
-    font_symbol = _font(41, bold=True)
-    font_pill = _font(20, bold=False)
-    font_pnl = _font(66, bold=True)
-    font_price = _font(28, bold=True)
-    font_duration = _font(22, bold=False)
+    font_symbol = _font(38, weight="semibold")
+    font_pill = _font(18, weight="regular")
+    font_pnl = _font(58, weight="semibold")
+    font_price = _font(26, weight="medium")
+    font_duration = _font(20, weight="regular")
 
     def clear_row(y0, y1, x1, min_key):
         x1 = max(x1 + 4, _BYBIT_MIN_CLEAR_X[min_key])

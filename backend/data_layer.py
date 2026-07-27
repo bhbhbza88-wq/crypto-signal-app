@@ -37,12 +37,11 @@ _EXCHANGES = {
 }
 
 # Порядок предпочтения при листинге на нескольких биржах
-_EXCHANGE_PREFERENCE = ('bybit', 'binance', 'okx', 'bitget', 'bingx', 'bitunix')
+_EXCHANGE_PREFERENCE = ('bybit', 'binance', 'bitget', 'bingx', 'bitunix')
 _KNOWN_EXCHANGES = frozenset(_EXCHANGE_PREFERENCE)
 _EXCHANGE_LABELS = {
     'bybit': 'Bybit',
     'binance': 'Binance',
-    'okx': 'OKX',
     'bitget': 'Bitget',
     'bingx': 'BingX',
     'bitunix': 'Bitunix',
@@ -69,7 +68,7 @@ def api_call(func, *args, retries=3, delay=2, **kwargs):
 
 
 def get_exchange(exchange_id=None):
-    """bybit | binance | okx | bitget | bingx | bitunix; неизвестный id → bybit."""
+    """bybit | binance | bitget | bingx | bitunix; неизвестный id → bybit."""
     if not exchange_id:
         return exchange
     return _EXCHANGES.get(str(exchange_id).lower().strip(), exchange)

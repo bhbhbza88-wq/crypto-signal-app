@@ -501,6 +501,76 @@ def _extract_image_bytes_from_openrouter(data: dict) -> bytes:
     raise ValueError(f"no image in OpenRouter response keys={list(msg.keys())}")
 
 
+def normalize_image_bytes(
+    image_bytes: bytes,
+    media_type: str = "image/jpeg",
+    *,
+    preserve: bool = False,
+    max_edge: int = 1400,
+    jpeg_quality: int = 82,
+) -> tuple[bytes, str]:
+    """Подготовка картинки к API.
+
+    preserve=True — почти без потерь: не даунскейлим и не жмём в JPEG 82
+    (нужно для edit текста на скриншотах, иначе появляются пятна/пиксели).
+    """
+    from io import BytesIO
+
+    try:
+        from PIL import Image
+    except Exception:
+        return image_bytes, media_type or "image/jpeg"
+
+    try:
+        im = Image.open(BytesIO(image_bytes))
+        im.load()
+        src_fmt = (im.format or "").upper()
+        mt = (media_type or "image/jpeg").lower()
+        if mt in ("image/jpg", "image/heic", "image/heif"):
+            mt = "image/jpeg"
+
+        if preserve:
+            # Уже JPEG/PNG и RGB — отдаём исходные байты без перекодирования
+            if src_fmt in ("JPEG", "JPG") and im.mode == "RGB":
+                return image_bytes, "image/jpeg"
+            if src_fmt == "PNG" and im.mode in ("RGB", "RGBA"):
+                return image_bytes, "image/png"
+            # Только конвертация режима → PNG lossless
+            if im.mode in ("RGBA", "P", "LA"):
+                if im.mode == "P":
+                    im = im.convert("RGBA")
+                out = BytesIO()
+                im.save(out, format="PNG", compress_level=3)
+                return out.getvalue(), "image/png"
+            if im.mode != "RGB":
+                im = im.convert("RGB")
+            out = BytesIO()
+            im.save(out, format="PNG", compress_level=3)
+            return out.getvalue(), "image/png"
+
+        if im.mode in ("RGBA", "P", "LA"):
+            bg = Image.new("RGB", im.size, (0, 0, 0))
+            if im.mode == "P":
+                im = im.convert("RGBA")
+            bg.paste(im, mask=im.split()[-1] if im.mode in ("RGBA", "LA") else None)
+            im = bg
+        elif im.mode != "RGB":
+            im = im.convert("RGB")
+        w, h = im.size
+        scale = min(1.0, max_edge / max(w, h))
+        if scale < 1.0:
+            im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.Resampling.LANCZOS)
+        out = BytesIO()
+        im.save(out, format="JPEG", quality=jpeg_quality, optimize=True)
+        return out.getvalue(), "image/jpeg"
+    except Exception as e:
+        print(f"[ai_client] normalize_image skip: {e}")
+        mt = (media_type or "image/jpeg").lower()
+        if mt in ("image/jpg", "image/heic", "image/heif"):
+            mt = "image/jpeg"
+        return image_bytes, mt
+
+
 async def edit_image_bytes(
     *,
     image_bytes: bytes,
@@ -508,13 +578,16 @@ async def edit_image_bytes(
     model: str | None = None,
     media_type: str = "image/png",
     timeout: float = 120,
+    preserve_source: bool = True,
 ) -> bytes:
     """AI image edit через OpenRouter (Gemini Flash Image): правит фото по текстовой инструкции."""
     import base64
 
     if not openrouter_configured():
         raise RuntimeError("OPENROUTER_API_KEY required for image edit")
-    image_bytes, media_type = normalize_image_bytes(image_bytes, media_type)
+    image_bytes, media_type = normalize_image_bytes(
+        image_bytes, media_type, preserve=preserve_source
+    )
     b64 = base64.b64encode(image_bytes).decode()
     data_url = f"data:{media_type};base64,{b64}"
     use_model = (model or MODEL_IMAGE_EDIT).strip()
@@ -553,6 +626,7 @@ def edit_image_bytes_sync(
     model: str | None = None,
     media_type: str = "image/png",
     timeout: float = 120,
+    preserve_source: bool = True,
 ) -> bytes:
     """Sync-обёртка для profit_card / telegram_bot."""
     import asyncio
@@ -574,6 +648,7 @@ def edit_image_bytes_sync(
                         model=model,
                         media_type=media_type,
                         timeout=timeout,
+                        preserve_source=preserve_source,
                     )
                 )
             )
@@ -585,44 +660,9 @@ def edit_image_bytes_sync(
             model=model,
             media_type=media_type,
             timeout=timeout,
+            preserve_source=preserve_source,
         )
     )
-
-
-def normalize_image_bytes(image_bytes: bytes, media_type: str = "image/jpeg") -> tuple[bytes, str]:
-    from io import BytesIO
-
-    try:
-        from PIL import Image
-    except Exception:
-        return image_bytes, media_type or "image/jpeg"
-
-    try:
-        im = Image.open(BytesIO(image_bytes))
-        im.load()
-        if im.mode in ("RGBA", "P", "LA"):
-            bg = Image.new("RGB", im.size, (0, 0, 0))
-            if im.mode == "P":
-                im = im.convert("RGBA")
-            bg.paste(im, mask=im.split()[-1] if im.mode in ("RGBA", "LA") else None)
-            im = bg
-        elif im.mode != "RGB":
-            im = im.convert("RGB")
-        max_edge = 1400
-        w, h = im.size
-        scale = min(1.0, max_edge / max(w, h))
-        if scale < 1.0:
-            im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.Resampling.LANCZOS)
-        out = BytesIO()
-        im.save(out, format="JPEG", quality=82, optimize=True)
-        return out.getvalue(), "image/jpeg"
-    except Exception as e:
-        print(f"[ai_client] normalize_image skip: {e}")
-        mt = (media_type or "image/jpeg").lower()
-        if mt in ("image/jpg", "image/heic", "image/heif"):
-            mt = "image/jpeg"
-        return image_bytes, mt
-
 
 async def openai_chat_completion(payload: dict, *, timeout: float = 30) -> dict:
     """OpenAI-совместимый чат — для «Ника» (OpenRouter → …)."""

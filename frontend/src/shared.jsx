@@ -32,12 +32,15 @@ export const APP_SECTIONS = [
 export const PNL_WIN_MULT = 1.22
 export const PNL_LOSS_MULT = 0.42
 export const WR_CAP = 92
+export const LEVERAGE = 15  // как в ТВХ и open_position_card
 
 export function displayPnl(pnl) {
   const n = parseFloat(pnl || 0)
   if (!Number.isFinite(n)) return 0
-  if (n > 0) return Math.round(n * PNL_WIN_MULT * 10) / 10
-  if (n < 0) return Math.round(n * PNL_LOSS_MULT * 10) / 10
+  // История теперь тоже с плечом 15x
+  const leveraged = n * LEVERAGE
+  if (leveraged > 0) return Math.round(leveraged * PNL_WIN_MULT * 10) / 10
+  if (leveraged < 0) return Math.round(leveraged * PNL_LOSS_MULT * 10) / 10
   return 0
 }
 
