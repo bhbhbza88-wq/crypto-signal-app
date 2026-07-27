@@ -87,34 +87,47 @@ def build_position_metrics(
     entry: float,
     leverage: int | None = None,
     stop: float | None = None,
+    mark_price: float | None = None,
+    margin: float | None = None,
 ) -> dict:
-    """Реалистичные цифры «только что открыли / уже чуть в плюсе»."""
+    """Реалистичные цифры открытой позиции (плечо + mark → PnL/ROI)."""
     side = (side or "LONG").upper()
     lev = int(leverage or SHARE_LEVERAGE)
     entry = float(entry)
     rng = random.Random(f"{_coin(symbol)}:{side}:{round(entry, 6)}:{lev}")
 
-    # небольшое движение цены в нашу сторону (0.3% … 1.8% без плеча)
-    move_pct = rng.uniform(0.004, 0.018)
+    if mark_price is not None and float(mark_price) > 0:
+        mark = float(mark_price)
+        if side == "LONG":
+            move_pct = (mark - entry) / entry
+        else:
+            move_pct = (entry - mark) / entry
+    else:
+        # небольшое движение цены в нашу сторону (0.3% … 1.8% без плеча)
+        move_pct = rng.uniform(0.004, 0.018)
+        if side == "LONG":
+            mark = entry * (1 + move_pct)
+        else:
+            mark = entry * (1 - move_pct)
+
     if side == "LONG":
-        mark = entry * (1 + move_pct)
         liq = entry * (1 - 0.85 / max(lev, 1))
     else:
-        mark = entry * (1 - move_pct)
         liq = entry * (1 + 0.85 / max(lev, 1))
 
     if stop and float(stop) > 0:
-        # SL на карточке чуть ближе к стопу сигнала
         sl = float(stop)
     else:
         sl = entry * (0.97 if side == "LONG" else 1.03)
 
     # маржа ~ 5–25 USDT, notional = margin * lev
-    margin = rng.uniform(5.5, 22.0)
+    if margin is None or float(margin) <= 0:
+        margin = rng.uniform(5.5, 22.0)
+    else:
+        margin = float(margin)
     notional = margin * lev
     holdings = notional  # в USDT на Bybit «Холдинги»
-    pnl_usdt = notional * move_pct if side == "LONG" else notional * move_pct
-    # для short move_pct уже «в нашу сторону»
+    pnl_usdt = notional * move_pct
     roi_pct = move_pct * lev * 100.0
     margin_ratio = rng.uniform(8.0, 22.0)
     realized = -rng.uniform(0.01, 0.08)  # комиссия
@@ -272,7 +285,7 @@ def _render_bybit_pil(m: dict) -> bytes:
     put((780, 730, 1100, 775), tpsl, _font(22), WHITE, align="right")
 
     buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    img.save(buf, format="PNG", compress_level=6)
     return buf.getvalue()
 
 
@@ -329,7 +342,7 @@ def _render_bingx_pil(m: dict) -> bytes:
         draw.text((cols[i], y2 + 5), text, font=_font(34, bold=True), fill=WHITE)
 
     buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    img.save(buf, format="PNG", compress_level=6)
     return buf.getvalue()
 
 
@@ -340,13 +353,21 @@ def render_open_position_card(
     leverage: int | None = None,
     stop: float | None = None,
     style: str | None = None,
+    mark_price: float | None = None,
+    margin: float | None = None,
 ) -> bytes:
     """
     PNG открытой позиции под монету.
     style: 'bybit' | 'bingx' | None (случайный по seed).
     """
     m = build_position_metrics(
-        symbol=symbol, side=side, entry=entry, leverage=leverage, stop=stop
+        symbol=symbol,
+        side=side,
+        entry=entry,
+        leverage=leverage,
+        stop=stop,
+        mark_price=mark_price,
+        margin=margin,
     )
     use_style = (style or m["style"]).lower()
     if use_style not in ("bybit", "bingx"):
@@ -372,11 +393,14 @@ def render_open_position_card(
                 image_bytes=path.read_bytes(),
                 prompt=_open_edit_prompt(m, use_style),
                 media_type=media,
+                model="google/gemini-3.1-flash-image",  # full quality, not lite
                 timeout=float(os.getenv("OPEN_POS_AI_TIMEOUT", "120") or "120"),
             )
-            img = Image.open(io.BytesIO(edited)).convert("RGB")
+            img = Image.open(io.BytesIO(edited))
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGB")
             buf = io.BytesIO()
-            img.save(buf, format="PNG", optimize=True)
+            img.save(buf, format="PNG", compress_level=6)
             return buf.getvalue()
         except Exception as e:
             print(f"[open_position_card] AI edit failed ({use_style}): {e} — fallback PIL")

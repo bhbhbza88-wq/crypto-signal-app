@@ -5,6 +5,7 @@ Telegram-бот NOWICKI: меню, Premium, публикация сигнало�
   - ТВХ (открытия) → TELEGRAM_PREMIUM_CHANNEL_IDS (CSV), fallback TELEGRAM_CHAT_ID
   - Закрытия / результаты → TELEGRAM_PUBLIC_CHANNEL_ID
   - Trend/phase/daily → не публикуем (канал ТВХ остаётся чистым copy-trading)
+  - Автопересылка 1 сигнал/день в TELEGRAM_NEWS_TARGET_CHANNEL (если AUTO_FORWARD_TO_NEWS=1)
 
 Env:
   TELEGRAM_BOT_TOKEN
@@ -13,6 +14,8 @@ Env:
   TELEGRAM_PREMIUM_CHAT_ID      — чат (invite при grant; автопосты ТВХ по умолчанию выкл)
   TELEGRAM_PUBLIC_CHANNEL_ID    — публичный канал результатов
   TELEGRAM_PUBLIC_CHANNEL_URL   — https://t.me/... для кнопок/бота
+  TELEGRAM_NEWS_TARGET_CHANNEL  — канал для автопересылки 1 сигнала/день (@nowicki_news)
+  AUTO_FORWARD_TO_NEWS          — вкл/выкл автопересылку (по умолчанию 1)
   TELEGRAM_ADMIN_IDS            — CSV telegram user id админов (/grant)
   PUBLIC_CHANNEL_MAX_LOSS_PCT   — макс. |PnL%| минуса для публикации в публичный канал (default 3.0)
   CRYPTO_PAY_ADDRESS / NETWORK / AMOUNT — ручной USDT (fallback)
@@ -55,6 +58,12 @@ HR = "────────────"
 
 # Ожидание email после «Я оплатил»: telegram_chat_id -> True
 _awaiting_email: dict[int, bool] = {}
+
+# Последнее опубликованное сообщение в премиум канале: (chat_id, message_id)
+_last_premium_message: tuple[str, int] | None = None
+
+# Дата последней пересылки в news канал (для ограничения 1 раз в день)
+_last_forward_date: str | None = None
 
 
 def _parse_id_list(raw: str) -> list[str]:
@@ -159,14 +168,16 @@ async def publish_signal_open(
     photo_png: bytes | None = None,
 ):
     """ТВХ — только в premium-каналы (чат без автопостов)."""
+    global _last_premium_message
     targets = premium_channel_ids()
     if not targets:
         print("[telegram_bot] нет premium channel id — ТВХ не отправлен")
         return
     for cid in targets:
+        msg_id = None
         if photo_png:
             try:
-                await _api(
+                data = await _api(
                     "sendPhoto",
                     {
                         "chat_id": cid,
@@ -176,10 +187,27 @@ async def publish_signal_open(
                     },
                     files={"photo": ("open.png", photo_png, "image/png")},
                 )
-                continue
+                if data and data.get("ok"):
+                    msg_id = data.get("result", {}).get("message_id")
             except Exception as e:
                 print(f"[telegram_bot] open_pos photo send: {e}")
-        await _send_to(cid, text, reply_markup)
+
+        if msg_id is None:
+            payload = {
+                "chat_id": cid,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
+            data = await _api("sendMessage", payload)
+            if data and data.get("ok"):
+                msg_id = data.get("result", {}).get("message_id")
+
+        if msg_id and not _last_premium_message:
+            _last_premium_message = (cid, msg_id)
+            print(f"[telegram_bot] saved last premium message: {cid} / {msg_id}")
 
 
 async def publish_signal_closed(text: str, reply_markup: dict | None = None, photo_png: bytes | None = None):
@@ -754,21 +782,40 @@ def _open_position_photo(signal: dict) -> bytes | None:
         return None
     try:
         from open_position_card import render_open_position_card
+        import data_layer
 
-        lev = signal.get("leverage") or signal.get("lev")
+        # Всегда используем 15x
+        leverage = 15
+        
+        # Получаем живую цену
+        symbol = str(signal.get("symbol") or "")
+        exchange = (signal.get("exchange") or signal.get("listed_on") or "bybit").split(",")[0].strip().lower()
+        mark_price = None
         try:
-            lev_i = int(lev) if lev else None
-        except (TypeError, ValueError):
-            lev_i = None
+            ticker = data_layer.fetch_ticker(symbol, exchange)
+            if ticker and ticker.get("last") is not None:
+                mark_price = float(ticker["last"])
+        except Exception as e:
+            print(f"[telegram_bot] ticker fetch: {e}")
+        
+        entry = float(signal.get("entry") or 0)
+        # Если нет live цены - добавим небольшой рост
+        if mark_price is None or mark_price <= 0:
+            mark_price = entry * 1.008  # ~0.8% в плюс как fallback
+        
         return render_open_position_card(
-            symbol=str(signal.get("symbol") or ""),
+            symbol=symbol,
             side=str(signal.get("signal") or "LONG"),
-            entry=float(signal.get("entry") or 0),
-            leverage=lev_i,
+            entry=entry,
+            leverage=leverage,
             stop=float(signal["stop"]) if signal.get("stop") else None,
+            mark_price=mark_price,
+            margin=12.0,  # типичная маржа для 15x
         )
     except Exception as e:
         print(f"[telegram_bot] open_position_card: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -784,7 +831,15 @@ async def notify_new_signal(signal: dict):
     reasons = signal.get("entry_reasons", [])
 
     side_emoji = "🟢 LONG" if side == "LONG" else "🔴 SHORT"
-    conf = round((score / 20) * 100) if score else 0
+    try:
+        score_f = float(score or 0)
+    except (TypeError, ValueError):
+        score_f = 0.0
+    # quality filter (0–100) vs legacy score (/20)
+    if score_f > 20:
+        conf = max(0, min(100, round(score_f)))
+    else:
+        conf = round((score_f / 20) * 100) if score_f else 0
     conf_line = f"\n⚡ Уверенность · <b>{conf}%</b>" if conf else ""
     venues = _exchange_label(signal)
 
@@ -794,6 +849,7 @@ async def notify_new_signal(signal: dict):
         f"{side_emoji}\n"
         f"<b>{sym}</b>{conf_line}\n"
         f"<i>доступно: {venues}</i>\n"
+        f"<i>Плечо · 15x</i>\n"
         f"{HR}\n"
         f"{_levels_block(entry, stop, tp1, tp2, tp3)}\n"
     )
@@ -804,6 +860,9 @@ async def notify_new_signal(signal: dict):
             text += f"{HR}\n" + "\n".join(f"· {r}" for r in clean) + "\n"
     text += f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>  ·  <i>не фин. совет</i>"
     await publish_signal_open(text, _channel_cta(), photo_png=_open_position_photo(signal))
+    
+    # Автопересылка в news канал (1 раз в день)
+    await forward_last_signal_to_news()
 
 
 async def notify_manual_signal(signal: dict, source: str):
@@ -823,11 +882,15 @@ async def notify_manual_signal(signal: dict, source: str):
         f"{side_emoji}\n"
         f"<b>{sym}</b>\n"
         f"<i>доступно: {venues}</i>\n"
+        f"<i>Плечо · 15x</i>\n"
         f"{HR}\n"
         f"{_levels_block(entry, stop, tp1, tp2, tp3)}\n"
         f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>  ·  <i>не фин. совет</i>"
     )
     await publish_signal_open(text, _channel_cta(), photo_png=_open_position_photo(signal))
+    
+    # Автопересылка в news канал (1 раз в день)
+    await forward_last_signal_to_news()
 
 
 
@@ -928,3 +991,74 @@ async def send_daily_summary(stats: dict):
         f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>"
     )
     await publish_signal_closed(text, _results_cta())
+
+
+async def forward_last_signal_to_news() -> bool:
+    """
+    Пересылает последнее опубликованное сообщение из премиум канала в news канал.
+    Ограничение: 1 раз в день (проверяется по UTC дате).
+    Возвращает True при успехе, False при ошибке.
+    """
+    global _last_premium_message, _last_forward_date
+    
+    # Проверяем env флаг
+    if os.getenv("AUTO_FORWARD_TO_NEWS", "1").strip().lower() in ("0", "false", "no", "off"):
+        print("[telegram_bot] AUTO_FORWARD_TO_NEWS отключён")
+        return False
+    
+    # Проверяем, была ли уже пересылка сегодня
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    if _last_forward_date == today:
+        print(f"[telegram_bot] пересылка в news уже была сегодня ({today})")
+        return False
+    
+    if not _last_premium_message:
+        print("[telegram_bot] нет сохранённого message_id для пересылки")
+        return False
+    
+    chat_id, msg_id = _last_premium_message
+    news_channel = (
+        os.getenv("TELEGRAM_NEWS_TARGET_CHANNEL")
+        or os.getenv("MARKET_OUTLOOK_CHANNEL")
+        or ""
+    ).strip()
+    
+    if not news_channel:
+        print("[telegram_bot] TELEGRAM_NEWS_TARGET_CHANNEL не задан")
+        return False
+    
+    # Приводим к правильному формату (@channel или -100...)
+    if not news_channel.startswith("@") and not news_channel.startswith("-"):
+        news_channel = f"@{news_channel.lstrip('@')}"
+    
+    print(f"[telegram_bot] пересылаем сообщение {msg_id} из {chat_id} в {news_channel}")
+    
+    payload = {
+        "chat_id": news_channel,
+        "from_chat_id": chat_id,
+        "message_id": msg_id,
+    }
+    
+    data = await _api("forwardMessage", payload)
+    
+    if data and data.get("ok"):
+        print(f"[telegram_bot] ✅ сообщение переслано в {news_channel}")
+        # Очищаем, чтобы не пересылать это сообщение снова
+        _last_premium_message = None
+        _last_forward_date = today
+        return True
+    else:
+        print(f"[telegram_bot] ❌ ошибка пересылки: {data}")
+        # Fallback на copyMessage если forwardMessage не сработал
+        print("[telegram_bot] пробуем copyMessage...")
+        copy_data = await _api("copyMessage", payload)
+        if copy_data and copy_data.get("ok"):
+            print(f"[telegram_bot] ✅ сообщение скопировано в {news_channel} (без пометки 'Forwarded')")
+            _last_premium_message = None
+            _last_forward_date = today
+            return True
+        else:
+            print(f"[telegram_bot] ❌ copyMessage тоже не сработал: {copy_data}")
+            return False
