@@ -268,60 +268,149 @@ def _best_trendline(
     return best
 
 
+def _zone_from_candle(
+    df: pd.DataFrame,
+    idx: int,
+    *,
+    kind: str,
+    atr: float,
+) -> tuple[float, float, float]:
+    """Order-block style box from the swing candle (+ small pad)."""
+    i = int(max(0, min(len(df) - 1, idx)))
+    row = df.iloc[i]
+    o, h, l, c = float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"])
+    pad = atr * 0.08
+    if kind == "supply":
+        # Body top ? wick high (resistance base).
+        body_lo = min(o, c)
+        top = h + pad
+        bot = min(body_lo, h - atr * 0.35)
+        # Keep a readable band.
+        if top - bot < atr * 0.35:
+            bot = top - atr * 0.45
+        if top - bot > atr * 1.35:
+            bot = top - atr * 1.35
+        mid = (top + bot) / 2.0
+        return float(top), float(bot), float(mid)
+    body_hi = max(o, c)
+    bot = l - pad
+    top = max(body_hi, l + atr * 0.35)
+    if top - bot < atr * 0.35:
+        top = bot + atr * 0.45
+    if top - bot > atr * 1.35:
+        top = bot + atr * 1.35
+    mid = (top + bot) / 2.0
+    return float(top), float(bot), float(mid)
+
+
 def _build_zones(
+    df: pd.DataFrame,
     highs: list[tuple[int, float]],
     lows: list[tuple[int, float]],
     *,
     atr: float,
     last_c: float,
 ) -> list[dict[str, Any]]:
-    """Grey supply/demand boxes like Bukvar (from swing pivots)."""
+    """Always try for 1 grey supply (above) + 1 grey demand (below), Bukvar-style."""
     atr = max(atr, last_c * 0.004)
+    n = len(df)
     zones: list[dict[str, Any]] = []
 
-    def _add(kind: str, pivots: list[tuple[int, float]], limit: int) -> None:
+    def _score(kind: str, i: int, pivot: float) -> float | None:
+        dist = (pivot - last_c) / atr if kind == "supply" else (last_c - pivot) / atr
+        # Allow zones on price (testing) and up to ~7 ATR / ~8% away.
+        if dist < -0.15:
+            return None
+        max_dist = max(7.0, (last_c * 0.08) / atr)
+        if dist > max_dist:
+            return None
+        # Prefer a clear band (~1-3 ATR), not a hairline under last price.
+        sweet = -abs(dist - 2.0) * 0.9
+        if 0.9 <= dist <= 3.5:
+            sweet += 1.6
+        if dist < 0.35:
+            sweet -= 0.8  # too glued to price unless it's the only option
+        recency = i / max(1, n - 1)
+        return sweet + recency * 1.2
+
+    def _pick(kind: str, pivots: list[tuple[int, float]]) -> dict[str, Any] | None:
         scored: list[tuple[float, dict[str, Any]]] = []
         for i, p in pivots:
-            if kind == "supply":
-                if p < last_c + atr * 0.12:
+            sc = _score(kind, i, p)
+            if sc is None:
+                continue
+            top, bot, mid = _zone_from_candle(df, i, kind=kind, atr=atr)
+            if kind == "supply" and bot <= last_c + atr * 0.05:
+                # Shift box so it overhangs when price is pressing / broke the pivot.
+                lift = max(0.0, last_c + atr * 0.08 - bot)
+                top += lift
+                bot += lift
+                mid = (top + bot) / 2.0
+                if bot < last_c - atr * 0.25:
                     continue
-                if p > last_c + atr * 5.0:
+            if kind == "demand" and top >= last_c - atr * 0.05:
+                drop = max(0.0, top - (last_c - atr * 0.08))
+                top -= drop
+                bot -= drop
+                mid = (top + bot) / 2.0
+                if top > last_c + atr * 0.25:
                     continue
-                top = p + atr * 0.12
-                bot = p - atr * 0.55
-            else:
-                if p > last_c - atr * 0.12:
-                    continue
-                if p < last_c - atr * 5.0:
-                    continue
-                top = p + atr * 0.55
-                bot = p - atr * 0.12
-            # Prefer nearest to price, then more recent.
-            score = -abs(p - last_c) / atr + (i / 500.0)
             scored.append(
                 (
-                    score,
+                    sc,
                     {
                         "kind": kind,
                         "top": float(top),
                         "bot": float(bot),
-                        "start_i": int(max(0, i - 2)),
-                        "mid": float(p),
+                        "start_i": int(max(0, i - 3)),
+                        "mid": float(mid),
                     },
                 )
             )
+        if not scored:
+            return None
         scored.sort(reverse=True)
-        picked: list[dict[str, Any]] = []
-        for _, z in scored:
-            if any(abs(z["mid"] - p["mid"]) < atr * 0.7 for p in picked):
-                continue
-            picked.append(z)
-            if len(picked) >= limit:
-                break
-        zones.extend(picked)
+        return scored[0][1]
 
-    _add("supply", highs[-10:], 1)
-    _add("demand", lows[-10:], 1)
+    supply = _pick("supply", highs[-14:])
+    demand = _pick("demand", lows[-14:])
+
+    # Fallbacks from strongest recent swing / visible extreme so both sides exist.
+    if supply is None and highs:
+        i, p = max(highs[-8:], key=lambda t: t[1])
+        top, bot, mid = _zone_from_candle(df, i, kind="supply", atr=atr)
+        if mid < last_c:
+            shift = (last_c + atr * 0.25) - mid
+            top += shift
+            bot += shift
+            mid += shift
+        supply = {
+            "kind": "supply",
+            "top": float(top),
+            "bot": float(bot),
+            "start_i": int(max(0, i - 3)),
+            "mid": float(mid),
+        }
+    if demand is None and lows:
+        i, p = min(lows[-8:], key=lambda t: t[1])
+        top, bot, mid = _zone_from_candle(df, i, kind="demand", atr=atr)
+        if mid > last_c:
+            shift = mid - (last_c - atr * 0.25)
+            top -= shift
+            bot -= shift
+            mid -= shift
+        demand = {
+            "kind": "demand",
+            "top": float(top),
+            "bot": float(bot),
+            "start_i": int(max(0, i - 3)),
+            "mid": float(mid),
+        }
+
+    if supply:
+        zones.append(supply)
+    if demand:
+        zones.append(demand)
     return zones
 
 
@@ -333,24 +422,31 @@ def _structure_from_df(
     bias: str = "long",
     key_level: float | None = None,
 ) -> dict[str, Any]:
-    """Zones (max 1 supply + 1 demand) + single orange key level. No trendline clutter."""
+    """Zones (1 supply + 1 demand) + single orange key level. No trendline clutter."""
     n = len(df)
     order = 3 if n < 90 else 4
     highs = _swing_pivots(df, "high", order=order)
     lows = _swing_pivots(df, "low", order=order)
-    highs = highs[-12:]
-    lows = lows[-12:]
+    highs = highs[-14:]
+    lows = lows[-14:]
     range_low = float(df["low"].astype(float).min())
     range_high = float(df["high"].astype(float).max())
 
     h_res = _cluster_levels(highs, atr=atr, last_c=last_c, kind="high", max_levels=1)
     h_sup = _cluster_levels(lows, atr=atr, last_c=last_c, kind="low", max_levels=1)
-    zones = _build_zones(highs, lows, atr=atr, last_c=last_c)
+    zones = _build_zones(df, highs, lows, atr=atr, last_c=last_c)
 
     swing_high = max((p for _, p in highs), default=range_high)
     swing_low = min((p for _, p in lows), default=range_low)
-    resistance = min([p for p in h_res if p >= last_c], default=swing_high)
-    support = max([p for p in h_sup if p <= last_c], default=swing_low)
+    # Resistance: nearest meaningful high at/above price (incl. local high being tested).
+    above = [p for _, p in highs if p >= last_c - atr * 0.15]
+    below = [p for _, p in lows if p <= last_c + atr * 0.15]
+    resistance = min(above, default=swing_high) if above else (
+        min([p for p in h_res if p >= last_c], default=swing_high)
+    )
+    support = max(below, default=swing_low) if below else (
+        max([p for p in h_sup if p <= last_c], default=swing_low)
+    )
 
     demand_mid = next((float(z["mid"]) for z in zones if z["kind"] == "demand"), support)
     supply_mid = next((float(z["mid"]) for z in zones if z["kind"] == "supply"), resistance)
@@ -359,9 +455,9 @@ def _structure_from_df(
     kl = _fnum(key_level)
     if kl is None:
         if (bias or "long").lower() == "short":
-            kl = supply_mid if supply_mid > last_c else resistance
+            kl = supply_mid if supply_mid >= last_c - atr * 0.2 else resistance
         else:
-            kl = demand_mid if demand_mid < last_c else support
+            kl = demand_mid if demand_mid <= last_c + atr * 0.2 else support
     orange_levels = [float(kl)] if kl else []
 
     return {
