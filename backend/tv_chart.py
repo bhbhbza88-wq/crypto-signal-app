@@ -933,7 +933,7 @@ def render_candle_png(
     )
 
     y_min, y_max = float(lows.min()), float(highs.max())
-    for k in ("support", "resistance", "invalidation", "target_1", "target_2"):
+    for k in ("support", "resistance", "target_1", "target_2"):
         try:
             if lv.get(k) is not None:
                 v = float(lv[k])
@@ -942,7 +942,7 @@ def render_candle_png(
                     y_max = max(y_max, v)
         except (TypeError, ValueError):
             pass
-    for p in (support_v, resistance_v, invalidation_v, swing_low, swing_high):
+    for p in (support_v, resistance_v, swing_low, swing_high):
         if p is not None:
             y_min = min(y_min, float(p))
             y_max = max(y_max, float(p))
@@ -1076,32 +1076,8 @@ def render_candle_png(
     # encoding mangling regardless of how this file gets saved.
     lbl_supply = "\u041f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"  # "Predlozhenie"
     lbl_demand = "\u0421\u043f\u0440\u043e\u0441"  # "Spros"
-    lbl_target = "\u0446\u0435\u043b\u044c"  # "tsel'"
-    lbl_stop = "\u0441\u0442\u043e\u043f"  # "stop"
     zone_label_ru = {"supply": lbl_supply, "demand": lbl_demand}
     zone_label_col = {"supply": (235, 150, 150), "demand": (150, 210, 190)}
-
-    # Target / invalidation guide lines (thin dashed) ? visual match for the
-    # levels already cited in the post text.
-    guide_lines = [(lbl_target, float(target), green if bias_norm != "short" else red)]
-    if invalidation_v is not None:
-        guide_lines.append((lbl_stop, float(invalidation_v), red if bias_norm != "short" else green))
-    for label, price, col in guide_lines:
-        yy = yx(price)
-        if yy < pad_t + 2 or yy > pad_t + plot_h - 2:
-            continue
-        _draw_dashed_hline(
-            draw, hist_right, plot_right, yy, (*col, 150), dash=7 * scale, gap=5 * scale, width=scale
-        )
-        lbl = f"{label} {_fmt(price)}"
-        tw = int(draw.textlength(lbl, font=font_xs))
-        lx = hist_right + 8 * scale
-        ly = yy - 15 * scale if yy > pad_t + 16 * scale else yy + 4 * scale
-        draw.rectangle(
-            [lx - 3 * scale, ly - 2 * scale, lx + tw + 3 * scale, ly + 13 * scale],
-            fill=(10, 12, 16, 190),
-        )
-        draw.text((lx, ly), lbl, font=font_xs, fill=col)
 
     # Single orange key level (the one referenced in the post text).
     mtf_confirmed = bool(lv.get("mtf_confirmed"))
