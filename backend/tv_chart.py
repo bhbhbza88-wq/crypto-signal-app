@@ -984,11 +984,12 @@ def render_candle_png(
 
     img = Image.new("RGBA", (W, H), (*bg, 255))
     draw = ImageDraw.Draw(img)
-    font_xs = _font(12 * scale)
-    font_sm = _font(13 * scale)
-    font_lg = _font(16 * scale, bold=True)
-    font_price = _font(13 * scale, bold=True)
-    font_wm = _font(26 * scale)
+    # ????????? ??????? ??? ????????????? timeframe/???/???????
+    font_xs = _font(14 * scale)
+    font_sm = _font(15 * scale)
+    font_lg = _font(18 * scale, bold=True)
+    font_price = _font(15 * scale, bold=True)
+    font_wm = _font(28 * scale)
 
     n_grid = 7
     for g in range(n_grid):
