@@ -167,8 +167,14 @@ async def publish_signal_open(
     reply_markup: dict | None = None,
     photo_png: bytes | None = None,
 ):
-    """ТВХ — только в premium-каналы (чат без автопостов)."""
+    """ТВХ в premium-каналы БЕЗ кнопок (чтобы была вкладка Комментарии).
+
+    Сайт/Бот вешаем на дубликат поста в чате обсуждений.
+    """
+    import asyncio
+
     global _last_premium_message
+    _ = reply_markup  # в канале кнопок не должно быть
     targets = premium_channel_ids()
     if not targets:
         print("[telegram_bot] нет premium channel id — ТВХ не отправлен")
@@ -183,7 +189,6 @@ async def publish_signal_open(
                         "chat_id": cid,
                         "caption": text if len(text) <= 1024 else (text[:1000].rstrip() + "…"),
                         "parse_mode": "HTML",
-                        "reply_markup": _json.dumps(reply_markup) if reply_markup else None,
                     },
                     files={"photo": ("open.png", photo_png, "image/png")},
                 )
@@ -193,42 +198,54 @@ async def publish_signal_open(
                 print(f"[telegram_bot] open_pos photo send: {e}")
 
         if msg_id is None:
-            payload = {
+            data = await _api("sendMessage", {
                 "chat_id": cid,
                 "text": text,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
-            }
-            if reply_markup:
-                payload["reply_markup"] = reply_markup
-            data = await _api("sendMessage", payload)
+            })
             if data and data.get("ok"):
                 msg_id = data.get("result", {}).get("message_id")
 
         if msg_id and not _last_premium_message:
             _last_premium_message = (cid, msg_id)
             print(f"[telegram_bot] saved last premium message: {cid} / {msg_id}")
+        if msg_id:
+            asyncio.create_task(_ensure_discussion_cta(cid, msg_id))
 
 
 async def publish_signal_closed(text: str, reply_markup: dict | None = None, photo_png: bytes | None = None):
-    """Закрытия — только публичный канал результатов."""
+    """Закрытия в публичный канал без кнопок; CTA — в чат комментариев."""
+    import asyncio
+
+    _ = reply_markup
     cid = public_results_id()
     if not cid:
-        # Миграция: если public ещё не задан — не спамим premium-каналы закрытиями
         print("[telegram_bot] TELEGRAM_PUBLIC_CHANNEL_ID не задан — закрытие не опубликовано")
         return
+    msg_id = None
     if photo_png:
         try:
-            await _api("sendPhoto", {
+            data = await _api("sendPhoto", {
                 "chat_id": cid,
                 "caption": text,
                 "parse_mode": "HTML",
-                "reply_markup": _json.dumps(reply_markup) if reply_markup else None,
             }, files={"photo": ("close.png", photo_png, "image/png")})
-            return
+            if data and data.get("ok"):
+                msg_id = data.get("result", {}).get("message_id")
         except Exception as e:
             print(f"[telegram_bot] profit_card send: {e}")
-    await _send_to(cid, text, reply_markup)
+    if msg_id is None:
+        data = await _api("sendMessage", {
+            "chat_id": cid,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        })
+        if data and data.get("ok"):
+            msg_id = data.get("result", {}).get("message_id")
+    if msg_id:
+        asyncio.create_task(_ensure_discussion_cta(cid, msg_id))
 
 
 async def publish_news(
@@ -236,13 +253,10 @@ async def publish_news(
     reply_markup: dict | None = None,
     photo_png: bytes | None = None,
 ):
-    """Аналитика / outlook → канал новостей (бот должен быть админом).
+    """Outlook → news-канал без кнопок; Сайт/Бот — в чат обсуждений."""
+    import asyncio
 
-    Важно: НЕ ставим inline-кнопки. В Telegram у постов с reply_markup
-    пропадает нативная вкладка «Комментарии» (ожидаемое поведение API).
-    """
-    # Принудительно без кнопок — комментарии важнее CTA
-    reply_markup = None
+    _ = reply_markup
     raw = (
         os.getenv("TELEGRAM_NEWS_TARGET_CHANNEL")
         or os.getenv("MARKET_OUTLOOK_CHANNEL")
@@ -252,8 +266,8 @@ async def publish_news(
         print("[telegram_bot] TELEGRAM_NEWS_TARGET_CHANNEL не задан — news skip")
         return
     cid = raw if raw.startswith("@") or raw.lstrip("-").isdigit() else f"@{raw.lstrip('@')}"
-    # Telegram caption limit 1024
     caption = text if len(text) <= 1024 else (text[:1000].rstrip() + "…")
+    msg_id = None
     if photo_png:
         try:
             data = await _api(
@@ -266,14 +280,24 @@ async def publish_news(
                 files={"photo": ("chart.png", photo_png, "image/png")},
             )
             if data and data.get("ok"):
-                # если текст длиннее caption — добить вторым сообщением
+                msg_id = data.get("result", {}).get("message_id")
                 if len(text) > 1024:
                     await _send_to(cid, text)
-                return
-            print(f"[telegram_bot] publish_news photo fail: {data}", flush=True)
+            else:
+                print(f"[telegram_bot] publish_news photo fail: {data}", flush=True)
         except Exception as e:
             print(f"[telegram_bot] publish_news photo: {e}", flush=True)
-    await _send_to(cid, text)
+    if msg_id is None:
+        data = await _api("sendMessage", {
+            "chat_id": cid,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        })
+        if data and data.get("ok"):
+            msg_id = data.get("result", {}).get("message_id")
+    if msg_id:
+        asyncio.create_task(_ensure_discussion_cta(cid, msg_id))
 
 
 # Обратная совместимость для старых вызовов
@@ -318,22 +342,109 @@ def _premium_kb(pay_url: str | None = None, pay_label: str = "💳 Оплати�
 
 
 def _results_cta():
-    return {"inline_keyboard": [
-        [
-            {"text": "🌐 Сайт", "url": SITE_URL},
-            {"text": "💎 Premium", "url": f"{BOT_URL}?start=premium"},
-        ],
-    ]}
+    """CTA для закрытий — в discussion, не в канале."""
+    return _channel_cta()
 
 
 def _channel_cta():
-    """Кнопки под постами ТВХ (premium)."""
+    """Кнопки Сайт/Бот — только в чате обсуждений под дубликатом поста."""
     return {"inline_keyboard": [
         [
             {"text": "🌐 Сайт", "url": SITE_URL},
             {"text": "🤖 Бот", "url": BOT_URL},
         ],
     ]}
+
+
+async def _attach_discussion_cta(chat_id: int | str, message_id: int) -> bool:
+    """Вешает Сайт/Бот на дубликат поста в чате комментариев."""
+    if not chat_id or not message_id:
+        return False
+    data = await _api(
+        "editMessageReplyMarkup",
+        {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reply_markup": _json.dumps(_channel_cta()),
+        },
+    )
+    if data and data.get("ok"):
+        print(f"[telegram_bot] CTA в комменты chat={chat_id} msg={message_id}")
+        return True
+    # Fallback: ответ с кнопками, если edit авто-форварда запрещён
+    data2 = await _api(
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "reply_to_message_id": message_id,
+            "text": "🔗",
+            "reply_markup": _channel_cta(),
+            "disable_notification": True,
+        },
+    )
+    ok = bool(data2 and data2.get("ok"))
+    print(
+        f"[telegram_bot] CTA fallback reply chat={chat_id} msg={message_id} "
+        f"edit_err={data} reply_ok={ok}"
+    )
+    return ok
+
+
+async def _ensure_discussion_cta(channel_id: str | int, message_id: int) -> None:
+    """После поста в канал — найти тред в discussion и повесить кнопки туда."""
+    import asyncio
+
+    await asyncio.sleep(1.5)
+    try:
+        from telethon import TelegramClient
+        from telethon.sessions import StringSession
+        from telethon.tl.functions.messages import GetDiscussionMessageRequest
+        from telethon.utils import get_peer_id
+
+        api_id = int(os.getenv("TELEGRAM_API_ID") or "0")
+        api_hash = (os.getenv("TELEGRAM_API_HASH") or "").strip()
+        session = (
+            os.getenv("TELEGRAM_CHAT_SESSION")
+            or os.getenv("TELEGRAM_SESSION")
+            or ""
+        ).strip()
+        if not (api_id and api_hash and session):
+            print("[telegram_bot] discussion CTA: нет user-session — ждём webhook auto-forward")
+            return
+
+        client = TelegramClient(StringSession(session), api_id, api_hash)
+        await client.connect()
+        if not await client.is_user_authorized():
+            await client.disconnect()
+            print("[telegram_bot] discussion CTA: session не авторизована")
+            return
+
+        peer = int(channel_id) if str(channel_id).lstrip("-").isdigit() else channel_id
+        entity = await client.get_entity(peer)
+        result = await client(GetDiscussionMessageRequest(peer=entity, msg_id=int(message_id)))
+        disc_msg = None
+        for m in (result.messages or []):
+            if getattr(m, "id", None):
+                disc_msg = m
+                break
+        if not disc_msg:
+            await client.disconnect()
+            print(f"[telegram_bot] discussion CTA: тред не найден для {channel_id}/{message_id}")
+            return
+
+        disc_chat_id = None
+        if getattr(disc_msg, "peer_id", None):
+            disc_chat_id = get_peer_id(disc_msg.peer_id)
+        elif result.chats:
+            disc_chat_id = get_peer_id(result.chats[0])
+        await client.disconnect()
+
+        if disc_chat_id is None:
+            print("[telegram_bot] discussion CTA: нет chat id")
+            return
+        await _attach_discussion_cta(disc_chat_id, disc_msg.id)
+    except Exception as e:
+        print(f"[telegram_bot] discussion CTA fail: {e}")
 
 
 def _bot_username() -> str:
@@ -689,13 +800,18 @@ async def handle_update(update: dict):
     chat_type = (chat.get("type") or "").strip()
     from_user = message.get("from") or {}
     user_id = from_user.get("id")
+
+    # Чат обсуждений канала: на авто-форвард поста вешаем Сайт/Бот.
+    # На обычные сообщения людей — молчим (не шлём welcome).
+    if chat_type in ("group", "supergroup"):
+        if message.get("is_automatic_forward") and message.get("message_id"):
+            await _attach_discussion_cta(chat_id, message["message_id"])
+        return
+
     text = str(message.get("text") or "").strip()
     if not chat_id or not text:
         return
 
-    # Бот отвечает ТОЛЬКО в личке.
-    # В группах / чате обсуждений канала (@nowicki_news comments) — молчим,
-    # иначе каждое сообщение получает welcome про сайт/premium.
     if chat_type != "private":
         return
 
