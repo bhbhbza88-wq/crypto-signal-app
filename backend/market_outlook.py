@@ -69,6 +69,14 @@ OUTLOOK_SYSTEM_ANALYSIS = """
 1) Что сейчас происходит по монете (факт с графика/уровней).
 2) Что жду дальше + цель. Обязательно один раз human_key_level как «ключевой уровень».
 
+Важно про логику сценария:
+- Сценарий должен быть ОДИН и без противоречий. Нельзя писать «жду одно, но
+  пока жду другое» — выбери одно направление и держись его до конца текста.
+- Если называешь уровень (поддержка/сопротивление/цель), сразу пиши его число
+  из фактов — не оставляй уровень без цифры.
+- Число одного и того же уровня не нужно повторять дважды подряд — если уже
+  назвал его, дальше можно сказать просто «этот уровень» / «он же».
+
 Тон: спокойный трейдер, без «покупай сейчас», без эмодзи, без воды.
 Цены только из фактов. Когда упоминаешь ключевой уровень — пиши его числом
 (как в human_key_level из фактов), а не слово "human_key_level" буквально.
@@ -89,6 +97,8 @@ OUTLOOK_SYSTEM_UPDATE = """
 1 абзац, простые слова. Пример тона:
 «По SOL сценарий отрабатывает: сходили вниз и получили реакцию. Ключевой уровень — 74.88, дальше смотрю выше.»
 
+Сценарий должен быть ОДИН и без противоречий (не «жду одно, но пока другое»).
+Если называешь уровень — сразу дай его число из фактов.
 Обязательно упомяни ключевой уровень числом (значение human_key_level из
 фактов) — не пиши слово "human_key_level" буквально.
 Без эмодзи, без «покупай», без сложных терминов.
@@ -163,6 +173,19 @@ def _body_prices_sane(body: str, pool: list[float], *, tol: float = 0.015) -> bo
         if n <= 0:
             continue
         if not any(p > 0 and abs(n - p) / p <= tol for p in pool):
+            return False
+    return True
+
+
+_LEVEL_WORD_RE = re.compile(r"(поддержк\w*|сопротивлен\w*)", re.IGNORECASE)
+
+
+def _levels_have_numbers(body: str, *, window: int = 22) -> bool:
+    """Catches vague mentions like "к уровню поддержки" with no actual price."""
+    for m in _LEVEL_WORD_RE.finditer(body):
+        tail = body[m.end():m.end() + window]
+        head = body[max(0, m.start() - window):m.start()]
+        if not re.search(r"\d", tail) and not re.search(r"\d", head):
             return False
     return True
 
@@ -727,7 +750,12 @@ async def _publish_row(
 
     prev_body = (prev or {}).get("body")
     pool = _facts_price_pool(row, float(ai.get("key_level") or key_level))
-    if not _body_prices_sane(ai["body"], pool) or _too_similar(ai["body"], prev_body):
+    needs_retry = (
+        not _body_prices_sane(ai["body"], pool)
+        or not _levels_have_numbers(ai["body"])
+        or _too_similar(ai["body"], prev_body)
+    )
+    if needs_retry:
         print(
             f"[market_outlook] retrying AI text for {row['symbol']} "
             "(sanity/duplicate check failed)",
@@ -742,6 +770,7 @@ async def _publish_row(
             mtf_confirmed=mtf_confirmed,
             extra_hint=(
                 "Важно: используй только числа из фактов ниже, ни одной новой цифры. "
+                "Каждое упоминание поддержки/сопротивления — сразу с числом. "
                 "Сформулируй иначе, не повторяй прошлый текст."
             ),
         )
@@ -749,6 +778,7 @@ async def _publish_row(
         if (
             retry
             and _body_prices_sane(retry["body"], retry_pool)
+            and _levels_have_numbers(retry["body"])
             and not _too_similar(retry["body"], prev_body)
         ):
             ai = retry
