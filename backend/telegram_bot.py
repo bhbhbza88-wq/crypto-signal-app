@@ -184,6 +184,20 @@ async def publish_signal_closed(text: str, reply_markup: dict | None = None, pho
     await _send_to(cid, text, reply_markup)
 
 
+async def publish_news(text: str, reply_markup: dict | None = None):
+    """Аналитика / outlook → канал новостей (бот должен быть админом)."""
+    raw = (
+        os.getenv("TELEGRAM_NEWS_TARGET_CHANNEL")
+        or os.getenv("MARKET_OUTLOOK_CHANNEL")
+        or ""
+    ).strip()
+    if not raw:
+        print("[telegram_bot] TELEGRAM_NEWS_TARGET_CHANNEL не задан — news skip")
+        return
+    cid = raw if raw.startswith("@") or raw.lstrip("-").isdigit() else f"@{raw.lstrip('@')}"
+    await _send_to(cid, text, reply_markup)
+
+
 # Обратная совместимость для старых вызовов
 async def send_telegram(text: str, reply_markup: dict | None = None):
     await publish_signal_open(text, reply_markup)
