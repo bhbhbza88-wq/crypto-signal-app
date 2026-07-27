@@ -231,6 +231,36 @@ def _bump_posts_today(n: int = 1) -> None:
     db.set_setting(_SETTING_DAY, f"{_day_key()}:{cur + n}")
 
 
+def reset_posts_today() -> str:
+    """Force today's counter to 0. Returns the new setting value."""
+    val = f"{_day_key()}:0"
+    db.set_setting(_SETTING_DAY, val)
+    return val
+
+
+def _maybe_reset_day_cap_from_env() -> None:
+    """
+    One-shot reset when MARKET_OUTLOOK_RESET_DAY=1.
+    Consumed once per UTC day (tracked in settings) so a sticky env
+    doesn't disable the daily cap entirely.
+    """
+    flag = (os.getenv("MARKET_OUTLOOK_RESET_DAY") or "").strip().lower()
+    if flag not in ("1", "true", "yes", "on"):
+        return
+    day = _day_key()
+    consumed_key = "outlook_day_reset_consumed"
+    if (db.get_setting(consumed_key, "") or "") == day:
+        return
+    before = db.get_setting(_SETTING_DAY, "") or ""
+    reset_posts_today()
+    db.set_setting(consumed_key, day)
+    print(
+        f"[market_outlook] day cap reset via MARKET_OUTLOOK_RESET_DAY "
+        f"(before={before!r} after={day}:0)",
+        flush=True,
+    )
+
+
 def _fmt_price(v: float) -> str:
     n = float(v)
     if n >= 1000:
@@ -869,6 +899,7 @@ async def _publish_row(
 
 async def run_once() -> int:
     """Один проход: scan → shortlist → AI → publish. Возвращает число постов."""
+    _maybe_reset_day_cap_from_env()
     left_day = MAX_PER_DAY - _posts_today()
     if left_day <= 0:
         print(f"[market_outlook] day cap ({MAX_PER_DAY}) reached", flush=True)
