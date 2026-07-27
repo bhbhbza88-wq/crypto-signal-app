@@ -153,13 +153,32 @@ async def _send_to(chat_id: str, text: str, reply_markup: dict | None = None):
     await _api("sendMessage", payload)
 
 
-async def publish_signal_open(text: str, reply_markup: dict | None = None):
+async def publish_signal_open(
+    text: str,
+    reply_markup: dict | None = None,
+    photo_png: bytes | None = None,
+):
     """ТВХ — только в premium-каналы (чат без автопостов)."""
     targets = premium_channel_ids()
     if not targets:
         print("[telegram_bot] нет premium channel id — ТВХ не отправлен")
         return
     for cid in targets:
+        if photo_png:
+            try:
+                await _api(
+                    "sendPhoto",
+                    {
+                        "chat_id": cid,
+                        "caption": text if len(text) <= 1024 else (text[:1000].rstrip() + "…"),
+                        "parse_mode": "HTML",
+                        "reply_markup": _json.dumps(reply_markup) if reply_markup else None,
+                    },
+                    files={"photo": ("open.png", photo_png, "image/png")},
+                )
+                continue
+            except Exception as e:
+                print(f"[telegram_bot] open_pos photo send: {e}")
         await _send_to(cid, text, reply_markup)
 
 
@@ -684,15 +703,23 @@ async def handle_update(update: dict):
 
 
 def _fmt_price(v) -> str:
+    """Форматирование цены для постов: компактно, без лишних нулей."""
     try:
         n = float(v)
     except (TypeError, ValueError):
-        return str(v)
-    if n >= 100:
+        return str(v) if v else "—"
+    
+    # Для крупных (>= 1000) используем пробел как разделитель тысяч
+    if abs(n) >= 10000:
+        return f"{n:,.0f}".replace(",", " ")
+    if abs(n) >= 1000:
+        return f"{n:,.2f}".replace(",", " ")
+    if abs(n) >= 100:
         return f"{n:.2f}"
-    if n >= 1:
-        return f"{n:.4f}"
-    return f"{n:.6f}".rstrip("0").rstrip(".")
+    if abs(n) >= 1:
+        return f"{n:.4f}".rstrip("0").rstrip(".")
+    # Для мелких альткоинов
+    return f"{n:.8f}".rstrip("0").rstrip(".")
 
 
 def _pretty_source(source: str) -> str:
@@ -719,6 +746,30 @@ def _exchange_label(signal: dict) -> str:
     if not listed:
         listed = signal.get("exchange") or "bybit"
     return listings_label(listed)
+
+
+def _open_position_photo(signal: dict) -> bytes | None:
+    """Скрин открытой позиции под монету (только текст на шаблоне)."""
+    if os.getenv("OPEN_POS_CARD", "1").strip().lower() in ("0", "false", "no", "off"):
+        return None
+    try:
+        from open_position_card import render_open_position_card
+
+        lev = signal.get("leverage") or signal.get("lev")
+        try:
+            lev_i = int(lev) if lev else None
+        except (TypeError, ValueError):
+            lev_i = None
+        return render_open_position_card(
+            symbol=str(signal.get("symbol") or ""),
+            side=str(signal.get("signal") or "LONG"),
+            entry=float(signal.get("entry") or 0),
+            leverage=lev_i,
+            stop=float(signal["stop"]) if signal.get("stop") else None,
+        )
+    except Exception as e:
+        print(f"[telegram_bot] open_position_card: {e}")
+        return None
 
 
 async def notify_new_signal(signal: dict):
@@ -752,7 +803,7 @@ async def notify_new_signal(signal: dict):
         if clean:
             text += f"{HR}\n" + "\n".join(f"· {r}" for r in clean) + "\n"
     text += f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>  ·  <i>не фин. совет</i>"
-    await publish_signal_open(text, _channel_cta())
+    await publish_signal_open(text, _channel_cta(), photo_png=_open_position_photo(signal))
 
 
 async def notify_manual_signal(signal: dict, source: str):
@@ -776,7 +827,7 @@ async def notify_manual_signal(signal: dict, source: str):
         f"{_levels_block(entry, stop, tp1, tp2, tp3)}\n"
         f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>  ·  <i>не фин. совет</i>"
     )
-    await publish_signal_open(text, _channel_cta())
+    await publish_signal_open(text, _channel_cta(), photo_png=_open_position_photo(signal))
 
 
 
