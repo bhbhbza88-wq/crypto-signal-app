@@ -236,7 +236,13 @@ async def publish_news(
     reply_markup: dict | None = None,
     photo_png: bytes | None = None,
 ):
-    """Аналитика / outlook → канал новостей (бот должен быть админом)."""
+    """Аналитика / outlook → канал новостей (бот должен быть админом).
+
+    Важно: НЕ ставим inline-кнопки. В Telegram у постов с reply_markup
+    пропадает нативная вкладка «Комментарии» (ожидаемое поведение API).
+    """
+    # Принудительно без кнопок — комментарии важнее CTA
+    reply_markup = None
     raw = (
         os.getenv("TELEGRAM_NEWS_TARGET_CHANNEL")
         or os.getenv("MARKET_OUTLOOK_CHANNEL")
@@ -256,7 +262,6 @@ async def publish_news(
                     "chat_id": cid,
                     "caption": caption,
                     "parse_mode": "HTML",
-                    "reply_markup": _json.dumps(reply_markup) if reply_markup else None,
                 },
                 files={"photo": ("chart.png", photo_png, "image/png")},
             )
@@ -268,7 +273,7 @@ async def publish_news(
             print(f"[telegram_bot] publish_news photo fail: {data}", flush=True)
         except Exception as e:
             print(f"[telegram_bot] publish_news photo: {e}", flush=True)
-    await _send_to(cid, text, reply_markup)
+    await _send_to(cid, text)
 
 
 # Обратная совместимость для старых вызовов
