@@ -658,7 +658,12 @@ async def _handle_paid_email(chat_id: int, email: str):
 async def handle_update(update: dict):
     cb = update.get("callback_query")
     if cb:
-        chat_id = cb.get("message", {}).get("chat", {}).get("id")
+        chat = (cb.get("message") or {}).get("chat") or {}
+        # Кнопки меню — только в личке (не в чате комментов / группах)
+        if chat.get("type") and chat.get("type") != "private":
+            await _api("answerCallbackQuery", {"callback_query_id": cb.get("id")})
+            return
+        chat_id = chat.get("id")
         data = (cb.get("data") or "").strip().lower()
         await _api("answerCallbackQuery", {"callback_query_id": cb.get("id")})
         if not chat_id:
@@ -674,11 +679,19 @@ async def handle_update(update: dict):
     message = update.get("message") or update.get("edited_message")
     if not message:
         return
-    chat_id = message.get("chat", {}).get("id")
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    chat_type = (chat.get("type") or "").strip()
     from_user = message.get("from") or {}
     user_id = from_user.get("id")
     text = str(message.get("text") or "").strip()
     if not chat_id or not text:
+        return
+
+    # Бот отвечает ТОЛЬКО в личке.
+    # В группах / чате обсуждений канала (@nowicki_news comments) — молчим,
+    # иначе каждое сообщение получает welcome про сайт/premium.
+    if chat_type != "private":
         return
 
     # Ответ email после «Я оплатил»
