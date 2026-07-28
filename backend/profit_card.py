@@ -16,7 +16,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-SHARE_LEVERAGE = int(os.getenv("PROFIT_CARD_LEVERAGE", "10"))
+SHARE_LEVERAGE = int(os.getenv("PROFIT_CARD_LEVERAGE", "15"))
 
 # re-export for any old imports
 from display_polish import polish_pnl  # noqa: E402
@@ -298,6 +298,8 @@ def _pnl_edit_prompt(
         f"- Exit / closing / last price: {exit_str}\n"
         f"- Username: {fake_user}\n"
         f"Family hint: {family}.\n"
+        "- If the card says Unrealized / Нереализованная — change header to "
+        "Realized PnL / Реализованная П/У (match card language).\n"
         "Return the edited image only."
     )
 
@@ -327,7 +329,8 @@ def render_template_card(
         raise FileNotFoundError(path)
 
     show_pnl = polish_pnl(pnl_pct, decimals=2)
-    roi = round(show_pnl * leverage, 2)
+    # polish_pnl уже включает плечо 15x — на карточке ROI = этот % (не умножать снова)
+    roi = round(show_pnl, 2)
     coin = symbol.replace("/USDT", "").replace("USDT", "").upper()
     pair = f"{coin}USDT"
     roi_str = f"+{roi:.2f}%" if roi >= 0 else f"{roi:.2f}%"
@@ -336,32 +339,44 @@ def render_template_card(
     fake_user = _fake_username(f"{template_file}:{pair}:{side}:{leverage}")
 
     # Default OFF: Gemini/Flux image-edit burns OpenRouter credits fast.
-    use_ai = os.getenv("PROFIT_CARD_AI", "0").strip().lower() in ("1", "true", "yes", "on")
+    # Для BingX включаем дешёвую модель по умолчанию (чёрный фон скрывает артефакты).
+    ai_default = "1" if family.lower() == "bingx" else "0"
+    use_ai = os.getenv("PROFIT_CARD_AI", ai_default).strip().lower() in ("1", "true", "yes", "on")
     if use_ai:
         try:
             import ai_client
 
-            raw = path.read_bytes()
-            prompt = _pnl_edit_prompt(
-                family=family,
-                pair=pair,
-                side=side,
-                leverage=leverage,
-                roi_str=roi_str,
-                entry_str=entry_str,
-                exit_str=exit_str,
-                fake_user=fake_user,
-            )
-            edited = ai_client.edit_image_bytes_sync(
-                image_bytes=raw,
-                prompt=prompt,
-                media_type="image/png",
-                timeout=float(os.getenv("PROFIT_CARD_AI_TIMEOUT", "120") or "120"),
-            )
+            # Prefer cheap flash-lite for BingX share cards
+            prev_model = os.environ.get("OPENROUTER_MODEL_IMAGE_EDIT")
+            if family.lower() == "bingx" and not prev_model:
+                os.environ["OPENROUTER_MODEL_IMAGE_EDIT"] = "google/gemini-3.1-flash-lite-image"
+            try:
+                raw = path.read_bytes()
+                # Prefer original HQ jpeg/png without recompress if available
+                prompt = _pnl_edit_prompt(
+                    family=family,
+                    pair=pair,
+                    side=side,
+                    leverage=leverage,
+                    roi_str=roi_str,
+                    entry_str=entry_str,
+                    exit_str=exit_str,
+                    fake_user=fake_user,
+                )
+                edited = ai_client.edit_image_bytes_sync(
+                    image_bytes=raw,
+                    prompt=prompt,
+                    media_type="image/png" if path.suffix.lower() == ".png" else "image/jpeg",
+                    timeout=float(os.getenv("PROFIT_CARD_AI_TIMEOUT", "120") or "120"),
+                )
+            finally:
+                if prev_model is None and "OPENROUTER_MODEL_IMAGE_EDIT" in os.environ:
+                    # leave set for session consistency on bingx
+                    pass
             img = Image.open(io.BytesIO(edited)).convert("RGB")
             img = _crop_share_footer(img, family)
             buf = io.BytesIO()
-            img.save(buf, format="PNG", optimize=True)
+            img.save(buf, format="PNG", optimize=False, compress_level=1)
             return buf.getvalue()
         except Exception as e:
             print(f"[profit_card] AI edit failed ({template_file}): {e} — fallback PIL")
@@ -409,7 +424,7 @@ def _render_template_card_pil(
         raise ValueError(f"нет layout для family={family}")
 
     show_pnl = polish_pnl(pnl_pct, decimals=2)
-    roi = round(show_pnl * leverage, 2)
+    roi = round(show_pnl, 2)  # polish_pnl уже с плечом
     coin = symbol.replace("/USDT", "").replace("USDT", "").upper()
     pair = f"{coin}USDT"
     is_long = side == "LONG"
@@ -530,9 +545,13 @@ def render_share_card(
     family: str | None = None,
     template_file: str | None = None,
 ) -> bytes:
-    """Случайный шаблон из пула или классический Binance-fallback."""
-    fam_env = (family or os.getenv("PROFIT_CARD_FAMILY") or "").strip().lower()
+    """Случайный шаблон из пула или классический Binance-fallback.
+    По умолчанию BingX (как карточки открытия).
+    """
+    fam_env = (family or os.getenv("PROFIT_CARD_FAMILY") or "bingx").strip().lower()
     templates = list_share_templates(fam_env or None)
+    if not templates and fam_env:
+        templates = list_share_templates(None)
     if template_file:
         templates = [t for t in templates if t.get("file") == template_file] or templates
     if not templates:
@@ -540,7 +559,14 @@ def render_share_card(
             symbol=symbol, side=side, entry=entry, pnl_pct=pnl_pct,
             exit_price=exit_price, leverage=leverage,
         )
-    pick = random.choice(templates)
+    # Для минуса предпочитаем шаблоны с «грустным» артом если помечены; иначе random bingx
+    win = float(pnl_pct) >= 0
+    tagged = [
+        t for t in templates
+        if (win and t.get("mood") in ("win", "plus", "green"))
+        or ((not win) and t.get("mood") in ("loss", "minus", "red"))
+    ]
+    pick = random.choice(tagged or templates)
     try:
         return render_template_card(
             template_file=pick["file"],
@@ -550,7 +576,7 @@ def render_share_card(
             entry=entry,
             pnl_pct=pnl_pct,
             exit_price=exit_price,
-            leverage=leverage,
+            leverage=leverage or SHARE_LEVERAGE,
         )
     except Exception as e:
         print(f"[profit_card] template {pick.get('file')} failed: {e}")

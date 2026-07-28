@@ -1058,35 +1058,38 @@ async def notify_signal_closed(signal: dict, result: str, pnl: float):
         return
 
     sym = signal.get("symbol", "")
-    side = signal.get("signal", "")
+    side = (signal.get("signal") or "").upper()
     entry = signal.get("entry")
     exit_price = signal.get("exit")
     win = pnl > 0
     show = polish_pnl(pnl, decimals=2)
     if pnl == 0:
-        emoji, title = "➖", "БЕЗУБЫТОК"
+        emoji, title = "➖", "Закрыли в ноль"
     elif win:
-        emoji, title = "✅", "СДЕЛКА В ПЛЮС"
+        emoji, title = "✅", "Закрыли в плюс"
     else:
-        emoji, title = "➖", "МИНИМАЛЬНЫЙ МИНУС"
+        emoji, title = "➖", "Закрыли с небольшим минусом"
     pnl_str = f"+{show:.2f}%" if show > 0 else f"{show:.2f}%"
+    side_ru = "LONG" if side == "LONG" else "SHORT" if side == "SHORT" else side
     labels = {
-        "tp1": "TP1 достигнут",
-        "tp2": "TP2 достигнут",
-        "tp3": "TP3 достигнут",
-        "sl": "Стоп-лосс",
-        "be": "Безубыток",
-        "potential": "Фиксация",
-        "timeout": "По времени",
-        "channel_closed": "Закрыто по сигналу",
+        "tp1": "взяли TP1",
+        "tp2": "взяли TP2",
+        "tp3": "взяли TP3",
+        "sl": "сработал стоп",
+        "be": "вышли в безубыток",
+        "potential": "закрыли по рынку",
+        "timeout": "закрыли по времени",
+        "channel_closed": "закрыли по сигналу",
     }
+    why = labels.get(result, result)
     text = (
         f"{emoji} <b>{title}</b>\n"
         f"{HR}\n"
-        f"<b>{sym}</b>  ·  {side}\n"
-        f"📋 {labels.get(result, result)}\n"
-        f"💵 PnL  <b>{pnl_str}</b>\n"
-        f"\n<a href=\"{SITE_URL}\">nowicki.trade</a>"
+        f"<b>{sym}</b> · {side_ru}\n"
+        f"{why}\n"
+        f"PnL · <b>{pnl_str}</b> · 15x\n"
+        f"{HR}\n"
+        f"<a href=\"{SITE_URL}\">nowicki.trade</a>"
     )
 
     photo = None
@@ -1096,6 +1099,7 @@ async def notify_signal_closed(signal: dict, result: str, pnl: float):
             photo = render_share_card(
                 symbol=sym, side=side or "LONG", entry=float(entry),
                 pnl_pct=float(pnl), exit_price=float(exit_price) if exit_price is not None else None,
+                leverage=15, family="bingx",
             )
         except Exception as e:
             print(f"[telegram_bot] profit_card: {e}")
