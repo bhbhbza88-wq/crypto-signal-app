@@ -637,12 +637,15 @@ async def admin_post_review_run(
     notify: bool = True,
     admin=Depends(require_admin),
 ):
-    """Запустить post_review вручную (fast|deep)."""
+    """Запустить post_review вручную (fast|deep|daily)."""
     import post_review as pr
 
     mode = (mode or "fast").strip().lower()
-    if mode not in ("fast", "deep"):
-        raise HTTPException(status_code=400, detail="mode: fast|deep")
+    if mode not in ("fast", "deep", "daily"):
+        raise HTTPException(status_code=400, detail="mode: fast|deep|daily")
+    if mode == "daily":
+        result = await pr.run_daily_digest(notify=bool(notify))
+        return {"ok": True, **{k: v for k, v in result.items() if k not in ("fast", "deep")}, "fast": result.get("fast"), "deep": result.get("deep")}
     model = (model or "gemini").strip().lower()
     if model not in ("gemini", "claude", "gpt"):
         raise HTTPException(status_code=400, detail="model: gemini|claude|gpt")

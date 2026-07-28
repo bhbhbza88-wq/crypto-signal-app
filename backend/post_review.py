@@ -35,8 +35,12 @@ _SETTING_LAST_REVIEW = "outlook_last_post_review_ts"
 ENABLED = (os.getenv("POST_REVIEW_ENABLED", "1") or "1").strip().lower() in (
     "1", "true", "yes", "on",
 )
-FAST_INTERVAL_H = float(os.getenv("POST_REVIEW_FAST_INTERVAL_H", "6") or "6")
-DEEP_INTERVAL_H = float(os.getenv("POST_REVIEW_DEEP_INTERVAL_H", "24") or "24")
+# Ежедневная сводка (локальное время канала)
+DIGEST_TZ = (os.getenv("POST_REVIEW_TZ") or os.getenv("MARKET_OUTLOOK_TZ") or "Europe/Kyiv").strip()
+DIGEST_HOUR = int(os.getenv("POST_REVIEW_DIGEST_HOUR", "23") or "23")
+DIGEST_MINUTE = int(os.getenv("POST_REVIEW_DIGEST_MINUTE", "0") or "0")
+# Окно постов для вечерней сводки
+DIGEST_HOURS = float(os.getenv("POST_REVIEW_DIGEST_HOURS", "24") or "24")
 
 MODEL_FAST = (os.getenv("POST_REVIEW_MODEL_FAST") or "google/gemini-2.5-flash").strip()
 MODEL_DEEP_GEMINI = (
@@ -530,46 +534,175 @@ async def run_review(
     return {"posts": len(posts), "review": review, "md": str(md_path), "json": str(json_path)}
 
 
+def daily_digest_summary(
+    *,
+    fast: dict[str, Any] | None,
+    deep: dict[str, Any] | None,
+    n_posts: int,
+    local_label: str,
+) -> str:
+    """Вечерняя сводка для админов."""
+    lines = [
+        f"🌙 Daily content digest · {local_label}",
+        f"Посты за сутки: {n_posts}",
+        "",
+    ]
+    if deep:
+        lines += [
+            f"📌 Посты (deep): {deep.get('score_1_10', '—')}/10 · "
+            f"trust={deep.get('trust_level')} · ai_smell={deep.get('ai_smell_score')}",
+            str(deep.get("overall_verdict") or deep.get("summary") or ""),
+        ]
+        probs = deep.get("systemic_problems") or []
+        if probs:
+            lines.append("Что не так:")
+            for x in probs[:5]:
+                lines.append(f"• {x}")
+        imps = deep.get("prompt_improvements") or deep.get("recommendations") or []
+        if imps:
+            lines.append("Улучшить:")
+            for x in imps[:5]:
+                lines.append(f"→ {x}")
+        lines.append("")
+    if fast:
+        lines += [
+            f"⚡ Fast check: {fast.get('score_1_10', '—')}/10 · ok={fast.get('ok')}",
+            str(fast.get("summary") or ""),
+        ]
+        for x in (fast.get("critical_issues") or [])[:4]:
+            if isinstance(x, dict):
+                lines.append(f"• {x.get('issue')}")
+            else:
+                lines.append(f"• {x}")
+    return "\n".join(lines)[:3900]
+
+
+def _local_now():
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo(DIGEST_TZ))
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
+def _seconds_until_digest() -> float:
+    """Секунды до ближайших DIGEST_HOUR:DIGEST_MINUTE в DIGEST_TZ."""
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import timedelta
+
+        tz = ZoneInfo(DIGEST_TZ)
+        now = datetime.now(tz)
+        target = now.replace(
+            hour=max(0, min(23, DIGEST_HOUR)),
+            minute=max(0, min(59, DIGEST_MINUTE)),
+            second=0,
+            microsecond=0,
+        )
+        if target <= now:
+            target = target + timedelta(days=1)
+        return max(30.0, (target - now).total_seconds())
+    except Exception:
+        return 3600.0
+
+
+async def run_daily_digest(*, notify: bool = True) -> dict[str, Any]:
+    """Вечерний прогон: fast + deep → одна сводка админам."""
+    posts = _fetch_recent_posts(DIGEST_HOURS)
+    local = _local_now().strftime("%Y-%m-%d %H:%M %Z")
+    print(f"[post_review] daily digest posts={len(posts)} at {local}", flush=True)
+
+    fast_review: dict[str, Any] | None = None
+    deep_review: dict[str, Any] | None = None
+    if posts:
+        try:
+            fast_review = await analyze_fast(posts)
+            save_report("fast", posts, fast_review)
+        except Exception as e:
+            print(f"[post_review] daily fast fail: {e}", flush=True)
+        try:
+            deep_review = await analyze_deep(posts, "gemini")
+            save_report("deep", posts, deep_review, "gemini")
+        except Exception as e:
+            print(f"[post_review] daily deep fail: {e}", flush=True)
+
+    summary = daily_digest_summary(
+        fast=fast_review,
+        deep=deep_review,
+        n_posts=len(posts),
+        local_label=local,
+    )
+    print(f"[post_review] DAILY\n{summary}", flush=True)
+
+    if notify:
+        try:
+            import telegram_bot
+
+            await telegram_bot._notify_admins(summary)
+        except Exception as e:
+            print(f"[post_review] daily notify fail: {e}", flush=True)
+
+    db.set_setting(
+        _SETTING_LAST_REVIEW,
+        json.dumps(
+            {
+                "ts": time.time(),
+                "mode": "daily",
+                "score": (deep_review or fast_review or {}).get("score_1_10"),
+                "local": local,
+            }
+        ),
+    )
+    return {
+        "posts": len(posts),
+        "fast": fast_review,
+        "deep": deep_review,
+        "summary": summary,
+    }
+
+
 async def run() -> None:
-    """Фоновый цикл: fast каждые Nч, deep каждые Mч."""
+    """Фоновый цикл: каждый день в DIGEST_HOUR (по умолчанию 23:00 Kyiv)."""
     if not is_configured():
         print("[post_review] disabled", flush=True)
         return
     print(
-        f"[post_review] loop start fast={FAST_INTERVAL_H}h deep={DEEP_INTERVAL_H}h",
+        f"[post_review] daily digest schedule {DIGEST_HOUR:02d}:{DIGEST_MINUTE:02d} {DIGEST_TZ}",
         flush=True,
     )
-    await asyncio.sleep(120)  # дать БД/LLM подняться
-    last_fast = 0.0
-    last_deep = 0.0
+    await asyncio.sleep(60)
     while True:
         try:
+            wait = _seconds_until_digest()
+            local = _local_now().strftime("%H:%M")
+            print(
+                f"[post_review] next digest in {wait/3600:.2f}h (now {local} {DIGEST_TZ})",
+                flush=True,
+            )
+            await asyncio.sleep(wait)
             import ai_client
 
             if not ai_client.openrouter_configured() and not ai_client.OPENAI_API_KEY:
-                print("[post_review] no AI key, sleep 1h", flush=True)
+                print("[post_review] no AI key, skip digest", flush=True)
                 await asyncio.sleep(3600)
                 continue
-
-            now = time.time()
-            if now - last_fast >= FAST_INTERVAL_H * 3600:
-                await run_review("fast", hours=FAST_INTERVAL_H * 1.5, notify=True)
-                last_fast = now
-            if now - last_deep >= DEEP_INTERVAL_H * 3600:
-                await run_review(
-                    "deep", hours=DEEP_INTERVAL_H, model_hint="gemini", notify=True
-                )
-                last_deep = now
+            await run_daily_digest(notify=True)
+            await asyncio.sleep(90)
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            print(f"[post_review] loop error: {e}", flush=True)
-        await asyncio.sleep(600)
+            print(f"[post_review] digest loop error: {e}", flush=True)
+            await asyncio.sleep(600)
 
 
 async def _cli_run(args: argparse.Namespace) -> int:
     if args.mode == "auto":
         await run()
+        return 0
+    if args.mode == "daily":
+        result = await run_daily_digest(notify=args.notify)
+        print(result.get("summary") or "")
         return 0
     mode: ReviewMode = "fast" if args.mode == "fast" else "deep"
     result = await run_review(
@@ -585,7 +718,7 @@ async def _cli_run(args: argparse.Namespace) -> int:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Критика постов market_outlook")
-    p.add_argument("--mode", choices=["fast", "deep", "auto"], default="fast")
+    p.add_argument("--mode", choices=["fast", "deep", "auto", "daily"], default="fast")
     p.add_argument("--hours", type=float, default=48.0)
     p.add_argument("--model", choices=["gemini", "claude", "gpt"], default="gemini")
     p.add_argument("--notify", action="store_true", help="отправить итог админам в TG")
