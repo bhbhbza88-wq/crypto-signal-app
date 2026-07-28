@@ -136,18 +136,18 @@ post_subtype: "analysis" (полный разбор) или "chart_only" (есл
 """.strip()
 
 OUTLOOK_SYSTEM_UPDATE = """
-Короткий апдейт к прошлому разбору (стиль Букваръ).
+Короткий апдейт-reply к прошлому разбору (стиль Букваръ).
 
-Начни «По $TICKER…». Голос: «сценарий отрабатывает», «сходили и получили реакцию»,
-«теперь жду», «смотрю дальше».
+Начни «По $TICKER…». Голос уверенный: сценарий «отрабатывает / сходили / дошли до зоны /
+получили реакцию» — даже если движение небольшое. Приукрась: зона/ликвидность/точка №1,
+не признавайся что цель ещё далеко.
 
-Что случилось с прошлого поста → что дальше (1 цель или условие).
-НЕ список уровней. Price action язык (ликвидность, зона, закрепление), не ema.
-1 абзац, 100–210 символов.
+Что «уже случилось» (мягко, в плюс сценарию) → что дальше жду (примерно / зона / условие).
+НЕ список уровней. Price action язык. 1 абзац, 100–210 символов.
 
 Пример (не копируй):
-«По SOL сценарий отработал: сняли ликвидность в точке №1, получили реакцию от зоны
-спроса. Смотрю продолжение вверх к 78. Ключевое условие — закрепление выше 75.»
+«По SOL сходили по сценарию: сняли ликвидность и получили реакцию от зоны. Теперь жду
+небольшой откат примерно к 76, оттуда снова интересно смотреть продолжение.»
 
 Верни JSON:
 {
@@ -171,9 +171,9 @@ _VARIATION_HINTS_ANALYSIS = [
     "Начни «По $TICKER сняли/смягчили/пришли». Потом «смотрю/работаю» + сценарий.",
 ]
 _VARIATION_HINTS_UPDATE = [
-    "«По $TICKER сценарий отработал/отрабатывает» + факт. «Теперь жду/смотрю» + цель.",
-    "«По $TICKER» + что случилось с прошлого разбора. «Дальше смотрю» + куда.",
-    "Начни «По $TICKER сходили/дошли/получили реакцию». Условие → цель.",
+    "«По $TICKER сценарий отработал/отрабатывает» + факт (даже небольшой). «Теперь жду» + цель.",
+    "«По $TICKER дошли до нашей зоны / получили реакцию». «Дальше смотрю» + куда примерно.",
+    "Начни «По $TICKER сходили по плану». Условие → следующая цель мягко.",
 ]
 
 _PRICE_NUM_RE = re.compile(r"\d[\d\s]*\.\d+")
@@ -379,7 +379,7 @@ def _fmt_price(v: float) -> str:
 
 
 def _recent_posts() -> dict[str, dict]:
-    """{ symbol: {ts, bias, key_level, close, post_type, body} } — tolerates legacy float map."""
+    """{ symbol: {ts, bias, key_level, close, post_type, body, message_id, root_message_id} }."""
     try:
         data = json.loads(db.get_setting(_SETTING_RECENT, "{}") or "{}")
         if not isinstance(data, dict):
@@ -394,6 +394,9 @@ def _recent_posts() -> dict[str, dict]:
                     "close": None,
                     "post_type": "analysis",
                     "body": None,
+                    "message_id": None,
+                    "root_message_id": None,
+                    "target": None,
                 }
             elif isinstance(v, dict) and "ts" in v:
                 out[str(k)] = {
@@ -403,6 +406,9 @@ def _recent_posts() -> dict[str, dict]:
                     "close": v.get("close"),
                     "post_type": v.get("post_type") or "analysis",
                     "body": v.get("body"),
+                    "message_id": v.get("message_id"),
+                    "root_message_id": v.get("root_message_id") or v.get("message_id"),
+                    "target": v.get("target"),
                 }
         return out
     except (TypeError, ValueError, json.JSONDecodeError):
@@ -417,11 +423,21 @@ def _remember_post(
     close: float,
     post_type: str,
     body: str | None = None,
+    message_id: int | None = None,
+    root_message_id: int | None = None,
+    target: float | None = None,
 ) -> None:
     m = _recent_posts()
     now = time.time()
     cutoff = now - max(SYMBOL_COOLDOWN_H, UPDATE_MAX_AGE_H) * 3600 * 2
     m = {k: v for k, v in m.items() if float(v.get("ts") or 0) >= cutoff}
+    prev = m.get(symbol) or {}
+    if post_type == "analysis" and message_id:
+        root_id = int(message_id)
+    else:
+        root_id = root_message_id or prev.get("root_message_id") or prev.get("message_id")
+        if root_id is not None:
+            root_id = int(root_id)
     m[symbol] = {
         "ts": now,
         "bias": bias,
@@ -429,6 +445,9 @@ def _remember_post(
         "close": close,
         "post_type": post_type,
         "body": (body or "")[:600],
+        "message_id": int(message_id) if message_id else prev.get("message_id"),
+        "root_message_id": root_id,
+        "target": target if target is not None else prev.get("target"),
     }
     db.set_setting(_SETTING_RECENT, json.dumps(m))
 
@@ -633,26 +652,50 @@ def _pick_key_level(row: dict, bias: str) -> float:
     return close * 0.988
 
 
+def _soft_scenario_move(row: dict, prev: dict) -> bool:
+    """Букварь-стиль: хватает лёгкого движения в сторону сценария / к зоне."""
+    bias = (prev.get("bias") or "long").strip().lower()
+    try:
+        old_c = float(prev["close"]) if prev.get("close") is not None else None
+    except (TypeError, ValueError):
+        old_c = None
+    now_c = float(row["close"])
+    if not old_c or old_c <= 0:
+        return True
+    moved = (now_c - old_c) / old_c
+    # ~0.15% в сторону сценария — уже «дошли / реакция»
+    if bias == "short" and moved <= -0.0015:
+        return True
+    if bias != "short" and moved >= 0.0015:
+        return True
+    for key in ("key_level", "target"):
+        try:
+            lvl = float(prev[key]) if prev.get(key) is not None else None
+        except (TypeError, ValueError):
+            lvl = None
+        if lvl is None or lvl <= 0:
+            continue
+        if abs(now_c - lvl) / lvl <= 0.004:
+            return True
+        if bias == "short" and now_c <= lvl * 1.002:
+            return True
+        if bias != "short" and now_c >= lvl * 0.998:
+            return True
+    return abs(moved) >= 0.0025
+
+
 def _update_context(row: dict) -> dict | None:
-    """Prior post exists and price moved enough -> short update."""
+    """Prior post + soft move → reply-update (приукрашенный, как Букварь)."""
     prev = _recent_posts().get(row["symbol"])
     if not prev:
         return None
     age_h = (time.time() - float(prev["ts"])) / 3600.0
     if age_h < UPDATE_MIN_AGE_H or age_h > UPDATE_MAX_AGE_H:
         return None
-    if (prev.get("post_type") or "") == "update" and age_h < UPDATE_MIN_AGE_H * 2:
+    if (prev.get("post_type") or "") == "update" and age_h < UPDATE_MIN_AGE_H * 1.5:
         return None
-    old_c = prev.get("close")
-    try:
-        old_c = float(old_c) if old_c is not None else None
-    except (TypeError, ValueError):
-        old_c = None
-    now_c = float(row["close"])
-    if old_c and old_c > 0:
-        moved = (now_c - old_c) / old_c
-        if abs(moved) < 0.003:
-            return None
+    if not _soft_scenario_move(row, prev):
+        return None
     return prev
 
 
@@ -1208,11 +1251,35 @@ async def _publish_row(
         except Exception as e:
             print(f"[market_outlook] admin alert fail: {e}", flush=True)
     text = _format_post(row, ai, chart_tag=chart_tag, post_subtype=ai.get("post_subtype"))
+    reply_to = None
+    if post_type == "update" and prev:
+        reply_to = prev.get("root_message_id") or prev.get("message_id")
+        try:
+            reply_to = int(reply_to) if reply_to else None
+        except (TypeError, ValueError):
+            reply_to = None
     try:
-        await telegram_bot.publish_news(text, photo_png=png)
+        msg_id = await telegram_bot.publish_news(
+            text,
+            photo_png=png,
+            reply_to_message_id=reply_to,
+        )
     except Exception as e:
         print(f"[market_outlook] publish fail {row['symbol']}: {e}", flush=True)
         return False
+    if not msg_id:
+        print(f"[market_outlook] publish returned no msg_id for {row['symbol']}", flush=True)
+        return False
+    target_v = None
+    try:
+        target_v = float(row.get("target_1") or row.get("resistance") or 0) or None
+    except (TypeError, ValueError):
+        target_v = None
+    root_id = None
+    if post_type == "analysis":
+        root_id = int(msg_id)
+    elif prev:
+        root_id = prev.get("root_message_id") or prev.get("message_id")
     _remember_post(
         row["symbol"],
         bias=bias,
@@ -1220,6 +1287,9 @@ async def _publish_row(
         close=float(row["close"]),
         post_type=post_type,
         body=ai.get("body"),
+        message_id=int(msg_id),
+        root_message_id=int(root_id) if root_id else None,
+        target=target_v,
     )
     if count_toward_cap:
         _bump_posts_today(1)
@@ -1227,7 +1297,8 @@ async def _publish_row(
     print(
         f"[market_outlook] published {row['symbol']} type={post_type} subtype={subtype_tag} "
         f"key={_fmt_price(key_level)} score={row['score']} "
-        f"ai={ai['score_1_10']}/10 chart={chart_tag or 'none'}",
+        f"ai={ai['score_1_10']}/10 chart={chart_tag or 'none'} "
+        f"msg={msg_id} reply_to={reply_to}",
         flush=True,
     )
     return True

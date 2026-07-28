@@ -258,8 +258,14 @@ async def publish_news(
     text: str,
     reply_markup: dict | None = None,
     photo_png: bytes | None = None,
-):
-    """Outlook → news-канал без кнопок; Сайт/Бот — в чат обсуждений."""
+    *,
+    reply_to_message_id: int | None = None,
+) -> int | None:
+    """Outlook → news-канал без кнопок; Сайт/Бот — в чат обсуждений.
+
+    Returns Telegram message_id or None.
+    reply_to_message_id — reply на прошлый пост канала (как у Букваря).
+    """
     import asyncio
 
     _ = reply_markup
@@ -270,19 +276,26 @@ async def publish_news(
     ).strip()
     if not raw:
         print("[telegram_bot] TELEGRAM_NEWS_TARGET_CHANNEL не задан — news skip")
-        return
+        return None
     cid = raw if raw.startswith("@") or raw.lstrip("-").isdigit() else f"@{raw.lstrip('@')}"
     caption = text if len(text) <= 1024 else (text[:1000].rstrip() + "…")
     msg_id = None
+    reply_extra = {}
+    if reply_to_message_id:
+        reply_extra["reply_to_message_id"] = int(reply_to_message_id)
+        # если старый пост уже недоступен — не роняем публикацию
+        reply_extra["allow_sending_without_reply"] = False
     if photo_png:
         try:
+            payload = {
+                "chat_id": cid,
+                "caption": caption,
+                "parse_mode": "HTML",
+                **reply_extra,
+            }
             data = await _api(
                 "sendPhoto",
-                {
-                    "chat_id": cid,
-                    "caption": caption,
-                    "parse_mode": "HTML",
-                },
+                payload,
                 files={"photo": ("chart.png", photo_png, "image/png")},
             )
             if data and data.get("ok"):
@@ -290,18 +303,52 @@ async def publish_news(
                 if len(text) > 1024:
                     await _send_to(cid, text)
             else:
-                print(f"[telegram_bot] publish_news photo fail: {data}", flush=True)
+                # fallback без reply если тред битый
+                if reply_extra and data and not data.get("ok"):
+                    print(
+                        f"[telegram_bot] publish_news reply fail, retry plain: {data}",
+                        flush=True,
+                    )
+                    data = await _api(
+                        "sendPhoto",
+                        {
+                            "chat_id": cid,
+                            "caption": caption,
+                            "parse_mode": "HTML",
+                        },
+                        files={"photo": ("chart.png", photo_png, "image/png")},
+                    )
+                    if data and data.get("ok"):
+                        msg_id = data.get("result", {}).get("message_id")
+                else:
+                    print(f"[telegram_bot] publish_news photo fail: {data}", flush=True)
         except Exception as e:
             print(f"[telegram_bot] publish_news photo: {e}", flush=True)
     if msg_id is None:
-        data = await _api("sendMessage", {
-            "chat_id": cid,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        })
+        data = await _api(
+            "sendMessage",
+            {
+                "chat_id": cid,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+                **reply_extra,
+            },
+        )
         if data and data.get("ok"):
             msg_id = data.get("result", {}).get("message_id")
+        elif reply_extra:
+            data = await _api(
+                "sendMessage",
+                {
+                    "chat_id": cid,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
+            )
+            if data and data.get("ok"):
+                msg_id = data.get("result", {}).get("message_id")
     if msg_id:
         asyncio.create_task(_ensure_discussion_cta(cid, msg_id))
         # мгновенный буст фермы (outbox → channel_booster)
@@ -309,6 +356,7 @@ async def publish_news(
             _notify_farm_boost(cid, int(msg_id), text)
         except Exception as e:
             print(f"[telegram_bot] farm boost outbox: {e}", flush=True)
+    return int(msg_id) if msg_id else None
 
 
 def _notify_farm_boost(channel: str | int, message_id: int, text: str = "") -> None:
