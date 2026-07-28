@@ -56,6 +56,7 @@ from signal_ingest import normalize_symbol, open_signal
 import telegram_ingest
 import news_relay
 import market_outlook
+import post_review
 import chat_engage
 import ai_client
 
@@ -95,6 +96,8 @@ async def lifespan(app: FastAPI):
         bg_tasks.append(asyncio.create_task(news_relay.run(), name="news_relay"))
     if market_outlook.is_configured():
         bg_tasks.append(asyncio.create_task(market_outlook.run(), name="market_outlook"))
+    if post_review.is_configured():
+        bg_tasks.append(asyncio.create_task(post_review.run(), name="post_review"))
     # Отдельный клиент только если TELEGRAM_CHAT_SESSION ≠ ingest.
     # Иначе chat_engage цепляется к клиенту ingest (один аккаунт).
     if chat_engage.needs_own_client():

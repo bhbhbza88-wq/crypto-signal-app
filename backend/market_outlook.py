@@ -1265,6 +1265,12 @@ async def _publish_row(
         root_id = int(msg_id)
     elif prev:
         root_id = prev.get("root_message_id") or prev.get("message_id")
+    try:
+        import post_review as _post_review
+
+        _post_review.save_chart_png(row["symbol"], png)
+    except Exception as e:
+        print(f"[market_outlook] chart save skip: {e}", flush=True)
     _remember_post(
         row["symbol"],
         bias=bias,
