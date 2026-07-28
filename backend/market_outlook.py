@@ -86,60 +86,69 @@ UPDATE_MIN_AGE_H = float(os.getenv("MARKET_OUTLOOK_UPDATE_MIN_AGE_H", "6") or "6
 UPDATE_MAX_AGE_H = float(os.getenv("MARKET_OUTLOOK_UPDATE_MAX_AGE_H", "48") or "48")
 
 OUTLOOK_SYSTEM_ANALYSIS = """
-Ты пишешь короткий разбор для Telegram-канала трейдера. Стиль «Торговый Букваръ» (SMC / Price Action), но более профессиональный и вызывающий доверие.
+Ты пишешь короткий разбор для Telegram-канала трейдера (SMC / Price Action).
+Звучит как живой профи в ленте, не как шаблонный бот.
 
 ЖЁСТКИЕ ПРАВИЛА:
-1. Первое предложение ВСЕГДА «По $TICKER…» (без #). Голос трейдера первого лица («смотрю», «жду», «работаю»).
-2. Price action / SMC язык (НЕ индикаторы):
-   - НИКОГДА не пиши ema, rsi, adx, индикаторы.
-   - ИСПОЛЬЗУЙ: зона спроса (ордерблок), зона предложения, ликвидность (сняли/собрали), заброс, смягчили диапазон, цепочка предложения, реакция, слом структуры.
-3. Мягкие диапазоны цен вместо одной точки (убирает подозрения, увеличивает хит-рейт):
-   - Вместо одной цифры пиши диапазон: «в зоне 64100–64400», «в диапазоне 1.45–1.48».
-   - Цели давай как «ближайший пул ликвидности», «первая проблемная зона».
-4. Профессиональный сленг сессий и менеджмента (выглядит как живой профи):
-   - Упоминай сессии: «под открытие Европы», «на Азии зажали волатильность», «перед Америкой».
-   - Упоминай частичный фикс: «буду фиксировать часть на первом импульсе», «остаток в Б/У».
-5. Структура body (1–2 абзаца, 170–300 символов):
-   1) По $TICKER + где сейчас / что сняли.
-   2) Жду: условие (если закрепимся/снимем) → диапазон целей.
+1. Голос первого лица: «смотрю», «жду», «работаю», «фиксирую». Без канцелярита и AI-штампов
+   («важно отметить», «следует», «таким образом», «на основании анализа»).
+2. Только price action / SMC. НИКОГДА: ema, rsi, adx, индикаторы, штамп «ключевое условие».
+   Можно: зона спроса/предложения (OB), ликвидность (сняли/собрали/свип), заброс, реакция,
+   слом структуры (BOS/CHoCH), POI, пул ликвидности, инвалидация.
+3. Цены — мягкими диапазонами, не одной точкой: «в зоне 64100–64400».
+4. ЛОГИКА ЦЕН (обязательно сверяй с price_now из фактов):
+   - long: цель ВЫШЕ текущей цены; инвалидация НИЖЕ.
+   - short: цель НИЖЕ текущей; инвалидация ВЫШЕ.
+   - Не пиши «жду закрепление выше/ниже X», если price_now УЖЕ там — тогда говори
+     «держимся / уже выше(ниже) / смотрю продолжение к …».
+5. Старт фразы — ВАРЬИРУЙ (не копируй один каркас):
+   ~60% «По $TICKER …»; остальные: с сессии («Под Европу по $TICKER…»),
+   с действия («Сняли ликвидность по $TICKER…»), с зоны («$TICKER в зоне предложения…»).
+6. Структура 1–2 абзаца, 160–280 символов. Не заканчивай висящим «, и на дневке.» —
+   встраивай дневку внутрь фразы естественно или не упоминай.
+7. В ~половине постов мягко упомяни менеджмент: частичный фикс / остаток в Б/У.
+8. НЕ добавляй отдельной строкой «Ключевой уровень — …». Уровень уже в тексте сценария.
 
-Примеры (НЕ копируй дословно):
-• «По BTC на Азии пришли в зону предложения. Локально жду заброс к пулу 64 800, оттуда смотрю шорт с первой целью в районе 63 200–63 500. Часть позиции буду фиксировать на импульсе.»
-• «По SOL сняли ликвидность снизу и под Европу получили реакцию. Интересно смотреть выход к проблемной зоне 74.5–75.0. Если закрепимся выше, цель сместится на 77.»
+Примеры тона (НЕ копируй):
+• «По BTC на Азии зашли в предложение около 64.1–64.4k. Жду реакцию; если удержит —
+  первая цель пул 63.2–63.5k, часть сниму на импульсе.»
+• «Под Европу по SOL свипнули снизу — реакция есть. Смотрю выход к 74.5–75.0;
+  ниже вчерашнего минимума идею закрываю.»
+• «AAVE уже ниже 220, ждать пробой смысла нет. Работаю продолжение шорта к 209–211,
+  стоп выше локального хая.»
 
 Верни JSON:
 {
   "ticker": "BTC",
-  "body": "170–300 символов",
+  "body": "160–280 символов",
   "score_1_10": 7,
   "bias": "long",
+  "target": 63200,
   "post_subtype": "analysis"
 }
 """.strip()
 
 OUTLOOK_SYSTEM_UPDATE = """
-Короткий апдейт-reply к прошлому разбору (стиль Букваръ). Выглядит как честная отработка, снимающая любые подозрения.
+Короткий апдейт-reply к прошлому разбору. Честно и по-человечески.
 
-Начни «По $TICKER…». 
+Правила:
+1. Варьируй старт: чаще «По $TICKER…», иногда сразу факт («Дошли…», «Сломали…»).
+2. Сценарий отработал (даже небольшое движение в нашу сторону):
+   факт + фиксация («забрал часть / остаток в Б/У») + что дальше смотрю.
+3. Слом сценария: не приукрашивай. «Структуру сломали, отменяю, на заборе.»
+4. Price action язык. 90–200 символов. Без «Ключевой уровень — …» отдельной строкой.
+5. Цены согласуй с price_now из фактов.
 
-Варианты апдейта:
-1. Сценарий отработал (даже минимальное движение в сторону прогноза на 0.15%):
-   - «По $TICKER сходили по сценарию...» / «дошли до первой проблемной зоны...»
-   - Напиши про фиксацию прибыли: «забрал первый тейк / зафиксировал часть, остаток перенес в Б/У». Это вызывает дикое доверие.
-2. Слом сценария (рынок пошел против нас):
-   - Не молчи и не придумывай победу. Напиши красиво: «сломали локальную структуру, сценарий отменяю, ушел на забор. Безопасность депозита на первом месте». Такое признание делает канал на 100% живым и честным в глазах людей.
-
-Price action язык. 1 абзац, 100–210 символов.
-
-Пример (не копируй):
-«По SOL сценарий отработал: коснулись верхней границы нашей зоны спроса и получили реакцию. Первый тейк забрал, остаток позиции перенес в Б/У. Наблюдаю.»
+Пример:
+«По SOL дошли до верхней границы зоны — реакцию забрали. Часть зафиксировал, остаток в Б/У. Дальше смотрю, удержит ли уровень.»
 
 Верни JSON:
 {
   "ticker": "SOL",
-  "body": "100–210 символов",
+  "body": "90–200 символов",
   "score_1_10": 7,
   "bias": "long",
+  "target": 75.0,
   "post_subtype": "update"
 }
 """.strip()
@@ -147,18 +156,19 @@ Price action язык. 1 абзац, 100–210 символов.
 # backward-compatible alias
 OUTLOOK_SYSTEM = OUTLOOK_SYSTEM_ANALYSIS
 
-# Bukvar-style variation hints: trader voice + sequential narrative + SMC terms.
+# Variation hints: avoid identical "По $TICKER + Ключевое условие" skeleton.
 _VARIATION_HINTS_ANALYSIS = [
-    "Начни «По $TICKER» + где сейчас. Потом «жду» + условие → цель. Price action язык.",
-    "«По $TICKER» + что произошло. «Сначала нужно» + условие, «после этого смотрю» + цель.",
-    "Начни «По $TICKER» + ликвидность/зона. «Интересно смотреть» + сценарий + условие.",
-    "«По $TICKER» + реакция/движение. «Пока рано» или «жду» + условие → цель. Один уровень.",
-    "Начни «По $TICKER сняли/смягчили/пришли». Потом «смотрю/работаю» + сценарий.",
+    "Начни с «По $TICKER» + где цена сейчас. Дальше сценарий без штампа «ключевое условие».",
+    "Начни с сессии («Под Европу / На Азии / Перед Америкой») + $TICKER. Потом зона → цель.",
+    "Начни с действия: сняли/свипнули/зашли в зону по $TICKER. Потом что смотришь.",
+    "Начни с зоны: «$TICKER в предложении/спросе…». Условие формулируй живо, не шаблоном.",
+    "Коротко и по делу: где мы → куда жду → где отмена. Без канцелярита.",
+    "Если price_now уже за key_level — не пиши «жду закрепление», пиши продолжение/удержание.",
 ]
 _VARIATION_HINTS_UPDATE = [
-    "«По $TICKER сценарий отработал/отрабатывает» + факт (даже небольшой). «Теперь жду» + цель.",
-    "«По $TICKER дошли до нашей зоны / получили реакцию». «Дальше смотрю» + куда примерно.",
-    "Начни «По $TICKER сходили по плану». Условие → следующая цель мягко.",
+    "Факт отработки (даже небольшой) + фиксация части/Б/У + что дальше.",
+    "Дошли до зоны / реакция — без пафоса. Один следующий ориентир мягко.",
+    "Если слом — честно отмени. Без попытки «всё равно был прав».",
 ]
 
 _PRICE_NUM_RE = re.compile(r"\d[\d\s]*\.\d+")
@@ -237,16 +247,15 @@ def _normalize_outlook_body(body: str) -> str:
     Push wording toward Bukvar SMC style:
     - Remove EMA mentions, formal timeframe talk.
     - Map support/resistance → supply/demand zones when appropriate.
-    - Add SMC vocabulary flavor.
+    - Clean glue artifacts from replacements.
     """
-    text = body
+    text = body or ""
     # Remove EMA mentions entirely from body (they're indicator talk, not price action).
     text = re.sub(r"\bторгуется\s+(ниже|выше|около|между)\s+ema\d+", r"цена \1", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(ниже|выше|около)\s+ema\d+\s+(и\s+ema\d+)?", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bema\d+\b", "", text, flags=re.IGNORECASE)
     text = re.sub(r"EMA\s*\d+", "", text, flags=re.IGNORECASE)
-    
-    # Timeframe normalization
+
     replacements = (
         (r"дневным графиком", "дневкой"),
         (r"дневной график", "дневка"),
@@ -260,10 +269,11 @@ def _normalize_outlook_body(body: str) -> str:
         (r"на четырехчасовом графике", "на 4ч"),
         (r"на часовом таймфрейме", "на часовике"),
         (r"на часовом графике", "на часовике"),
-        # Formal → conversational
-        (r"совпадает с\s+дневк\w*", "держится на дневке", ),
-        (r"также\s+совпадает", "и на дневке"),
-        # Passive → active trader voice
+        # Formal → conversational (careful: avoid hanging ", и на дневке.")
+        (r",?\s*также\s+совпадает\s+с\s+дневк\w*", " и это видно на дневке"),
+        (r"совпадает с\s+дневк\w*", "держится и на дневке"),
+        (r",\s*и на дневке\.?\s*$", "."),
+        (r"\s+и на дневке\.?\s*$", "."),
         (r"\bЦена торгуется", "Торгуемся"),
         (r"цена торгуется", "цена"),
         (r"Это говорит о", ""),
@@ -271,7 +281,8 @@ def _normalize_outlook_body(body: str) -> str:
         (r"зона консолидации", "боковое движение"),
         (r"давление продавцов", "продавцы давят"),
         (r"импульс\s+(вверх|вниз)", r"движение \1"),
-        # SMC vocabulary nudges: поддержка → зона спроса (when clear)
+        (r"Ключевое условие[:\s—–-]*", ""),
+        (r"ключевое условие[:\s—–-]*", ""),
         (r"к поддержке\b", "к зоне спроса"),
         (r"от поддержки\b", "от зоны спроса"),
         (r"к сопротивлению\b", "к зоне предложения"),
@@ -279,11 +290,118 @@ def _normalize_outlook_body(body: str) -> str:
     )
     for pat, repl in replacements:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
-    
-    # Clean up extra spaces from EMA removal
+
+    # Drop forced trailing key-level lines (we weave levels into body instead).
+    text = re.sub(
+        r"\n*\s*Ключевой уровень\s*[—–:-]\s*[\d\s.,]+\.?\s*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
     text = re.sub(r"\s{2,}", " ", text)
     text = re.sub(r"\.\s+\.", ".", text)
+    text = re.sub(r"\s+([,.!?;:])", r"\1", text)
+    text = re.sub(r",\s*,", ",", text)
     return text.strip()
+
+
+def _key_level_relation(close: float, key_level: float, bias: str) -> str:
+    """How price sits vs key level — drives AI wording so we don't wait for already-true breaks."""
+    try:
+        c, k = float(close), float(key_level)
+    except (TypeError, ValueError):
+        return "unknown"
+    if k <= 0:
+        return "unknown"
+    pct = (c - k) / k * 100.0
+    b = (bias or "long").lower()
+    if abs(pct) < 0.15:
+        return "at_level"
+    if b == "short":
+        if c < k:
+            return "already_below"  # don't wait for break below
+        return "still_above"
+    # long / default
+    if c > k:
+        return "already_above"  # don't wait for break above
+    return "still_below"
+
+
+def _scenario_levels_sane(body: str, *, close: float, bias: str) -> bool:
+    """
+    Reject obviously stale scenarios:
+    - long with all cited targets below close
+    - short with all cited targets above close
+    - 'жду закрепление выше X' when already above X (and vice versa)
+    """
+    text = (body or "").lower()
+    nums = _price_numbers_in_text(body)
+    b = (bias or "long").lower()
+    try:
+        c = float(close)
+    except (TypeError, ValueError):
+        return True
+    if c <= 0:
+        return True
+
+    # Stale "wait for break" phrasing
+    for m in re.finditer(
+        r"(жду|ждём|ждем|если)\s+.{0,24}?(закреп\w*|проб\w*|удерж\w*)\s+(выше|ниже)\s+([\d\s]+(?:\.\d+)?)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        side = m.group(2).lower()
+        try:
+            lvl = float(m.group(3).replace(" ", ""))
+        except ValueError:
+            continue
+        if lvl <= 0:
+            continue
+        if side == "выше" and c > lvl * 1.001:
+            return False
+        if side == "ниже" and c < lvl * 0.999:
+            return False
+
+    # Target side check: use numbers that look like targets (not the close itself)
+    candidates = [n for n in nums if n > 0 and abs(n - c) / c > 0.002]
+    if len(candidates) >= 1:
+        if b == "long" and all(n < c for n in candidates):
+            # allow one support/inval below if there's also something above — already filtered
+            return False
+        if b == "short" and all(n > c for n in candidates):
+            return False
+    return True
+
+
+def _extract_target_from_verdict(verdict: dict, row: dict, bias: str) -> float | None:
+    """Prefer AI target field, else row target_1 / resistance/support by bias."""
+    for key in ("target", "target_1"):
+        v = verdict.get(key) if key == "target" else row.get(key)
+        try:
+            if v is not None and float(v) > 0:
+                return float(v)
+        except (TypeError, ValueError):
+            pass
+    b = (bias or "long").lower()
+    fallback = row.get("resistance") if b != "short" else row.get("support")
+    try:
+        if fallback is not None and float(fallback) > 0:
+            return float(fallback)
+    except (TypeError, ValueError):
+        pass
+    # last resort: first price in body away from close
+    try:
+        close = float(row.get("close") or 0)
+    except (TypeError, ValueError):
+        close = 0.0
+    body = str(verdict.get("body") or "")
+    for n in _price_numbers_in_text(body):
+        if close > 0 and abs(n - close) / close > 0.003:
+            if b == "short" and n < close:
+                return n
+            if b != "short" and n > close:
+                return n
+    return None
 
 
 def is_configured() -> bool:
@@ -954,25 +1072,38 @@ def _facts_block(
     else:
         target = float(row.get("resistance") or row.get("target_1") or close * 1.03)
         inv = float(row.get("support") or row.get("invalidation") or close * 0.97)
-    
+
+    relation = _key_level_relation(close, key_level, bias)
+    relation_hint = {
+        "already_above": "price_now УЖЕ ВЫШЕ key_level — НЕ пиши «жду закрепление выше». Пиши удержание/продолжение к target.",
+        "already_below": "price_now УЖЕ НИЖЕ key_level — НЕ пиши «жду закрепление ниже». Пиши продолжение шорта к target.",
+        "still_above": "price_now ещё выше key_level — для шорта можно ждать заход/закрепление ниже.",
+        "still_below": "price_now ещё ниже key_level — для лонга можно ждать заход/закрепление выше.",
+        "at_level": "price_now около key_level — говори про реакцию/удержание зоны.",
+        "unknown": "",
+    }.get(relation, "")
+
     base = (
         f"symbol: {row['symbol']}\n"
         f"ticker: ${row['symbol'].replace('/USDT', '')}\n"
         f"post_type: {post_type}\n"
         f"bias_hint: {bias}\n"
-        f"KEY_LEVEL: {key_level} (условие входа: закрепление выше/ниже)\n"
+        f"KEY_LEVEL: {key_level}\n"
         f"human_key_level: {_fmt_price(key_level)}\n"
+        f"key_level_vs_price: {relation}\n"
+        f"{relation_hint}\n"
         f"exchange: {ex} Futures ({row.get('listings')})\n"
-        f"chart_tf: {CHART_TF} (пиши {_tf_speak(CHART_TF)})\n"
+        f"chart_tf: {CHART_TF} (пиши {_tf_speak(CHART_TF)} только если уместно, не висящим хвостом)\n"
         f"price_now: {_fmt_price(close)}\n"
         f"chg_24h_pct: {row['chg_24h']}\n"
-        f"target: {_fmt_price(target)} (ОДНА главная цена — куда жду)\n"
+        f"target: {_fmt_price(target)} (ОДНА главная цена — куда жду; должна быть по сторону bias)\n"
         f"invalidation: {_fmt_price(inv)} (стоп/отмена сценария)\n"
         f"internal_score_0_100: {row['score']}\n"
         f"btc_phase: {row.get('btc_phase')}\n"
-        f"mtf_confluence_1d: {'yes (можно упомянуть «и на дневке»)' if mtf_confirmed else 'no'}\n"
-        "СТИЛЬ: Price action (ликвидность, зона, заброс, смягчение), НЕ ema/индикаторы.\n"
-        "Начни «По $TICKER…». Голос: смотрю/жду/работаю. Условие → цель (не сразу).\n"
+        f"mtf_confluence_1d: {'yes (можно естественно вплести «на дневке»)' if mtf_confirmed else 'no'}\n"
+        "СТИЛЬ: Price action. Без ema/индикаторов. Без штампа «Ключевое условие».\n"
+        "Варьируй старт. Не добавляй отдельную строку «Ключевой уровень — …».\n"
+        "В JSON поле target — число главной цели.\n"
     )
     if prev:
         base += (
@@ -1010,23 +1141,24 @@ async def _ai_write_post(
         user = (
             "Короткий апдейт. "
             f"{variation} "
-            "ONE цена — куда жду. Price action язык (ликвидность/зона/закрепление), НЕ ema."
+            "Одна цель. Price action. Без «Ключевое условие» и без отдельной строки уровня."
             f"{mtf_note}{hint_suffix}\n\n"
             + _facts_block(row, key_level=kl, bias=bias_n, post_type=post_type, prev=prev, mtf_confirmed=mtf_confirmed)
         )
-        max_tokens = 250
-        temperature = 0.7
+        max_tokens = 260
+        temperature = 0.78
     else:
         variation = random.choice(_VARIATION_HINTS_ANALYSIS)
         user = (
-            "Понятный пост, price action. "
+            "Живой пост трейдера, price action. "
             f"{variation} "
-            "ОДНА главная цена + условие (если нужно). НЕ список уровней. НЕ индикаторы в тексте."
+            "ОДНА главная цель по сторону bias. Не шаблон. Не индикаторы. "
+            "Верни target числом в JSON."
             f"{mtf_note}{hint_suffix}\n\n"
             + _facts_block(row, key_level=kl, bias=bias_n, post_type=post_type, prev=prev, mtf_confirmed=mtf_confirmed)
         )
-        max_tokens = 380
-        temperature = 0.76
+        max_tokens = 400
+        temperature = 0.88
     try:
         verdict = await ai_client.fast_json_completion(
             system=system,
@@ -1042,18 +1174,17 @@ async def _ai_write_post(
     body = (verdict.get("body") or verdict.get("narrative") or "").strip()
     if not body:
         return None
-    # Ensure key level appears in analysis/update text.
     human_kl = _fmt_price(kl)
-    # Guard against the AI literally echoing the field name instead of its value
-    # (e.g. "уровень human_key_level" or "KEY_LEVEL зафиксирован").
     for placeholder in ("human_key_level", "HUMAN_KEY_LEVEL", "KEY_LEVEL"):
         body = body.replace(placeholder, human_kl)
     body = _normalize_outlook_body(body)
+    # If key level still missing, weave it into a natural clause — never a bolted footer.
     if human_kl not in body and human_kl.replace(" ", "") not in body.replace(" ", ""):
         if post_type == "update":
-            body = f"{body.rstrip()} Ключевой уровень — {human_kl}."
+            body = f"{body.rstrip().rstrip('.')} — ориентир {_fmt_price(kl)}."
         else:
-            body = f"{body.rstrip()}\n\nКлючевой уровень — {human_kl}."
+            body = f"{body.rstrip().rstrip('.')} Зона/ориентир около {_fmt_price(kl)}."
+        body = _normalize_outlook_body(body)
     coin = row["symbol"].replace("/USDT", "")
     ticker = (verdict.get("ticker") or coin).strip().lstrip("#$").upper() or coin
     try:
@@ -1065,12 +1196,14 @@ async def _ai_write_post(
         bias_out = bias_n
     if bias_out == "neutral":
         bias_out = bias_n
+    target_out = _extract_target_from_verdict(verdict, row, bias_out)
     return {
         "ticker": ticker,
         "body": body,
         "score_1_10": max(1, min(10, s10)),
         "bias": bias_out,
         "key_level": kl,
+        "target": target_out,
         "post_type": post_type,
         "post_subtype": (verdict.get("post_subtype") or "analysis").strip().lower(),
     }
@@ -1165,15 +1298,18 @@ async def _publish_row(
 
     prev_body = (prev or {}).get("body")
     pool = _facts_price_pool(row, float(ai.get("key_level") or key_level))
+    close_now = float(row.get("close") or 0)
+    bias_chk = (ai.get("bias") or bias_hint or "long").lower()
     needs_retry = (
         not _body_prices_sane(ai["body"], pool)
         or not _levels_have_numbers(ai["body"])
         or _too_similar(ai["body"], prev_body)
+        or not _scenario_levels_sane(ai["body"], close=close_now, bias=bias_chk)
     )
     if needs_retry:
         print(
             f"[market_outlook] retrying AI text for {row['symbol']} "
-            "(sanity/duplicate check failed)",
+            "(sanity/duplicate/scenario check failed)",
             flush=True,
         )
         retry = await _ai_write_post(
@@ -1185,22 +1321,25 @@ async def _publish_row(
             mtf_confirmed=mtf_confirmed,
             extra_hint=(
                 "Важно: используй только числа из фактов ниже, ни одной новой цифры. "
-                "Каждое упоминание поддержки/сопротивления — сразу с числом. "
-                "Сформулируй иначе, не повторяй прошлый текст."
+                "Цели строго по сторону bias относительно price_now. "
+                "Не пиши «жду закрепление», если key_level_vs_price = already_above/already_below. "
+                "Сформулируй иначе, без штампа «Ключевое условие», не повторяй прошлый текст."
             ),
         )
         retry_pool = _facts_price_pool(row, float((retry or {}).get("key_level") or key_level)) if retry else []
+        retry_bias = ((retry or {}).get("bias") or bias_hint or "long").lower()
         if (
             retry
             and _body_prices_sane(retry["body"], retry_pool)
             and _levels_have_numbers(retry["body"])
             and not _too_similar(retry["body"], prev_body)
+            and _scenario_levels_sane(retry["body"], close=close_now, bias=retry_bias)
         ):
             ai = retry
         else:
             print(
                 f"[market_outlook] dropping post for {row['symbol']}: "
-                "failed sanity/duplicate check twice",
+                "failed sanity/duplicate/scenario check twice",
                 flush=True,
             )
             return False
@@ -1257,9 +1396,20 @@ async def _publish_row(
         return False
     target_v = None
     try:
-        target_v = float(row.get("target_1") or row.get("resistance") or 0) or None
+        if ai.get("target") is not None:
+            target_v = float(ai.get("target")) or None
     except (TypeError, ValueError):
         target_v = None
+    if target_v is None:
+        try:
+            target_v = float(row.get("target_1") or row.get("resistance") or 0) or None
+        except (TypeError, ValueError):
+            target_v = None
+        if (bias or "").lower() == "short":
+            try:
+                target_v = float(row.get("support") or row.get("target_1") or 0) or target_v
+            except (TypeError, ValueError):
+                pass
     root_id = None
     if post_type == "analysis":
         root_id = int(msg_id)
@@ -1460,3 +1610,139 @@ async def run() -> None:
         except Exception as e:
             print(f"[market_outlook] Упал: {e}", flush=True)
         await asyncio.sleep(max(60, INTERVAL_SEC))
+
+
+async def maybe_rewrite_once_on_boot() -> None:
+    """Один раз после деплоя переписать подписи недавних постов (v1 style fix)."""
+    flag = "outlook_style_rewrite_v2"
+    if (db.get_setting(flag) or "").strip():
+        print(f"[market_outlook] rewrite_once skip ({flag} done)", flush=True)
+        return
+    await asyncio.sleep(90)
+    try:
+        result = await rewrite_and_edit_recent_posts(limit=12)
+        db.set_setting(flag, json.dumps({"ts": time.time(), **{k: result.get(k) for k in ("edited", "skipped", "failed")}}))
+    except Exception as e:
+        print(f"[market_outlook] rewrite_once fail: {e}", flush=True)
+
+
+REWRITE_SYSTEM = """
+Ты редактор крипто-канала. Перепиши ГОТОВЫЙ пост так, чтобы он звучал живо и профессионально.
+Сохрани: тикер, bias, уровни/цели/смысл сценария. Не меняй торговую идею на противоположную.
+Убери: штамп «Ключевое условие», висящее «, и на дневке.», канцелярит, AI-штампы.
+Если по close цена УЖЕ за уровнем — поправь формулировку («уже ниже/выше… смотрю продолжение»), не пиши «жду закрепление».
+Верни JSON: {"body": "...", "ticker": "BTC"}
+""".strip()
+
+
+async def _rewrite_one_body(meta: dict, symbol: str) -> str | None:
+    body = (meta.get("body") or "").strip()
+    if not body or len(body) < 40:
+        return None
+    coin = symbol.replace("/USDT", "")
+    bias = meta.get("bias") or "long"
+    close = meta.get("close")
+    key_level = meta.get("key_level")
+    target = meta.get("target")
+    relation = _key_level_relation(close or 0, key_level or 0, bias)
+    user = (
+        f"symbol: {symbol}\n"
+        f"ticker: ${coin}\n"
+        f"bias: {bias}\n"
+        f"close_at_publish: {close}\n"
+        f"key_level: {key_level}\n"
+        f"target: {target}\n"
+        f"key_level_vs_price: {relation}\n"
+        f"original_body:\n{body}\n"
+    )
+    try:
+        out = await ai_client.fast_json_completion(
+            system=REWRITE_SYSTEM,
+            user_text=user,
+            max_tokens=320,
+            temperature=0.55,
+        )
+    except Exception as e:
+        print(f"[market_outlook] rewrite AI fail {symbol}: {e}", flush=True)
+        return None
+    if not isinstance(out, dict):
+        return None
+    new_body = _normalize_outlook_body((out.get("body") or "").strip())
+    if len(new_body) < 60:
+        return None
+    return new_body
+
+
+async def rewrite_and_edit_recent_posts(*, limit: int = 12) -> dict:
+    """
+    Переписать текст недавних outlook-постов и отредактировать подписи в Telegram.
+    Графики не трогаем (editMessageCaption).
+    """
+    import telegram_bot
+
+    recent = _recent_posts()
+    items = sorted(
+        recent.items(),
+        key=lambda kv: float((kv[1] or {}).get("ts") or 0),
+        reverse=True,
+    )[: max(1, limit)]
+
+    edited = 0
+    skipped = 0
+    failed = 0
+    details: list[dict] = []
+
+    for symbol, meta in items:
+        msg_id = meta.get("message_id")
+        old_body = (meta.get("body") or "").strip()
+        if not msg_id or not old_body:
+            skipped += 1
+            details.append({"symbol": symbol, "status": "skip_no_msg_or_body"})
+            continue
+        new_body = await _rewrite_one_body(meta, symbol)
+        if not new_body:
+            failed += 1
+            details.append({"symbol": symbol, "status": "rewrite_fail"})
+            continue
+        ticker = symbol.replace("/USDT", "")
+        emoji = _pick_emoji_for_bias(str(meta.get("bias") or "long"))
+        caption = f"{emoji} #{ticker}\n\n{new_body}"[:1020]
+        ok = await telegram_bot.edit_news_caption(int(msg_id), caption)
+        if not ok:
+            failed += 1
+            details.append({"symbol": symbol, "status": "edit_fail", "msg_id": msg_id})
+            continue
+        # persist rewritten body
+        _remember_post(
+            symbol,
+            bias=str(meta.get("bias") or "long"),
+            key_level=meta.get("key_level"),
+            close=float(meta.get("close") or 0),
+            post_type=str(meta.get("post_type") or "analysis"),
+            body=new_body,
+            message_id=int(msg_id),
+            root_message_id=meta.get("root_message_id") or msg_id,
+            target=meta.get("target"),
+        )
+        edited += 1
+        details.append(
+            {
+                "symbol": symbol,
+                "status": "ok",
+                "msg_id": msg_id,
+                "old": old_body[:120],
+                "new": new_body[:120],
+            }
+        )
+        print(f"[market_outlook] rewritten+edited {symbol} msg={msg_id}", flush=True)
+        await asyncio.sleep(1.2)
+
+    summary = {"edited": edited, "skipped": skipped, "failed": failed, "details": details}
+    print(f"[market_outlook] rewrite_and_edit done: {summary}", flush=True)
+    try:
+        await telegram_bot._notify_admins(
+            f"✏️ Outlook rewrite: edited={edited} skipped={skipped} failed={failed}"
+        )
+    except Exception:
+        pass
+    return summary

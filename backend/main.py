@@ -96,6 +96,9 @@ async def lifespan(app: FastAPI):
         bg_tasks.append(asyncio.create_task(news_relay.run(), name="news_relay"))
     if market_outlook.is_configured():
         bg_tasks.append(asyncio.create_task(market_outlook.run(), name="market_outlook"))
+        bg_tasks.append(
+            asyncio.create_task(market_outlook.maybe_rewrite_once_on_boot(), name="outlook_rewrite_once")
+        )
     if post_review.is_configured():
         bg_tasks.append(asyncio.create_task(post_review.run(), name="post_review"))
     # Отдельный клиент только если TELEGRAM_CHAT_SESSION ≠ ingest.
@@ -549,6 +552,13 @@ class ChatEngageTestRequest(BaseModel):
     entry: float | None = None
     pnl: float | None = None
     exit_price: float | None = None
+
+
+@app.post("/api/admin/outlook-rewrite")
+async def admin_outlook_rewrite(limit: int = 12, admin=Depends(require_admin)):
+    """Переписать и отредактировать недавние outlook-посты в канале (только текст)."""
+    result = await market_outlook.rewrite_and_edit_recent_posts(limit=max(1, min(30, int(limit))))
+    return {"ok": True, **result}
 
 
 @app.get("/api/admin/post-review/latest")

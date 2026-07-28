@@ -359,6 +359,56 @@ async def publish_news(
     return int(msg_id) if msg_id else None
 
 
+def _news_chat_id() -> str | None:
+    raw = (
+        os.getenv("TELEGRAM_NEWS_TARGET_CHANNEL")
+        or os.getenv("MARKET_OUTLOOK_CHANNEL")
+        or ""
+    ).strip()
+    if not raw:
+        return None
+    return raw if raw.startswith("@") or raw.lstrip("-").isdigit() else f"@{raw.lstrip('@')}"
+
+
+async def edit_news_caption(message_id: int, text: str) -> bool:
+    """Редактирует подпись/текст уже опубликованного outlook-поста (без смены графика)."""
+    cid = _news_chat_id()
+    if not cid or not message_id:
+        return False
+    caption = text if len(text) <= 1024 else (text[:1000].rstrip() + "…")
+    # Photo posts → editMessageCaption; plain text → editMessageText
+    data = await _api(
+        "editMessageCaption",
+        {
+            "chat_id": cid,
+            "message_id": int(message_id),
+            "caption": caption,
+            "parse_mode": "HTML",
+        },
+    )
+    if data and data.get("ok"):
+        return True
+    # fallback: maybe it was a text-only post
+    data2 = await _api(
+        "editMessageText",
+        {
+            "chat_id": cid,
+            "message_id": int(message_id),
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        },
+    )
+    if data2 and data2.get("ok"):
+        return True
+    print(
+        f"[telegram_bot] edit_news_caption fail msg={message_id}: "
+        f"cap={data} text={data2}",
+        flush=True,
+    )
+    return False
+
+
 def _notify_farm_boost(channel: str | int, message_id: int, text: str = "") -> None:
     """Пишет в scaner/data/boost_outbox.jsonl — демон подхватит за секунды."""
     import json
