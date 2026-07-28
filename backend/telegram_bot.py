@@ -401,15 +401,51 @@ def _channel_cta():
     ]}
 
 
+# Антидубль CTA: ensure_discussion + webhook auto-forward иначе шлют 👇 дважды.
+_cta_done: dict[str, float] = {}
+_CTA_TTL_SEC = 6 * 3600
+
+
+def _cta_key(chat_id: int | str, message_id: int) -> str:
+    return f"{chat_id}:{int(message_id)}"
+
+
+def _cta_already_done(chat_id: int | str, message_id: int) -> bool:
+    import time
+
+    now = time.time()
+    # ленивая чистка
+    stale = [k for k, ts in _cta_done.items() if now - ts > _CTA_TTL_SEC]
+    for k in stale:
+        _cta_done.pop(k, None)
+    return _cta_key(chat_id, message_id) in _cta_done
+
+
+def _cta_mark_done(chat_id: int | str, message_id: int) -> None:
+    import time
+
+    _cta_done[_cta_key(chat_id, message_id)] = time.time()
+
+
 async def _attach_discussion_cta(chat_id: int | str, message_id: int) -> bool:
-    """В чате комментов: ответ «👇» и под ним кнопки Сайт / Бот."""
+    """В чате комментов: один ответ «👇» с кнопками Сайт / Бот под корнем треда.
+
+    Без plain-fallback: иначе 👇 всплывает среди обычных комментов людей.
+    """
     if not chat_id or not message_id:
         return False
+    if _cta_already_done(chat_id, message_id):
+        print(f"[telegram_bot] CTA skip duplicate chat={chat_id} reply_to={message_id}")
+        return False
+
+    # резервируем сразу — параллельные ensure+webhook не успеют оба отправить
+    _cta_mark_done(chat_id, message_id)
+
     data = await _api(
         "sendMessage",
         {
             "chat_id": chat_id,
-            "reply_to_message_id": message_id,
+            "reply_to_message_id": int(message_id),
             "text": "👇",
             "reply_markup": _channel_cta(),
             "disable_notification": True,
@@ -418,19 +454,11 @@ async def _attach_discussion_cta(chat_id: int | str, message_id: int) -> bool:
     if data and data.get("ok"):
         print(f"[telegram_bot] CTA 👇 chat={chat_id} reply_to={message_id}")
         return True
-    # без reply_to — если авто-форвард ещё не виден боту
-    data2 = await _api(
-        "sendMessage",
-        {
-            "chat_id": chat_id,
-            "text": "👇",
-            "reply_markup": _channel_cta(),
-            "disable_notification": True,
-        },
-    )
-    ok = bool(data2 and data2.get("ok"))
-    print(f"[telegram_bot] CTA 👇 plain chat={chat_id} reply_err={data} ok={ok}")
-    return ok
+
+    # не удалось привязать к треду — откатываем маркер, без «голого» сообщения в чат
+    _cta_done.pop(_cta_key(chat_id, message_id), None)
+    print(f"[telegram_bot] CTA 👇 skip (no reply) chat={chat_id} reply_to={message_id} err={data}")
+    return False
 
 
 async def _ensure_discussion_cta(channel_id: str | int, message_id: int) -> None:
@@ -844,10 +872,19 @@ async def handle_update(update: dict):
     from_user = message.get("from") or {}
     user_id = from_user.get("id")
 
-    # Чат обсуждений канала: на авто-форвард поста вешаем Сайт/Бот.
-    # На обычные сообщения людей — молчим (не шлём welcome).
+    # Чат обсуждений канала: CTA только на авто-форвард поста из канала.
+    # Обычные комменты людей — молчим. Дубль с _ensure_discussion_cta режется антидублем.
     if chat_type in ("group", "supergroup"):
-        if message.get("is_automatic_forward") and message.get("message_id"):
+        is_auto = bool(message.get("is_automatic_forward"))
+        # корень треда (не reply человека); sender_chat = канал-источник
+        sender_chat = message.get("sender_chat") or {}
+        sender_ok = (not sender_chat) or (sender_chat.get("type") == "channel")
+        if (
+            is_auto
+            and sender_ok
+            and message.get("message_id")
+            and not message.get("reply_to_message")
+        ):
             await _attach_discussion_cta(chat_id, message["message_id"])
         return
 

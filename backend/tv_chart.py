@@ -19,8 +19,9 @@ from data_layer import build_features, fetch_ohlcv_raw
 
 CHART_IMG_API_KEY = (os.getenv("CHART_IMG_API_KEY") or "").strip()
 CHART_INTERVAL = (os.getenv("OUTLOOK_CHART_INTERVAL", "240") or "240").strip()
-CHART_WIDTH = int(os.getenv("OUTLOOK_CHART_WIDTH", "1200") or "1200")
-CHART_HEIGHT = int(os.getenv("OUTLOOK_CHART_HEIGHT", "675") or "675")
+# Чуть крупнее дефолт — Telegram JPEG-сжатие sendPhoto меньше убивает текст
+CHART_WIDTH = int(os.getenv("OUTLOOK_CHART_WIDTH", "1280") or "1280")
+CHART_HEIGHT = int(os.getenv("OUTLOOK_CHART_HEIGHT", "720") or "720")
 EXCHANGE_TV = (os.getenv("OUTLOOK_TV_EXCHANGE", "BYBIT") or "BYBIT").strip().upper()
 WATERMARK = (os.getenv("OUTLOOK_CHART_WATERMARK") or "nowicki").strip()
 RENDER_TF = (os.getenv("OUTLOOK_CHART_TF", "4h") or "4h").strip()
@@ -28,6 +29,8 @@ RENDER_BARS = int(os.getenv("OUTLOOK_CHART_BARS", "100") or "100")
 # Share of plot width reserved as empty "future" for the direction arrow.
 FUTURE_RATIO = float(os.getenv("OUTLOOK_CHART_FUTURE_RATIO", "0.22") or "0.22")
 FUTURE_RATIO = min(0.35, max(0.16, FUTURE_RATIO))
+# 3x supersample → после downscale подписи читаются в Telegram
+CHART_SCALE = max(2, min(4, int(os.getenv("OUTLOOK_CHART_SCALE", "3") or "3")))
 
 _ICON_DIR = os.path.join(os.getenv("DATA_DIR", "."), "coin_icons")
 _ICON_BYTES_CACHE: dict[str, bytes | None] = {}
@@ -849,10 +852,11 @@ def render_candle_png(
     if len(df) < 25:
         return None
 
-    scale = 2
-    W = max(1000, CHART_WIDTH) * scale
-    H = max(560, CHART_HEIGHT) * scale
-    pad_l, pad_r, pad_t, pad_b = 18 * scale, 92 * scale, 52 * scale, 36 * scale
+    scale = CHART_SCALE
+    W = max(1100, CHART_WIDTH) * scale
+    H = max(620, CHART_HEIGHT) * scale
+    # больше места справа/снизу под крупнее подписи цен и дат
+    pad_l, pad_r, pad_t, pad_b = 20 * scale, 110 * scale, 58 * scale, 42 * scale
     # Bukvar charts are clean ? no volume strip (more room for zones + path).
     vol_h = 0
     plot_h = H - pad_t - pad_b - vol_h - 8 * scale
@@ -971,9 +975,10 @@ def render_candle_png(
         return int(pad_l + (float(i) / n) * hist_w)
 
     bg = (8, 10, 14)
-    grid = (28, 32, 40)
-    text_muted = (120, 130, 150)
-    text_main = (220, 224, 230)
+    grid = (36, 40, 50)
+    # Было ~(120,130,150) — после JPEG Telegram подписи пропадали
+    text_muted = (198, 206, 220)
+    text_main = (245, 247, 250)
     # Path + candle colors (classic green/red).
     green = (8, 153, 129)
     red = (242, 54, 69)
@@ -984,12 +989,13 @@ def render_candle_png(
 
     img = Image.new("RGBA", (W, H), (*bg, 255))
     draw = ImageDraw.Draw(img)
-    # ????????? ??????? ??? ????????????? timeframe/???/???????
-    font_xs = _font(14 * scale)
-    font_sm = _font(15 * scale)
-    font_lg = _font(18 * scale, bold=True)
-    font_price = _font(15 * scale, bold=True)
-    font_wm = _font(28 * scale)
+    # Крупнее + bold: на телефоне и после сжатия TG читается
+    font_xs = _font(18 * scale, bold=True)
+    font_sm = _font(17 * scale)
+    font_lg = _font(22 * scale, bold=True)
+    font_price = _font(17 * scale, bold=True)
+    font_wm = _font(30 * scale)
+    font_zone = _font(16 * scale, bold=True)
 
     n_grid = 7
     for g in range(n_grid):
@@ -999,10 +1005,12 @@ def render_candle_png(
             draw, pad_l, plot_right, yy, (*grid, 160), dash=6 * scale, gap=5 * scale, width=scale
         )
         draw.text(
-            (plot_right + 8 * scale, yy - 7 * scale),
+            (plot_right + 8 * scale, yy - 9 * scale),
             _fmt(y_max - (y_max - y_min) * frac),
             font=font_xs,
             fill=text_muted,
+            stroke_width=max(1, scale // 2),
+            stroke_fill=(8, 10, 14, 255),
         )
 
     # Soft vertical divider at end of history (subtle).
@@ -1030,7 +1038,14 @@ def render_candle_png(
         except Exception:
             lbl = ""
         if lbl:
-            draw.text((x - 14 * scale, H - 22 * scale), lbl, font=font_xs, fill=text_muted)
+            draw.text(
+                (x - 18 * scale, H - 28 * scale),
+                lbl,
+                font=font_xs,
+                fill=text_muted,
+                stroke_width=max(1, scale // 2),
+                stroke_fill=(8, 10, 14, 255),
+            )
 
     # Future date ticks in the empty right margin (Bukvar-style).
     try:
@@ -1047,10 +1062,12 @@ def render_candle_png(
             ahead = max(1, int(len(df) * FUTURE_RATIO * (fi / 3)))
             fdt = last_dt + delta * ahead
             draw.text(
-                (fx - 14 * scale, H - 22 * scale),
+                (fx - 18 * scale, H - 28 * scale),
                 fdt.strftime("%d %b"),
                 font=font_xs,
                 fill=text_muted,
+                stroke_width=max(1, scale // 2),
+                stroke_fill=(8, 10, 14, 255),
             )
     except Exception:
         pass
@@ -1078,7 +1095,7 @@ def render_candle_png(
     lbl_supply = "\u041f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"  # "Predlozhenie"
     lbl_demand = "\u0421\u043f\u0440\u043e\u0441"  # "Spros"
     zone_label_ru = {"supply": lbl_supply, "demand": lbl_demand}
-    zone_label_col = {"supply": (235, 150, 150), "demand": (150, 210, 190)}
+    zone_label_col = {"supply": (255, 175, 175), "demand": (160, 235, 210)}
 
     # Single orange key level (the one referenced in the post text).
     mtf_confirmed = bool(lv.get("mtf_confirmed"))
@@ -1139,33 +1156,43 @@ def render_candle_png(
             y_top, y_bot = y_bot, y_top
         x0 = xx(float(z.get("start_i") or 0))
         label = f"{ru}  {_fmt(float(z['bot']))}-{_fmt(float(z['top']))}"
-        tw = int(draw.textlength(label, font=font_xs))
+        tw = int(draw.textlength(label, font=font_zone))
         lx = min(x0 + 6 * scale, plot_right - tw - 6 * scale)
         lx = max(lx, pad_l + 4 * scale)
-        text_h = 16 * scale
+        text_h = 18 * scale
         if (y_bot - y_top) >= text_h + 6 * scale:
             ly = y_top + 3 * scale
         else:
             ly = max(pad_t, y_top - text_h - 2 * scale)
+        # почти непрозрачный фон — иначе серый текст на зоне пропадает в TG
         draw.rectangle(
-            [lx - 3 * scale, ly - 2 * scale, lx + tw + 3 * scale, ly + 13 * scale],
-            fill=(10, 12, 16, 165),
+            [lx - 4 * scale, ly - 3 * scale, lx + tw + 4 * scale, ly + 15 * scale],
+            fill=(6, 8, 12, 235),
+            outline=(55, 60, 72, 255),
+            width=max(1, scale // 2),
         )
-        draw.text((lx, ly), label, font=font_xs, fill=zone_label_col.get(kind, text_muted))
+        draw.text(
+            (lx, ly),
+            label,
+            font=font_zone,
+            fill=zone_label_col.get(kind, text_muted),
+            stroke_width=max(1, scale // 2),
+            stroke_fill=(0, 0, 0, 255),
+        )
 
     last_o = float(last["open"])
     py = yx(last_c)
     badge = _fmt(last_c)
-    bw = int(draw.textlength(badge, font=font_price)) + 14 * scale
-    bh = 22 * scale
+    bw = int(draw.textlength(badge, font=font_price)) + 16 * scale
+    bh = 26 * scale
     badge_color = green if last_c >= last_o else red
     text_on_badge = (255, 255, 255)
     draw.rounded_rectangle(
         [plot_right + 4 * scale, py - bh // 2, plot_right + 4 * scale + bw, py + bh // 2],
-        radius=3 * scale,
+        radius=4 * scale,
         fill=(*badge_color, 255),
     )
-    draw.text((plot_right + 11 * scale, py - 8 * scale), badge, font=font_price, fill=text_on_badge)
+    draw.text((plot_right + 12 * scale, py - 9 * scale), badge, font=font_price, fill=text_on_badge)
     x0 = hist_right
     dash_end = hist_right + int((plot_right - hist_right) * 0.18)
     while x0 < dash_end:
@@ -1199,7 +1226,8 @@ def render_candle_png(
 
     out = img.convert("RGB").resize((W // scale, H // scale), Image.Resampling.LANCZOS)
     buf = io.BytesIO()
-    out.save(buf, format="PNG", optimize=True)
+    # Без optimize/жёсткого compress — текст лучше переживает JPEG Telegram
+    out.save(buf, format="PNG", compress_level=3)
     return buf.getvalue()
 
 
