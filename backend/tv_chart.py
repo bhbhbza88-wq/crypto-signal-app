@@ -1082,23 +1082,7 @@ def render_candle_png(
 
     # Single orange key level (the one referenced in the post text).
     mtf_confirmed = bool(lv.get("mtf_confirmed"))
-    for p in structure.get("orange_levels") or []:
-        yy = yx(float(p))
-        if yy < pad_t or yy > pad_t + plot_h:
-            continue
-        draw.line([(pad_l, yy), (hist_right, yy)], fill=(*orange, 255), width=2 * scale)
-        draw.line(
-            [(hist_right, yy), (hist_right + int(future_w * 0.25), yy)],
-            fill=(*orange, 180),
-            width=2 * scale,
-        )
-        badge = _fmt(float(p)) + (" 1D" if mtf_confirmed else "")
-        bw = int(draw.textlength(badge, font=font_xs)) + 8 * scale
-        draw.rectangle(
-            [plot_right + 4 * scale, yy - 8 * scale, plot_right + 4 * scale + bw, yy + 8 * scale],
-            fill=(*orange, 255),
-        )
-        draw.text((plot_right + 8 * scale, yy - 7 * scale), badge, font=font_xs, fill=(20, 20, 20))
+    # Key level (orange) removed per user request — zones are enough, no yellow bar clutter.
 
     # Candles: green up / red down.
     for i, row in df.iterrows():

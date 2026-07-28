@@ -1061,7 +1061,7 @@ def _pick_emoji_for_bias(bias: str) -> str:
 def _format_post(row: dict, ai: dict, chart_tag: str = "", *, post_subtype: str | None = None) -> str:
     """
     Bukvar format:
-    - analysis/update: #TICKER\\n\\nbody
+    - analysis/update: emoji #TICKER\\n\\nbody
     - chart_only: emoji #TICKER (no body, chart speaks)
     - greet/promo: text only (no ticker, handled separately)
     """
@@ -1070,20 +1070,23 @@ def _format_post(row: dict, ai: dict, chart_tag: str = "", *, post_subtype: str 
     ticker = (ai.get("ticker") or coin).strip().lstrip("#$").upper() or coin
     body = (ai.get("body") or "").strip()
     subtype = post_subtype or ai.get("post_subtype") or "analysis"
+    bias = (ai.get("bias") or "long").strip().lower()
     
     # Clean formal phrases
     for bad in ("На основании анализа", "Следует отметить", "В заключение", "Данный актив"):
         body = body.replace(bad, "")
     
+    # Emoji before ticker (Bukvar style): long → 🪙/🧬, short → 🔻, neutral → ⚪️
+    emoji = _pick_emoji_for_bias(bias)
+    
     # Chart-only: just emoji + ticker (body empty or very short)
     if subtype == "chart_only" or (len(body) < 50 and subtype == "analysis"):
-        emoji = _pick_emoji_for_bias(ai.get("bias") or "long")
         return f"{emoji} #{ticker}"
     
-    # Full analysis/update
+    # Full analysis/update: emoji #TICKER + body
     if not body:
-        return f"#{ticker}"
-    text = f"#{ticker}\n\n{body}"
+        return f"{emoji} #{ticker}"
+    text = f"{emoji} #{ticker}\n\n{body}"
     return text[:1020]
 
 
