@@ -269,18 +269,16 @@ def _pnl_edit_prompt(
 ) -> str:
     is_long = side.upper() == "LONG"
     side_ru = "Лонг" if is_long else "Шорт"
-    side_ua = "Довгий" if is_long else "Короткий"
-    side_en = "Long" if is_long else "Short"
     return (
-        "You are editing an exchange PnL share screenshot (Bitunix / BingX / Binance).\n"
+        "You are editing a BingX PnL share screenshot.\n"
         "CRITICAL RULES:\n"
         "- Change ONLY the trade data text and the displayed username/handle.\n"
         "- Do NOT redraw, crop, stretch, or cover the artwork/photo/illustration.\n"
         "- Do NOT add black rectangles, panels, or overlays.\n"
-        "- Keep exchange logos, artwork, layout, fonts and native look.\n"
-        "- Match the card language (Russian / Ukrainian / English) already used on the image.\n"
-        "- Side color MUST be: Long/Лонг/Довгий = bright green (#0ECB81). "
-        "Short/Шорт/Короткий = red or pink. Never paint Long in red/pink.\n"
+        "- Keep BingX logo, mascot artwork, layout, fonts and native look.\n"
+        "- ALL TEXT MUST BE IN RUSSIAN (even if the template has English).\n"
+        "- Side color MUST be: Лонг = bright green (#0ECB81). "
+        "Шорт = red or pink. Never paint Лонг in red/pink.\n"
         "- PnL % color: green if positive (+), red/pink if negative (−).\n"
         "\n"
         "PRIVACY / IDENTITY:\n"
@@ -289,17 +287,15 @@ def _pnl_edit_prompt(
         "(do not crop, blank, or redraw it).\n"
         "- Do not keep original personal identifiers from the template.\n"
         "\n"
-        f"Set the trade fields to EXACTLY these values:\n"
+        "Set the trade fields to EXACTLY these Russian labels + values:\n"
+        "- Header: Реализованная П/У\n"
         f"- Symbol/pair: {pair}\n"
-        f"- Side: {side_ru} (or {side_ua}/{side_en} if that language is on the card)\n"
+        f"- Side: {side_ru}\n"
         f"- Leverage: {leverage}X\n"
         f"- Main PnL percent: {roi_str}\n"
-        f"- Entry / opening price: {entry_str}\n"
-        f"- Exit / closing / last price: {exit_str}\n"
+        f"- Последняя цена {exit_str}\n"
+        f"- Цена входа {entry_str}\n"
         f"- Username: {fake_user}\n"
-        f"Family hint: {family}.\n"
-        "- If the card says Unrealized / Нереализованная — change header to "
-        "Realized PnL / Реализованная П/У (match card language).\n"
         "Return the edited image only."
     )
 
@@ -545,19 +541,15 @@ def render_share_card(
     family: str | None = None,
     template_file: str | None = None,
 ) -> bytes:
-    """ТОЛЬКО 2 BingX шаблона для закрытия: win (tpl_01) и loss (tpl_02).
-    По умолчанию BingX (как карточки открытия).
-    """
-    # СТРОГО 2 карточки: tpl_01 для профита, tpl_02 для минуса
+    """ТОЛЬКО 2 карточки пользователя: bingx_close_win / bingx_close_loss."""
     win = float(pnl_pct) >= 0
     if template_file:
-        # Если указан конкретный файл — используем его
         pick_file = template_file
     elif win:
-        pick_file = "tpl_01_1280x1280.png"  # Green cap Doge
+        pick_file = "bingx_close_win.png"   # улыбающийся маскот, зелёная кепка
     else:
-        pick_file = "tpl_02_1080x967.png"  # Red cap Doge
-    
+        pick_file = "bingx_close_loss.png"  # плачущий маскот, красный козырёк
+
     try:
         return render_template_card(
             template_file=pick_file,

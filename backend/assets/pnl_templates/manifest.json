@@ -128,20 +128,32 @@
   },
   "templates": [
     {
-      "file": "tpl_01_1280x1280.png",
+      "file": "bingx_close_win.png",
       "family": "bingx",
       "width": 1280,
       "height": 1280,
       "mood": "win",
-      "note": "Green cap Doge, for profit closes only"
+      "note": "User HQ win card — smiling mascot, green brim"
+    },
+    {
+      "file": "bingx_close_loss.png",
+      "family": "bingx",
+      "width": 1280,
+      "height": 1280,
+      "mood": "loss",
+      "note": "User HQ loss card — crying mascot, red brim"
+    },
+    {
+      "file": "tpl_01_1280x1280.png",
+      "family": "bingx",
+      "width": 1280,
+      "height": 1280
     },
     {
       "file": "tpl_02_1080x967.png",
       "family": "bingx",
       "width": 1080,
-      "height": 967,
-      "mood": "loss",
-      "note": "Red cap Doge, for loss closes only"
+      "height": 967
     },
     {
       "file": "tpl_03_1280x1280.png",
