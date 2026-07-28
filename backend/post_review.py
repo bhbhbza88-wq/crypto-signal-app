@@ -334,7 +334,19 @@ async def analyze_deep(
         temperature=0.3,
     )
     parsed = _parse_json_object(raw)
-    parsed["model_used"] = model
+    if parsed.get("parse_error") and model_hint == "gemini" and model != "google/gemini-2.5-pro":
+        print("[post_review] deep parse fail → fallback gemini-2.5-pro", flush=True)
+        raw2 = await _call_llm(
+            model="google/gemini-2.5-pro",
+            messages=[{"role": "user", "content": content}],
+            max_tokens=2500,
+            temperature=0.3,
+        )
+        parsed = _parse_json_object(raw2)
+        parsed["model_used"] = "google/gemini-2.5-pro"
+        parsed["fallback_from"] = model
+    else:
+        parsed["model_used"] = model
     parsed["ai"] = True
     return parsed
 
