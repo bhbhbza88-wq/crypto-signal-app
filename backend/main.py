@@ -561,6 +561,50 @@ async def admin_outlook_rewrite(limit: int = 12, admin=Depends(require_admin)):
     return {"ok": True, **result}
 
 
+class OutlookPatchIdsRequest(BaseModel):
+    ids: dict[str, int]
+    bodies: dict[str, str] | None = None
+
+
+@app.post("/api/admin/outlook-patch-ids")
+def admin_outlook_patch_ids(req: OutlookPatchIdsRequest, admin=Depends(require_admin)):
+    """Проставить message_id (и опционально body) для символов в outlook_recent_posts."""
+    recent = market_outlook._recent_posts()
+    updated = []
+    for sym, mid in (req.ids or {}).items():
+        key = sym if sym in recent else (f"{sym}/USDT" if f"{sym}/USDT" in recent else sym)
+        meta = recent.get(key) or recent.get(sym)
+        if not meta:
+            # allow create stub
+            ticker = sym.replace("/USDT", "")
+            key = f"{ticker}/USDT"
+            meta = {
+                "ts": _time.time(),
+                "bias": "long",
+                "key_level": None,
+                "close": None,
+                "post_type": "analysis",
+                "body": None,
+                "message_id": None,
+                "root_message_id": None,
+                "target": None,
+            }
+        try:
+            mid_i = int(mid)
+        except (TypeError, ValueError):
+            continue
+        meta["message_id"] = mid_i
+        meta["root_message_id"] = meta.get("root_message_id") or mid_i
+        if req.bodies:
+            b = req.bodies.get(sym) or req.bodies.get(key) or req.bodies.get(sym.replace("/USDT", ""))
+            if b:
+                meta["body"] = str(b)[:600]
+        recent[key] = meta
+        updated.append(key)
+    db.set_setting(market_outlook._SETTING_RECENT, json.dumps(recent))
+    return {"ok": True, "updated": updated}
+
+
 @app.get("/api/admin/post-review/latest")
 def admin_post_review_latest(mode: str = "fast", admin=Depends(require_admin)):
     """Последний отчёт post_review (fast|deep)."""

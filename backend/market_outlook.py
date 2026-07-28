@@ -1439,7 +1439,7 @@ async def _publish_row(
         f"[market_outlook] published {row['symbol']} type={post_type} subtype={subtype_tag} "
         f"key={_fmt_price(key_level)} score={row['score']} "
         f"ai={ai['score_1_10']}/10 chart={chart_tag or 'none'} "
-        f"msg={msg_id} reply_to={reply_to}",
+        f"msg={msg_id} reply_to={reply_to} target={target_v}",
         flush=True,
     )
     return True
