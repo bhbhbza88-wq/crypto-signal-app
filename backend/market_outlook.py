@@ -1614,14 +1614,30 @@ async def run() -> None:
 
 async def maybe_rewrite_once_on_boot() -> None:
     """Один раз после деплоя переписать подписи недавних постов (v1 style fix)."""
-    flag = "outlook_style_rewrite_v2"
+    flag = "outlook_style_rewrite_v3"
     if (db.get_setting(flag) or "").strip():
         print(f"[market_outlook] rewrite_once skip ({flag} done)", flush=True)
         return
     await asyncio.sleep(90)
     try:
+        recent = _recent_posts()
+        for sym, meta in list(recent.items())[:8]:
+            print(
+                f"[market_outlook] recent {sym}: msg={meta.get('message_id')} "
+                f"body_len={len(str(meta.get('body') or ''))} "
+                f"bias={meta.get('bias')} close={meta.get('close')}",
+                flush=True,
+            )
         result = await rewrite_and_edit_recent_posts(limit=12)
-        db.set_setting(flag, json.dumps({"ts": time.time(), **{k: result.get(k) for k in ("edited", "skipped", "failed")}}))
+        db.set_setting(
+            flag,
+            json.dumps(
+                {
+                    "ts": time.time(),
+                    **{k: result.get(k) for k in ("edited", "skipped", "failed")},
+                }
+            ),
+        )
     except Exception as e:
         print(f"[market_outlook] rewrite_once fail: {e}", flush=True)
 
