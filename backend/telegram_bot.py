@@ -212,6 +212,12 @@ async def publish_signal_open(
             print(f"[telegram_bot] saved last premium message: {cid} / {msg_id}")
         if msg_id:
             asyncio.create_task(_ensure_discussion_cta(cid, msg_id))
+            # VIP / премиум канал → outbox на приватный boost_channel
+            try:
+                vip = os.getenv("TELEGRAM_FARM_VIP_CHANNEL", "https://t.me/+ONlP_9aok4kxMDZi")
+                _notify_farm_boost(vip, int(msg_id), text)
+            except Exception as e:
+                print(f"[telegram_bot] farm vip outbox: {e}", flush=True)
 
 
 async def publish_signal_closed(text: str, reply_markup: dict | None = None, photo_png: bytes | None = None):
@@ -298,6 +304,45 @@ async def publish_news(
             msg_id = data.get("result", {}).get("message_id")
     if msg_id:
         asyncio.create_task(_ensure_discussion_cta(cid, msg_id))
+        # мгновенный буст фермы (outbox → channel_booster)
+        try:
+            _notify_farm_boost(cid, int(msg_id), text)
+        except Exception as e:
+            print(f"[telegram_bot] farm boost outbox: {e}", flush=True)
+
+
+def _notify_farm_boost(channel: str | int, message_id: int, text: str = "") -> None:
+    """Пишет в scaner/data/boost_outbox.jsonl — демон подхватит за секунды."""
+    import json
+    from pathlib import Path
+
+    ch = str(channel).lstrip("@")
+    if ch.lstrip("-").isdigit():
+        # numeric id — для news используем username
+        ch = "nowicki_news"
+    roots = [
+        Path(__file__).resolve().parent.parent.parent / "scaner" / "data",
+        Path.home() / "Desktop" / "scaner" / "data",
+        Path(r"C:\Users\Dell\Desktop\scaner\data"),
+    ]
+    payload = {
+        "channel": ch if "nowicki" in ch or ch.startswith("http") else "nowicki_news",
+        "msg_id": int(message_id),
+        "post_text": (text or "")[:2000],
+        "ts": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).isoformat(),
+    }
+    for d in roots:
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            path = d / "boost_outbox.jsonl"
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            print(f"[telegram_bot] boost outbox → {path}", flush=True)
+            return
+        except Exception:
+            continue
 
 
 # Обратная совместимость для старых вызовов
