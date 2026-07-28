@@ -86,101 +86,94 @@ UPDATE_MIN_AGE_H = float(os.getenv("MARKET_OUTLOOK_UPDATE_MIN_AGE_H", "6") or "6
 UPDATE_MAX_AGE_H = float(os.getenv("MARKET_OUTLOOK_UPDATE_MAX_AGE_H", "48") or "48")
 
 OUTLOOK_SYSTEM_ANALYSIS = """
-Ты пишешь короткий разбор для Telegram-канала NOWICKI.
+Ты пишешь короткий разбор для Telegram-канала трейдера. Стиль «Торговый Букваръ».
 
-Главное: текст должен быть ПОНЯТНЫМ обычному человеку.
-- короткие предложения (макс 12–15 слов)
-- простые слова: вверх/вниз, поддержка, сопротивление, жду, цель
-- без канцелярита и без сложного жаргона подряд
-- можно 1–2 трейдерских слова (ликвидность, зона), но сразу простым смыслом
+ЖЁСТКИЕ ПРАВИЛА:
+1. Первое предложение ВСЕГДА «По $TICKER…» (без #). Голос трейдера первого лица.
+2. Price action язык — НЕ индикаторы:
+   - НИКОГДА не пиши ema21/ema50/индикаторы/RSI/ADX в тексте.
+   - ИСПОЛЬЗУЙ: ликвидность (сняли/собрали), зона спроса, зона предложения, заброс,
+     смягчили диапазон, закрепление, подтверждение, цепочка предложения, реакция от зоны,
+     точка №1/№2, проторговка.
+   - Можно «поддержка/сопротивление», но лучше «зона спроса/предложения».
+3. Голос: «смотрю», «жду», «работаю от шорта», «интересно после», «пока не рассматриваю»,
+   «сначала нужно». НЕ пиши «цена торгуется», «это говорит о», «данный актив».
+4. Сценарий с условием (не сразу цель):
+   - Структура: что произошло → условие → потом вход/цель.
+   - «Сначала нужно закрепиться выше X, после этого можно смотреть лонг с целью Y.»
+   - «Пока рано», «без подтверждения не беру», «жду реакции от зоны».
+5. Минимум цифр — НЕ каша:
+   - ОДНА главная цена (куда жду) + ОДНО условие (если есть).
+   - НЕ пиши список: «поддержка X, сопротивление Y, ключевой Z, цель W».
+   - Ключевой уровень = условие входа (закрепление/подтверждение), не отдельная строка.
+6. Длина: 170–300 символов (медиана Букваря 248). Короче чем раньше.
+7. Таймфреймы: «на дневке», «на 4ч», «на младшем», «на часовике». НЕ «дневной график».
+8. НЕ жаргон: «давление продавцов», «зона консолидации», «импульс», «тренд бычий».
+   Пиши: «рынок падает», «цена стоит», «движение вверх», «получили реакцию».
 
-Стиль формулировок (строго, как в рабочих постах канала):
-- Индикаторы только в нижнем регистре: ema21, ema50 — НЕ «EMA21», НЕ «EMA 21».
-- Биржа: один раз «на Bybit Futures» рядом с ema/ценой (если уместно).
-- Таймфреймы только разговорно:
-  • дневка → «на дневке» (НЕ «дневной график», НЕ «дневной таймфрейм»)
-  • 4ч → «на 4ч» / «на четырёхчасовке»
-  • 1ч → «на часовике»
-- Не пиши «совпадает с дневным графиком» — пиши «он же … на дневке».
-- Тикер в тексте можно как $TICKER в первом предложении.
+Структура body (1–2 абзаца):
+1) По $TICKER + где сейчас/что произошло за последние часы.
+2) Что жду: условие (если нужно) → цель. «смотрю / жду / интересно».
 
-Структура body (строго 2 абзаца через \\n\\n):
-1) Что сейчас происходит по монете (факт с графика/уровней).
-2) Что жду дальше + цель. Обязательно один раз human_key_level как «ключевой уровень».
-
-Важно про логику сценария:
-- Сценарий должен быть ОДИН и без противоречий. Нельзя писать «снизился, но
-  жду роста» / «жду одно, но пока другое» — выбери одно направление и держись
-  его до конца текста. Если bias=long и цена недавно падала — пиши отскок/
-  набор от уровня, а не «продолжение роста» без опоры.
-- Если называешь уровень (поддержка/сопротивление/цель), сразу пиши его число
-  из фактов — не оставляй уровень без цифры.
-- Число одного и того же уровня не нужно повторять дважды подряд — если уже
-  назвал его, дальше можно сказать просто «этот уровень» / «он же».
-
-Контекст торговых сессий (упоминай ТОЛЬКО когда действительно уместно):
-- Европейская сессия открывается 7-9 UTC → может дать импульс, рост объёмов
-- Американская сессия 13-15 UTC → часто основное движение дня
-- Не пиши про сессии в каждом посте. Упоминай только если близко к открытию
-  (в пределах 1-2 часов) или если сессия объясняет текущее движение.
-- Пример: «Перед открытием Европы жду ...» или «Американцы могут дать импульс выше».
-
-Тон: спокойный трейдер, без «покупай сейчас», без эмодзи, без воды.
-Цены только из фактов. Когда упоминаешь ключевой уровень — пиши его числом
-(как в human_key_level из фактов), а не слово "human_key_level" буквально.
-
-Пример тона (не копируй дословно):
-«$AAVE торгуется ниже ema21 на Bybit Futures. Цена 99.36, объёмы низкие.
-Ожидаю снижение к поддержке 97.89. Ключевой уровень — 102.57, он же
-сопротивление на дневке.»
+Примеры (НЕ копируй дословно):
+• «По BTC пришли в зону предложения. Локально жду заброс ниже 64 800, оттуда смотрю
+  шорт с целью 63 400. Ключевое условие — закрепление ниже 64 800.»
+• «По SOL сняли ликвидность сверху и получили реакцию. Интересно смотреть продолжение
+  падения к 74.5. Если закрепимся ниже, дальше 72.»
+• «По ETH движение боковое, ликвидность внизу не трогали. Сначала жду выход к 1820,
+  после реакции от зоны спроса можно рассматривать лонг.»
 
 Верни JSON:
 {
-  "ticker": "SOL",
-  "body": "абзац1\\n\\nабзац2",
+  "ticker": "BTC",
+  "body": "170–300 символов",
   "score_1_10": 7,
-  "bias": "long"
+  "bias": "long",
+  "post_subtype": "analysis"
 }
-body 220–400 символов.
+post_subtype: "analysis" (полный разбор) или "chart_only" (если сценарий слабый/неясный —
+текст не обязателен, график сам скажет).
 """.strip()
 
 OUTLOOK_SYSTEM_UPDATE = """
-Короткий понятный апдейт к прошлому разбору.
+Короткий апдейт к прошлому разбору (стиль Букваръ).
 
-1 абзац, простые слова. Пример тона:
-«По SOL сценарий отрабатывает: сходили вниз и получили реакцию. Ключевой уровень — 74.88, дальше смотрю выше.»
+Начни «По $TICKER…». Голос: «сценарий отрабатывает», «сходили и получили реакцию»,
+«теперь жду», «смотрю дальше».
 
-Сценарий должен быть ОДИН и без противоречий (не «жду одно, но пока другое»).
-Если называешь уровень — сразу дай его число из фактов.
-Обязательно упомяни ключевой уровень числом (значение human_key_level из
-фактов) — не пиши слово "human_key_level" буквально.
-Без эмодзи, без «покупай», без сложных терминов.
+Что случилось с прошлого поста → что дальше (1 цель или условие).
+НЕ список уровней. Price action язык (ликвидность, зона, закрепление), не ema.
+1 абзац, 100–210 символов.
+
+Пример (не копируй):
+«По SOL сценарий отработал: сняли ликвидность в точке №1, получили реакцию от зоны
+спроса. Смотрю продолжение вверх к 78. Ключевое условие — закрепление выше 75.»
 
 Верни JSON:
 {
   "ticker": "SOL",
-  "body": "один абзац 110–240 символов",
+  "body": "100–210 символов",
   "score_1_10": 7,
-  "bias": "long"
+  "bias": "long",
+  "post_subtype": "update"
 }
 """.strip()
 
 # backward-compatible alias
 OUTLOOK_SYSTEM = OUTLOOK_SYSTEM_ANALYSIS
 
-# Rotated "angle" hints so consecutive posts don't all follow the exact same
-# sentence pattern, while the JSON contract / length limits stay fixed.
+# Bukvar-style variation hints: trader voice + sequential narrative + SMC terms.
 _VARIATION_HINTS_ANALYSIS = [
-    "Схема: что сейчас -> что жду -> ключевой уровень human_key_level.",
-    "Схема: где стоим сейчас -> сценарий на ближайшие часы -> ключевой уровень.",
-    "Начни с того, как цена отреагировала на уровень, потом сценарий, в конце ключевой уровень.",
-    "Начни с движения за последние часы (рост/падение/объём), затем ожидание и ключевой уровень.",
-    "Начни с того, у какой зоны сейчас цена, потом что это значит, в конце ключевой уровень.",
+    "Начни «По $TICKER» + где сейчас. Потом «жду» + условие → цель. Price action язык.",
+    "«По $TICKER» + что произошло. «Сначала нужно» + условие, «после этого смотрю» + цель.",
+    "Начни «По $TICKER» + ликвидность/зона. «Интересно смотреть» + сценарий + условие.",
+    "«По $TICKER» + реакция/движение. «Пока рано» или «жду» + условие → цель. Один уровень.",
+    "Начни «По $TICKER сняли/смягчили/пришли». Потом «смотрю/работаю» + сценарий.",
 ]
 _VARIATION_HINTS_UPDATE = [
-    "Скажи, отработал ли прошлый сценарий, и что дальше с ключевым уровнем.",
-    "Коротко: где сейчас цена относительно прошлого разбора и что жду дальше.",
-    "Начни с факта (дошли/не дошли до уровня), заверши ожиданием и ключевым уровнем.",
+    "«По $TICKER сценарий отработал/отрабатывает» + факт. «Теперь жду/смотрю» + цель.",
+    "«По $TICKER» + что случилось с прошлого разбора. «Дальше смотрю» + куда.",
+    "Начни «По $TICKER сходили/дошли/получили реакцию». Условие → цель.",
 ]
 
 _PRICE_NUM_RE = re.compile(r"\d[\d\s]*\.\d+")
@@ -255,13 +248,21 @@ def _too_similar(new_body: str, prev_body: str | None, *, ratio_hi: float = 0.82
 
 
 def _normalize_outlook_body(body: str) -> str:
-    """Push wording toward the channel's informal style (AAVE-like)."""
+    """
+    Push wording toward Bukvar SMC style:
+    - Remove EMA mentions, formal timeframe talk.
+    - Map support/resistance → supply/demand zones when appropriate.
+    - Add SMC vocabulary flavor.
+    """
     text = body
+    # Remove EMA mentions entirely from body (they're indicator talk, not price action).
+    text = re.sub(r"\bторгуется\s+(ниже|выше|около|между)\s+ema\d+", r"цена \1", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(ниже|выше|около)\s+ema\d+\s+(и\s+ema\d+)?", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bema\d+\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"EMA\s*\d+", "", text, flags=re.IGNORECASE)
+    
+    # Timeframe normalization
     replacements = (
-        (r"\bEMA\s*21\b", "ema21"),
-        (r"\bEMA\s*50\b", "ema50"),
-        (r"\bEma\s*21\b", "ema21"),
-        (r"\bEma\s*50\b", "ema50"),
         (r"дневным графиком", "дневкой"),
         (r"дневной график", "дневка"),
         (r"на дневном графике", "на дневке"),
@@ -274,16 +275,30 @@ def _normalize_outlook_body(body: str) -> str:
         (r"на четырехчасовом графике", "на 4ч"),
         (r"на часовом таймфрейме", "на часовике"),
         (r"на часовом графике", "на часовике"),
+        # Formal → conversational
+        (r"совпадает с\s+дневк\w*", "держится на дневке", ),
+        (r"также\s+совпадает", "и на дневке"),
+        # Passive → active trader voice
+        (r"\bЦена торгуется", "Торгуемся"),
+        (r"цена торгуется", "цена"),
+        (r"Это говорит о", ""),
+        (r"данный актив", "актив"),
+        (r"зона консолидации", "боковое движение"),
+        (r"давление продавцов", "продавцы давят"),
+        (r"импульс\s+(вверх|вниз)", r"движение \1"),
+        # SMC vocabulary nudges: поддержка → зона спроса (when clear)
+        (r"к поддержке\b", "к зоне спроса"),
+        (r"от поддержки\b", "от зоны спроса"),
+        (r"к сопротивлению\b", "к зоне предложения"),
+        (r"от сопротивления\b", "от зоны предложения"),
     )
     for pat, repl in replacements:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
-    text = re.sub(
-        r"совпадает с\s+дневк\w*",
-        "держится на дневке",
-        text,
-        flags=re.IGNORECASE,
-    )
-    return text
+    
+    # Clean up extra spaces from EMA removal
+    text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"\.\s+\.", ".", text)
+    return text.strip()
 
 
 def is_configured() -> bool:
@@ -897,33 +912,39 @@ def _facts_block(
     prev: dict | None = None,
     mtf_confirmed: bool = False,
 ) -> str:
+    """
+    Facts for AI (Bukvar style).
+    Simplified: close, key_level, ONE target, invalidation.
+    NO redundant support/resistance/ema listing — price action focus.
+    """
     ex = (row.get("exchange") or EXCHANGE_ID or "bybit").strip()
+    close = float(row["close"])
+    # Pick ONE target based on bias (not 2–3 levels)
+    if bias == "short":
+        target = float(row.get("support") or row.get("invalidation") or close * 0.97)
+        inv = float(row.get("resistance") or close * 1.03)
+    else:
+        target = float(row.get("resistance") or row.get("target_1") or close * 1.03)
+        inv = float(row.get("support") or row.get("invalidation") or close * 0.97)
+    
     base = (
         f"symbol: {row['symbol']}\n"
         f"ticker: ${row['symbol'].replace('/USDT', '')}\n"
         f"post_type: {post_type}\n"
         f"bias_hint: {bias}\n"
-        f"KEY_LEVEL: {key_level}\n"
+        f"KEY_LEVEL: {key_level} (условие входа: закрепление выше/ниже)\n"
         f"human_key_level: {_fmt_price(key_level)}\n"
         f"exchange: {ex} Futures ({row.get('listings')})\n"
-        f"chart_tf: {CHART_TF} (пиши {_tf_speak(CHART_TF)}, не «график»)\n"
-        f"price: {_fmt_price(row['close'])}\n"
+        f"chart_tf: {CHART_TF} (пиши {_tf_speak(CHART_TF)})\n"
+        f"price_now: {_fmt_price(close)}\n"
         f"chg_24h_pct: {row['chg_24h']}\n"
-        f"regime: {row['regime']} adx={row['adx']} rsi={row['rsi']}\n"
-        f"vol_trend: {row['vol_trend']} atr_pct={row['atr_pct']}\n"
-        f"breakout_flag: {row['breakout']}\n"
-        f"ema21: {_fmt_price(row['ema21'])} ema50: {_fmt_price(row['ema50'])}\n"
-        f"support: {_fmt_price(row['support'])}\n"
-        f"resistance: {_fmt_price(row['resistance'])}\n"
-        f"target_1: {_fmt_price(row.get('target_1') or row['resistance'])}\n"
-        f"target_2: {_fmt_price(row.get('target_2') or row['resistance'])}\n"
-        f"invalidation: {_fmt_price(row['invalidation'])}\n"
-        f"fail_zone: {_fmt_price(row.get('fail_zone') or row['invalidation'])}\n"
+        f"target: {_fmt_price(target)} (ОДНА главная цена — куда жду)\n"
+        f"invalidation: {_fmt_price(inv)} (стоп/отмена сценария)\n"
         f"internal_score_0_100: {row['score']}\n"
         f"btc_phase: {row.get('btc_phase')}\n"
-        f"mtf_confluence_1d: {'yes' if mtf_confirmed else 'no'}\n"
-        "style: ema lowercase; one 'на Bybit Futures'; TF slang only "
-        "(на дневке / на 4ч / на часовике).\n"
+        f"mtf_confluence_1d: {'yes (можно упомянуть «и на дневке»)' if mtf_confirmed else 'no'}\n"
+        "СТИЛЬ: Price action (ликвидность, зона, заброс, смягчение), НЕ ema/индикаторы.\n"
+        "Начни «По $TICKER…». Голос: смотрю/жду/работаю. Условие → цель (не сразу).\n"
     )
     if prev:
         base += (
@@ -951,8 +972,7 @@ async def _ai_write_post(
     kl = float(key_level) if key_level is not None else _pick_key_level(row, bias_n)
     system = OUTLOOK_SYSTEM_UPDATE if post_type == "update" else OUTLOOK_SYSTEM_ANALYSIS
     mtf_note = (
-        " Уровень также держится на дневке — если уместно, одной фразой "
-        "«он же … на дневке» (не пиши «дневной график/таймфрейм»)."
+        " Уровень также держится на дневке — если уместно, одной фразой «и на дневке» (не пиши «график/таймфрейм»)."
         if mtf_confirmed
         else ""
     )
@@ -960,35 +980,25 @@ async def _ai_write_post(
     if post_type == "update":
         variation = random.choice(_VARIATION_HINTS_UPDATE)
         user = (
-            "Короткий апдейт по уже вышедшему сценарию. "
+            "Короткий апдейт. "
             f"{variation} "
-            "Обязательно упомяни human_key_level. Цены только из фактов, не выдумывай новые числа."
+            "ONE цена — куда жду. Price action язык (ликвидность/зона/закрепление), НЕ ema."
             f"{mtf_note}{hint_suffix}\n\n"
             + _facts_block(row, key_level=kl, bias=bias_n, post_type=post_type, prev=prev, mtf_confirmed=mtf_confirmed)
         )
-        max_tokens = 280
+        max_tokens = 250
         temperature = 0.7
     else:
-        from datetime import datetime, timezone
-        now_utc = datetime.now(timezone.utc)
-        hour_utc = now_utc.hour
-        # Контекст сессии только если близко к открытию
-        session_hint = ""
-        if 6 <= hour_utc <= 9:
-            session_hint = "\n(Сейчас ~{hour_utc}:00 UTC — скоро/идёт европейская сессия. Упомяни если уместно.)"
-        elif 12 <= hour_utc <= 15:
-            session_hint = "\n(Сейчас ~{hour_utc}:00 UTC — скоро/идёт американская сессия. Упомяни если уместно.)"
-        
         variation = random.choice(_VARIATION_HINTS_ANALYSIS)
         user = (
-            "Напиши понятный пост простыми словами по фактам. "
+            "Понятный пост, price action. "
             f"{variation} "
-            "Цены только из фактов, не выдумывай новые числа."
-            f"{mtf_note}{hint_suffix}{session_hint}\n\n"
+            "ОДНА главная цена + условие (если нужно). НЕ список уровней. НЕ индикаторы в тексте."
+            f"{mtf_note}{hint_suffix}\n\n"
             + _facts_block(row, key_level=kl, bias=bias_n, post_type=post_type, prev=prev, mtf_confirmed=mtf_confirmed)
         )
-        max_tokens = 420
-        temperature = 0.78
+        max_tokens = 380
+        temperature = 0.76
     try:
         verdict = await ai_client.fast_json_completion(
             system=system,
@@ -1034,20 +1044,46 @@ async def _ai_write_post(
         "bias": bias_out,
         "key_level": kl,
         "post_type": post_type,
+        "post_subtype": (verdict.get("post_subtype") or "analysis").strip().lower(),
     }
 
 
-def _format_post(row: dict, ai: dict, chart_tag: str = "") -> str:
-    """Bukvar: #TICKER + body (full or short update)."""
+def _pick_emoji_for_bias(bias: str) -> str:
+    """Bukvar-style emoji for ticker line."""
+    b = (bias or "long").lower()
+    if b == "short":
+        return random.choice(["🔻", "⚪️"])
+    if b == "long":
+        return random.choice(["🪙", "🧬", "💎"])
+    return "⚪️"
+
+
+def _format_post(row: dict, ai: dict, chart_tag: str = "", *, post_subtype: str | None = None) -> str:
+    """
+    Bukvar format:
+    - analysis/update: #TICKER\\n\\nbody
+    - chart_only: emoji #TICKER (no body, chart speaks)
+    - greet/promo: text only (no ticker, handled separately)
+    """
     del chart_tag
     coin = row["symbol"].replace("/USDT", "")
     ticker = (ai.get("ticker") or coin).strip().lstrip("#$").upper() or coin
     body = (ai.get("body") or "").strip()
+    subtype = post_subtype or ai.get("post_subtype") or "analysis"
+    
+    # Clean formal phrases
     for bad in ("На основании анализа", "Следует отметить", "В заключение", "Данный актив"):
         body = body.replace(bad, "")
-    if ai.get("post_type") == "update" and not body:
+    
+    # Chart-only: just emoji + ticker (body empty or very short)
+    if subtype == "chart_only" or (len(body) < 50 and subtype == "analysis"):
+        emoji = _pick_emoji_for_bias(ai.get("bias") or "long")
+        return f"{emoji} #{ticker}"
+    
+    # Full analysis/update
+    if not body:
         return f"#{ticker}"
-    text = f"#{ticker}\n\n{body}" if body else f"#{ticker}"
+    text = f"#{ticker}\n\n{body}"
     return text[:1020]
 
 
@@ -1168,7 +1204,7 @@ async def _publish_row(
             )
         except Exception as e:
             print(f"[market_outlook] admin alert fail: {e}", flush=True)
-    text = _format_post(row, ai, chart_tag=chart_tag)
+    text = _format_post(row, ai, chart_tag=chart_tag, post_subtype=ai.get("post_subtype"))
     try:
         await telegram_bot.publish_news(text, photo_png=png)
     except Exception as e:
@@ -1184,8 +1220,9 @@ async def _publish_row(
     )
     if count_toward_cap:
         _bump_posts_today(1)
+    subtype_tag = ai.get("post_subtype") or "analysis"
     print(
-        f"[market_outlook] published {row['symbol']} type={post_type} "
+        f"[market_outlook] published {row['symbol']} type={post_type} subtype={subtype_tag} "
         f"key={_fmt_price(key_level)} score={row['score']} "
         f"ai={ai['score_1_10']}/10 chart={chart_tag or 'none'}",
         flush=True,
