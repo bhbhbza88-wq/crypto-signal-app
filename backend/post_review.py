@@ -196,13 +196,29 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
         except Exception:
             continue
     print(f"[post_review] parse_error raw[:800]={text[:800]!r}", flush=True)
-    return {
+    # Частичный разбор при обрезанном JSON
+    partial: dict[str, Any] = {
         "parse_error": True,
         "raw": (raw or "")[:3000],
         "summary": "не удалось распарсить ответ модели",
         "overall_verdict": "не удалось распарсить ответ модели",
         "score_1_10": None,
     }
+    m_score = re.search(r'"score_1_10"\s*:\s*(\d+)', text)
+    if m_score:
+        partial["score_1_10"] = int(m_score.group(1))
+    m_verdict = re.search(r'"overall_verdict"\s*:\s*"((?:\\.|[^"\\])*)"', text)
+    if m_verdict:
+        verdict = m_verdict.group(1).replace('\\"', '"').replace("\\n", "\n")
+        partial["overall_verdict"] = verdict
+        partial["summary"] = verdict
+    m_trust = re.search(r'"trust_level"\s*:\s*"(\w+)"', text)
+    if m_trust:
+        partial["trust_level"] = m_trust.group(1)
+    m_smell = re.search(r'"ai_smell_score"\s*:\s*(\d+)', text)
+    if m_smell:
+        partial["ai_smell_score"] = int(m_smell.group(1))
+    return partial
 
 
 async def _call_llm(
@@ -219,7 +235,8 @@ async def _call_llm(
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
-        timeout=90,
+        timeout=120,
+        response_format={"type": "json_object"},
     )
 
 
@@ -330,8 +347,8 @@ async def analyze_deep(
     raw = await _call_llm(
         model=model,
         messages=[{"role": "user", "content": content}],
-        max_tokens=2500,
-        temperature=0.3,
+        max_tokens=4000,
+        temperature=0.2,
     )
     parsed = _parse_json_object(raw)
     if parsed.get("parse_error") and model_hint == "gemini" and model != "google/gemini-2.5-pro":
@@ -339,8 +356,8 @@ async def analyze_deep(
         raw2 = await _call_llm(
             model="google/gemini-2.5-pro",
             messages=[{"role": "user", "content": content}],
-            max_tokens=2500,
-            temperature=0.3,
+            max_tokens=4000,
+            temperature=0.2,
         )
         parsed = _parse_json_object(raw2)
         parsed["model_used"] = "google/gemini-2.5-pro"
