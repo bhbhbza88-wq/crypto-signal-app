@@ -505,14 +505,14 @@ async def run_review(
         f"model={review.get('model_used')}",
         flush=True,
     )
+    summary = short_telegram_summary(mode, review, len(posts))
+    print(f"[post_review] SUMMARY\n{summary}", flush=True)
 
     if notify:
         try:
             import telegram_bot
 
-            await telegram_bot._notify_admins(
-                short_telegram_summary(mode, review, len(posts))
-            )
+            await telegram_bot._notify_admins(summary)
         except Exception as e:
             print(f"[post_review] notify fail: {e}", flush=True)
 
