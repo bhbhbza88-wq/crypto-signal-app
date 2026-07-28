@@ -551,6 +551,60 @@ class ChatEngageTestRequest(BaseModel):
     exit_price: float | None = None
 
 
+@app.get("/api/admin/post-review/latest")
+def admin_post_review_latest(mode: str = "fast", admin=Depends(require_admin)):
+    """Последний отчёт post_review (fast|deep)."""
+    import post_review as pr
+
+    mode = (mode or "fast").strip().lower()
+    if mode not in ("fast", "deep"):
+        raise HTTPException(status_code=400, detail="mode: fast|deep")
+    md = pr.OUT_DIR / f"latest_{mode}.md"
+    js = pr.OUT_DIR / f"latest_{mode}.json"
+    if not js.exists():
+        raise HTTPException(status_code=404, detail=f"no {mode} review yet")
+    try:
+        payload = json.loads(js.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "ok": True,
+        "mode": mode,
+        "md": md.read_text(encoding="utf-8") if md.exists() else "",
+        "payload": payload,
+    }
+
+
+@app.post("/api/admin/post-review/run")
+async def admin_post_review_run(
+    mode: str = "fast",
+    hours: float = 48.0,
+    model: str = "gemini",
+    notify: bool = True,
+    admin=Depends(require_admin),
+):
+    """Запустить post_review вручную (fast|deep)."""
+    import post_review as pr
+
+    mode = (mode or "fast").strip().lower()
+    if mode not in ("fast", "deep"):
+        raise HTTPException(status_code=400, detail="mode: fast|deep")
+    model = (model or "gemini").strip().lower()
+    if model not in ("gemini", "claude", "gpt"):
+        raise HTTPException(status_code=400, detail="model: gemini|claude|gpt")
+    result = await pr.run_review(
+        mode=mode,  # type: ignore[arg-type]
+        hours=float(hours),
+        model_hint=model,  # type: ignore[arg-type]
+        notify=bool(notify),
+    )
+    return {
+        "ok": True,
+        **{k: v for k, v in result.items() if k != "review"},
+        "review": result.get("review"),
+    }
+
+
 @app.post("/api/admin/chat-engage-test")
 def admin_chat_engage_test(req: ChatEngageTestRequest, admin=Depends(require_admin)):
     """Практика: карточка профита + текст контакту/чату (по умолчанию Kupyansk_2).

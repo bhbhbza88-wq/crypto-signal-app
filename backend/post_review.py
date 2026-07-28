@@ -164,24 +164,43 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
-    m = re.search(r"\{[\s\S]*\}", text)
-    if m:
+    # Gemini иногда кладёт JSON после reasoning/thinking блока
+    for candidate in (text,):
         try:
-            data = json.loads(m.group(0))
+            data = json.loads(candidate)
             if isinstance(data, dict):
                 return data
         except Exception:
             pass
+    # Последний JSON-объект в тексте (часто после preamble)
+    matches = list(re.finditer(r"\{[\s\S]*\}", text))
+    for m in reversed(matches):
+        chunk = m.group(0)
+        # усечь до сбалансированных скобок
+        depth = 0
+        end = None
+        for i, ch in enumerate(chunk):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        if end:
+            chunk = chunk[:end]
+        try:
+            data = json.loads(chunk)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            continue
+    print(f"[post_review] parse_error raw[:800]={text[:800]!r}", flush=True)
     return {
         "parse_error": True,
-        "raw": (raw or "")[:2000],
+        "raw": (raw or "")[:3000],
         "summary": "не удалось распарсить ответ модели",
+        "overall_verdict": "не удалось распарсить ответ модели",
         "score_1_10": None,
     }
 
