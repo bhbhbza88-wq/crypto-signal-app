@@ -6,17 +6,17 @@
         0.055,
         0.16
       ],
-      "pair_size": 0.045,
+      "pair_size": 0.038,
       "side_xy": [
         0.06,
         0.24
       ],
-      "side_size": 0.032,
+      "side_size": 0.026,
       "roi_xy": [
         0.055,
-        0.32
+        0.33
       ],
-      "roi_size": 0.1,
+      "roi_size": 0.084,
       "price1_xy": [
         0.055,
         0.55
@@ -25,7 +25,7 @@
         0.055,
         0.62
       ],
-      "price_size": 0.028,
+      "price_size": 0.024,
       "label_mode": "inline",
       "side_style": "inline",
       "pair_with_side": true,
@@ -34,42 +34,53 @@
       "clear_y1": 0.82
     },
     "bingx": {
-      "clear_x1": 0.58,
+      "clear_x1": 0.52,
       "header_xy": [
         0.05,
-        0.105
+        0.112
       ],
-      "header_size": 0.028,
+      "header_size": 0.021,
       "pair_xy": [
         0.05,
-        0.165
+        0.172
       ],
-      "pair_size": 0.048,
+      "pair_size": 0.034,
       "side_xy": [
         0.05,
-        0.235
+        0.236
       ],
-      "side_size": 0.034,
+      "side_size": 0.024,
       "roi_xy": [
         0.05,
-        0.33
+        0.328
       ],
-      "roi_size": 0.12,
+      "roi_size": 0.076,
       "price1_xy": [
         0.05,
-        0.5
+        0.498
       ],
       "price2_xy": [
         0.05,
-        0.56
+        0.552
       ],
-      "price_size": 0.028,
+      "price_size": 0.022,
       "label_mode": "inline",
       "side_style": "row",
       "pair_with_side": false,
-      "footer_clear": false,
-      "clear_y0": 0.09,
-      "clear_y1": 0.7
+      "footer_clear": true,
+      "footer_xy": [
+        0.11,
+        0.905
+      ],
+      "footer_size": 0.022,
+      "footer_clear_box": [
+        0.08,
+        0.88,
+        0.42,
+        0.96
+      ],
+      "clear_y0": 0.095,
+      "clear_y1": 0.66
     },
     "binance": {
       "clear_x1": 0.78,
@@ -77,17 +88,17 @@
         0.07,
         0.235
       ],
-      "pair_size": 0.04,
+      "pair_size": 0.034,
       "side_xy": [
         0.07,
         0.3
       ],
-      "side_size": 0.03,
+      "side_size": 0.025,
       "roi_xy": [
         0.07,
-        0.43
+        0.435
       ],
-      "roi_size": 0.095,
+      "roi_size": 0.08,
       "price1_xy": [
         0.07,
         0.71
@@ -104,8 +115,8 @@
         0.48,
         0.655
       ],
-      "price_size": 0.033,
-      "label_size": 0.026,
+      "price_size": 0.028,
+      "label_size": 0.022,
       "label_mode": "columns",
       "side_style": "row",
       "pair_with_side": false,
@@ -120,13 +131,17 @@
       "file": "tpl_01_1280x1280.png",
       "family": "bingx",
       "width": 1280,
-      "height": 1280
+      "height": 1280,
+      "mood": "win",
+      "note": "Green cap Doge, for profit closes only"
     },
     {
       "file": "tpl_02_1080x967.png",
       "family": "bingx",
       "width": 1080,
-      "height": 967
+      "height": 967,
+      "mood": "loss",
+      "note": "Red cap Doge, for loss closes only"
     },
     {
       "file": "tpl_03_1280x1280.png",

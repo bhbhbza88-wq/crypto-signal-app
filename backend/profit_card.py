@@ -545,32 +545,23 @@ def render_share_card(
     family: str | None = None,
     template_file: str | None = None,
 ) -> bytes:
-    """Случайный шаблон из пула или классический Binance-fallback.
+    """ТОЛЬКО 2 BingX шаблона для закрытия: win (tpl_01) и loss (tpl_02).
     По умолчанию BingX (как карточки открытия).
     """
-    fam_env = (family or os.getenv("PROFIT_CARD_FAMILY") or "bingx").strip().lower()
-    templates = list_share_templates(fam_env or None)
-    if not templates and fam_env:
-        templates = list_share_templates(None)
-    if template_file:
-        templates = [t for t in templates if t.get("file") == template_file] or templates
-    if not templates:
-        return render_profit_card(
-            symbol=symbol, side=side, entry=entry, pnl_pct=pnl_pct,
-            exit_price=exit_price, leverage=leverage,
-        )
-    # Для минуса предпочитаем шаблоны с «грустным» артом если помечены; иначе random bingx
+    # СТРОГО 2 карточки: tpl_01 для профита, tpl_02 для минуса
     win = float(pnl_pct) >= 0
-    tagged = [
-        t for t in templates
-        if (win and t.get("mood") in ("win", "plus", "green"))
-        or ((not win) and t.get("mood") in ("loss", "minus", "red"))
-    ]
-    pick = random.choice(tagged or templates)
+    if template_file:
+        # Если указан конкретный файл — используем его
+        pick_file = template_file
+    elif win:
+        pick_file = "tpl_01_1280x1280.png"  # Green cap Doge
+    else:
+        pick_file = "tpl_02_1080x967.png"  # Red cap Doge
+    
     try:
         return render_template_card(
-            template_file=pick["file"],
-            family=pick["family"],
+            template_file=pick_file,
+            family="bingx",
             symbol=symbol,
             side=side,
             entry=entry,
@@ -579,7 +570,7 @@ def render_share_card(
             leverage=leverage or SHARE_LEVERAGE,
         )
     except Exception as e:
-        print(f"[profit_card] template {pick.get('file')} failed: {e}")
+        print(f"[profit_card] template {pick_file} failed: {e}")
         return render_profit_card(
             symbol=symbol, side=side, entry=entry, pnl_pct=pnl_pct,
             exit_price=exit_price, leverage=leverage,

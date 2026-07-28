@@ -41,8 +41,8 @@ def _load() -> dict:
 def _write_qr(url: str) -> None:
     img = qrcode.make(url)
     img.save(QR_PNG)
-    print(f"QR_PNG {QR_PNG}")
-    print(f"QR_URL {url}")
+    print(f"QR_PNG {QR_PNG}", flush=True)
+    print(f"QR_URL {url}", flush=True)
 
 
 async def _finish(client: TelegramClient) -> None:
@@ -66,7 +66,7 @@ async def _finish(client: TelegramClient) -> None:
         pass
 
 
-async def start_and_wait(timeout_total: float = 180.0) -> None:
+async def start_and_wait(timeout_total: float = 420.0) -> None:
     if not API_ID or not API_HASH:
         raise SystemExit("TELEGRAM_API_ID / TELEGRAM_API_HASH не заданы")
 
@@ -75,8 +75,8 @@ async def start_and_wait(timeout_total: float = 180.0) -> None:
     qr = await client.qr_login()
     _write_qr(qr.url)
     _save({"session": client.session.save()})
-    print("Открой Telegram на телефоне → Настройки → Устройства → Подключить устройство")
-    print("и отсканируй QR (_news_qr.png). Жду скана…")
+    print("Scan QR in Telegram: Settings -> Devices -> Link Desktop Device", flush=True)
+    print("File: _news_qr.png — waiting…", flush=True)
 
     deadline = asyncio.get_event_loop().time() + timeout_total
     while True:
@@ -93,7 +93,7 @@ async def start_and_wait(timeout_total: float = 180.0) -> None:
                 await qr.recreate()
                 _write_qr(qr.url)
                 _save({"session": client.session.save()})
-                print("QR обновлён — сканируй свежий _news_qr.png", flush=True)
+                print("QR refreshed — scan fresh _news_qr.png", flush=True)
             except Exception as e:
                 print(f"QR recreate: {e}", flush=True)
                 await client.disconnect()
