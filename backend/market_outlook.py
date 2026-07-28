@@ -37,15 +37,20 @@ ENABLED = (os.getenv("MARKET_OUTLOOK_ENABLED", "1") or "1").strip().lower() in (
     "1", "true", "yes", "on",
 )
 INTERVAL_SEC = int(os.getenv("MARKET_OUTLOOK_INTERVAL_SEC", "300") or "300")  # 5m continuous scan
-MAX_PER_DAY = int(os.getenv("MARKET_OUTLOOK_MAX_PER_DAY", "8") or "8")
+# Цель 5–6 постов/день; MAX чуть выше цели, чтобы догнать при отставании.
+TARGET_PER_DAY = int(os.getenv("MARKET_OUTLOOK_TARGET_PER_DAY", "6") or "6")
+MAX_PER_DAY = int(os.getenv("MARKET_OUTLOOK_MAX_PER_DAY", "6") or "6")
 MAX_PER_RUN = int(os.getenv("MARKET_OUTLOOK_MAX_PER_RUN", "1") or "1")
-# Чуть ниже порог — больше качественных постов (было 78)
-MIN_INTERNAL_SCORE = float(os.getenv("MARKET_OUTLOOK_MIN_SCORE", "68") or "68")
-# Убираем gap — публикуем сразу когда нашли качественное (0 = disabled)
-MIN_GAP_H = float(os.getenv("MARKET_OUTLOOK_MIN_GAP_H", "0") or "0")
+# Базовый порог качества; при отставании от квоты смягчается до SOFT_MIN.
+MIN_INTERNAL_SCORE = float(os.getenv("MARKET_OUTLOOK_MIN_SCORE", "65") or "65")
+SOFT_MIN_SCORE = float(os.getenv("MARKET_OUTLOOK_SOFT_MIN_SCORE", "48") or "48")
+# Базовый gap; фактический считается адаптивно под оставшуюся квоту/окно.
+MIN_GAP_H = float(os.getenv("MARKET_OUTLOOK_MIN_GAP_H", "2.0") or "2.0")
 SYMBOL_COOLDOWN_H = float(os.getenv("MARKET_OUTLOOK_SYMBOL_COOLDOWN_H", "18") or "18")
 WORKERS = int(os.getenv("MARKET_OUTLOOK_WORKERS", "8") or "8")
 EXCHANGE_ID = (os.getenv("MARKET_OUTLOOK_EXCHANGE", "bybit") or "bybit").strip().lower()
+# Основной ТФ графика/разбора — как в заголовке чарта (4h).
+CHART_TF = (os.getenv("OUTLOOK_CHART_TF", "4h") or "4h").strip().lower()
 
 # Human-like posting window (local wall clock). Default: Europe/Kyiv 09:00–23:30.
 ACTIVE_TZ = (os.getenv("MARKET_OUTLOOK_TZ") or "Europe/Kyiv").strip() or "Europe/Kyiv"
@@ -89,13 +94,25 @@ OUTLOOK_SYSTEM_ANALYSIS = """
 - без канцелярита и без сложного жаргона подряд
 - можно 1–2 трейдерских слова (ликвидность, зона), но сразу простым смыслом
 
+Стиль формулировок (строго, как в рабочих постах канала):
+- Индикаторы только в нижнем регистре: ema21, ema50 — НЕ «EMA21», НЕ «EMA 21».
+- Биржа: один раз «на Bybit Futures» рядом с ema/ценой (если уместно).
+- Таймфреймы только разговорно:
+  • дневка → «на дневке» (НЕ «дневной график», НЕ «дневной таймфрейм»)
+  • 4ч → «на 4ч» / «на четырёхчасовке»
+  • 1ч → «на часовике»
+- Не пиши «совпадает с дневным графиком» — пиши «он же … на дневке».
+- Тикер в тексте можно как $TICKER в первом предложении.
+
 Структура body (строго 2 абзаца через \\n\\n):
 1) Что сейчас происходит по монете (факт с графика/уровней).
 2) Что жду дальше + цель. Обязательно один раз human_key_level как «ключевой уровень».
 
 Важно про логику сценария:
-- Сценарий должен быть ОДИН и без противоречий. Нельзя писать «жду одно, но
-  пока жду другое» — выбери одно направление и держись его до конца текста.
+- Сценарий должен быть ОДИН и без противоречий. Нельзя писать «снизился, но
+  жду роста» / «жду одно, но пока другое» — выбери одно направление и держись
+  его до конца текста. Если bias=long и цена недавно падала — пиши отскок/
+  набор от уровня, а не «продолжение роста» без опоры.
 - Если называешь уровень (поддержка/сопротивление/цель), сразу пиши его число
   из фактов — не оставляй уровень без цифры.
 - Число одного и того же уровня не нужно повторять дважды подряд — если уже
@@ -111,6 +128,11 @@ OUTLOOK_SYSTEM_ANALYSIS = """
 Тон: спокойный трейдер, без «покупай сейчас», без эмодзи, без воды.
 Цены только из фактов. Когда упоминаешь ключевой уровень — пиши его числом
 (как в human_key_level из фактов), а не слово "human_key_level" буквально.
+
+Пример тона (не копируй дословно):
+«$AAVE торгуется ниже ema21 на Bybit Futures. Цена 99.36, объёмы низкие.
+Ожидаю снижение к поддержке 97.89. Ключевой уровень — 102.57, он же
+сопротивление на дневке.»
 
 Верни JSON:
 {
@@ -231,6 +253,37 @@ def _too_similar(new_body: str, prev_body: str | None, *, ratio_hi: float = 0.82
         return False
     return difflib.SequenceMatcher(None, a, b).ratio() >= ratio_hi
 
+
+def _normalize_outlook_body(body: str) -> str:
+    """Push wording toward the channel's informal style (AAVE-like)."""
+    text = body
+    replacements = (
+        (r"\bEMA\s*21\b", "ema21"),
+        (r"\bEMA\s*50\b", "ema50"),
+        (r"\bEma\s*21\b", "ema21"),
+        (r"\bEma\s*50\b", "ema50"),
+        (r"дневным графиком", "дневкой"),
+        (r"дневной график", "дневка"),
+        (r"на дневном графике", "на дневке"),
+        (r"на дневном таймфрейме", "на дневке"),
+        (r"дневного таймфрейма", "дневки"),
+        (r"дневном таймфрейме", "дневке"),
+        (r"четырёхчасовом таймфрейме", "4ч"),
+        (r"четырехчасовом таймфрейме", "4ч"),
+        (r"на четырёхчасовом графике", "на 4ч"),
+        (r"на четырехчасовом графике", "на 4ч"),
+        (r"на часовом таймфрейме", "на часовике"),
+        (r"на часовом графике", "на часовике"),
+    )
+    for pat, repl in replacements:
+        text = re.sub(pat, repl, text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"совпадает с\s+дневк\w*",
+        "держится на дневке",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text
 
 
 def is_configured() -> bool:
@@ -384,7 +437,7 @@ def _hours_since_any_post() -> float | None:
 
 
 def _global_gap_ok() -> bool:
-    """Enough time since the last post of any coin (spaces 4–5 posts/day)."""
+    """Enough time since the last post of any coin (spaces toward daily target)."""
     age = _hours_since_any_post()
     if age is None:
         return True
@@ -422,12 +475,99 @@ def _in_active_window(now: datetime | None = None) -> bool:
     return mins >= start or mins < end
 
 
+def _active_hours_left(now: datetime | None = None) -> float:
+    """Hours remaining in today's active window (0 if quiet)."""
+    n = now or _local_now()
+    if not _in_active_window(n):
+        return 0.0
+    mins = _local_minutes(n)
+    end = ACTIVE_UNTIL_MIN
+    start = ACTIVE_FROM_MIN
+    if start < end:
+        return max(0.0, (end - mins) / 60.0)
+    # Overnight: remaining until end after midnight wrap.
+    if mins >= start:
+        return ((24 * 60 - mins) + end) / 60.0
+    return max(0.0, (end - mins) / 60.0)
+
+
+def _posts_needed_today() -> int:
+    """How many more posts we still want today (toward TARGET, capped by MAX)."""
+    left_cap = max(0, MAX_PER_DAY - _posts_today())
+    left_target = max(0, TARGET_PER_DAY - _posts_today())
+    return min(left_cap, left_target) if left_target else left_cap
+
+
+def _behind_quota(now: datetime | None = None) -> bool:
+    """True if pacing is behind: too few posts for elapsed fraction of the window."""
+    n = now or _local_now()
+    if not _in_active_window(n):
+        return False
+    posts = _posts_today()
+    if posts >= TARGET_PER_DAY:
+        return False
+    start, end = ACTIVE_FROM_MIN, ACTIVE_UNTIL_MIN
+    if start >= end:
+        window = (24 * 60 - start) + end
+    else:
+        window = end - start
+    if window <= 0:
+        return False
+    elapsed = _local_minutes(n) - start
+    if start >= end and _local_minutes(n) < start:
+        elapsed = (24 * 60 - start) + _local_minutes(n)
+    elapsed = max(0, min(window, elapsed))
+    expected = TARGET_PER_DAY * (elapsed / window)
+    # Slight buffer so we don't soft-score too early in the morning.
+    return posts + 0.35 < expected
+
+
+def _effective_min_score() -> float:
+    """Soften quality bar when behind daily target so 5–6 posts still land."""
+    base = MIN_INTERNAL_SCORE
+    soft = min(base, SOFT_MIN_SCORE)
+    posts = _posts_today()
+    needed = max(0, TARGET_PER_DAY - posts)
+    if needed <= 0:
+        return base
+    hours_left = _active_hours_left()
+    if hours_left <= 0:
+        return base
+    # Behind schedule or running out of window → lower bar.
+    if _behind_quota() or (needed >= 2 and hours_left / needed < 2.2):
+        # Late day / far behind: go down to soft floor.
+        if hours_left / max(needed, 1) < 1.4 or posts == 0 and hours_left < 8:
+            return soft
+        return max(soft, base - 12)
+    return base
+
+
 def _required_gap_h() -> float:
-    """Base gap ± ~25 min, stable for current day post count (not re-rolled every scan)."""
+    """
+    Adaptive gap: keep human spacing early, compress when behind quota
+    so we can still hit TARGET_PER_DAY before the window closes.
+    """
     if MIN_GAP_H <= 0:
-        return 0.0  # При нулевом gap публикуем сразу когда нашли качество
-    jitter_min = ((hash(f"{_day_key()}:{_posts_today()}") % 51) - 25)
-    return max(1.5, MIN_GAP_H + jitter_min / 60.0)
+        return 0.0
+    posts = _posts_today()
+    needed = max(0, min(MAX_PER_DAY, TARGET_PER_DAY) - posts)
+    hours_left = _active_hours_left()
+    jitter_min = ((hash(f"{_day_key()}:{posts}") % 51) - 25) / 60.0
+
+    if needed <= 0:
+        # Already hit target — space remaining optional posts wider.
+        return max(2.0, MIN_GAP_H + jitter_min)
+
+    # Ideal even spacing across leftover window (keep ~15% slack).
+    if hours_left > 0:
+        paced = (hours_left * 0.85) / needed
+    else:
+        paced = MIN_GAP_H
+
+    gap = min(MIN_GAP_H, paced) if _behind_quota() else min(MIN_GAP_H + 0.4, max(MIN_GAP_H * 0.85, paced))
+    # Hard floor so we don't spam; softer floor when desperately behind.
+    floor = 0.6 if (_behind_quota() and hours_left / needed < 1.5) else 1.0
+    return max(floor, gap + jitter_min * 0.5)
 
 
 def _seconds_until_active() -> int:
@@ -694,18 +834,24 @@ def scan_candidates() -> list[dict]:
 
 def _pick_shortlist(rows: list[dict], limit: int) -> list[dict]:
     """Prefer scenario updates first, then fresh analysis (respecting cooldown)."""
+    min_score = _effective_min_score()
+    relax_regime = _behind_quota() and _active_hours_left() < 6
+
+    def _ok_regime(r: dict) -> bool:
+        if relax_regime:
+            return True
+        phase = (r.get("btc_phase") or "").upper()
+        if phase == "DOWNTREND":
+            return r["regime"] in ("DOWNTREND", "CHOP") or bool(r.get("breakout"))
+        return not (r["regime"] == "DOWNTREND" and not r.get("breakout"))
+
     updates: list[dict] = []
     fresh: list[dict] = []
     for r in rows:
-        if r["score"] < MIN_INTERNAL_SCORE:
+        if r["score"] < min_score:
             continue
-        phase = (r.get("btc_phase") or "").upper()
-        if phase == "DOWNTREND":
-            if r["regime"] not in ("DOWNTREND", "CHOP") and not r.get("breakout"):
-                continue
-        else:
-            if r["regime"] == "DOWNTREND" and not r.get("breakout"):
-                continue
+        if not _ok_regime(r):
+            continue
         prev = _update_context(r)
         if prev:
             rr = dict(r)
@@ -717,7 +863,29 @@ def _pick_shortlist(rows: list[dict], limit: int) -> list[dict]:
         fresh.append(r)
 
     picked = (updates + fresh)[:limit]
+    # Last resort near end of day: any scored coin off cooldown.
+    if not picked and relax_regime and rows:
+        for r in rows:
+            if r["score"] < SOFT_MIN_SCORE:
+                continue
+            if _on_cooldown(r["symbol"]):
+                continue
+            picked.append(r)
+            if len(picked) >= limit:
+                break
     return picked
+
+
+def _tf_speak(tf: str) -> str:
+    """Human slang for the chart TF used in AI facts."""
+    t = (tf or "4h").lower().strip()
+    if t in ("1d", "d", "day", "1D"):
+        return "на дневке"
+    if t in ("4h", "240", "4H"):
+        return "на 4ч"
+    if t in ("1h", "60", "1H"):
+        return "на часовике"
+    return f"на {t}"
 
 
 def _facts_block(
@@ -729,6 +897,7 @@ def _facts_block(
     prev: dict | None = None,
     mtf_confirmed: bool = False,
 ) -> str:
+    ex = (row.get("exchange") or EXCHANGE_ID or "bybit").strip()
     base = (
         f"symbol: {row['symbol']}\n"
         f"ticker: ${row['symbol'].replace('/USDT', '')}\n"
@@ -736,7 +905,8 @@ def _facts_block(
         f"bias_hint: {bias}\n"
         f"KEY_LEVEL: {key_level}\n"
         f"human_key_level: {_fmt_price(key_level)}\n"
-        f"exchange: {row.get('exchange')} ({row.get('listings')})\n"
+        f"exchange: {ex} Futures ({row.get('listings')})\n"
+        f"chart_tf: {CHART_TF} (пиши {_tf_speak(CHART_TF)}, не «график»)\n"
         f"price: {_fmt_price(row['close'])}\n"
         f"chg_24h_pct: {row['chg_24h']}\n"
         f"regime: {row['regime']} adx={row['adx']} rsi={row['rsi']}\n"
@@ -752,6 +922,8 @@ def _facts_block(
         f"internal_score_0_100: {row['score']}\n"
         f"btc_phase: {row.get('btc_phase')}\n"
         f"mtf_confluence_1d: {'yes' if mtf_confirmed else 'no'}\n"
+        "style: ema lowercase; one 'на Bybit Futures'; TF slang only "
+        "(на дневке / на 4ч / на часовике).\n"
     )
     if prev:
         base += (
@@ -779,7 +951,8 @@ async def _ai_write_post(
     kl = float(key_level) if key_level is not None else _pick_key_level(row, bias_n)
     system = OUTLOOK_SYSTEM_UPDATE if post_type == "update" else OUTLOOK_SYSTEM_ANALYSIS
     mtf_note = (
-        " Уровень совпадает и на дневном таймфрейме — если уместно, упомяни это одной фразой."
+        " Уровень также держится на дневке — если уместно, одной фразой "
+        "«он же … на дневке» (не пиши «дневной график/таймфрейм»)."
         if mtf_confirmed
         else ""
     )
@@ -837,6 +1010,7 @@ async def _ai_write_post(
     # (e.g. "уровень human_key_level" or "KEY_LEVEL зафиксирован").
     for placeholder in ("human_key_level", "HUMAN_KEY_LEVEL", "KEY_LEVEL"):
         body = body.replace(placeholder, human_kl)
+    body = _normalize_outlook_body(body)
     if human_kl not in body and human_kl.replace(" ", "") not in body.replace(" ", ""):
         if post_type == "update":
             body = f"{body.rstrip()} Ключевой уровень — {human_kl}."
@@ -1046,14 +1220,22 @@ async def run_once() -> int:
         if now - _last_gap_skip_log_ts >= 1800:
             print(
                 f"[market_outlook] skip: gap {age:.1f}h < {_required_gap_h():.1f}h "
-                f"(posts_today={_posts_today()}/{MAX_PER_DAY})",
+                f"(posts_today={_posts_today()}/{MAX_PER_DAY} "
+                f"target={TARGET_PER_DAY} behind={_behind_quota()})",
                 flush=True,
             )
             _last_gap_skip_log_ts = now
         return 0
 
     limit = min(MAX_PER_RUN, left_day)
-    print(f"[market_outlook] scan… candidates={len(CANDIDATES)} limit={limit}", flush=True)
+    eff_score = _effective_min_score()
+    print(
+        f"[market_outlook] scan… candidates={len(CANDIDATES)} limit={limit} "
+        f"posts={_posts_today()}/{TARGET_PER_DAY} (cap {MAX_PER_DAY}) "
+        f"min_score={eff_score:.0f} gap≥{_required_gap_h():.1f}h "
+        f"hours_left={_active_hours_left():.1f}",
+        flush=True,
+    )
     rows = await asyncio.to_thread(scan_candidates)
     if not rows:
         print("[market_outlook] empty scan", flush=True)
@@ -1068,7 +1250,7 @@ async def run_once() -> int:
     shortlist = _pick_shortlist(rows, limit)
     if not shortlist:
         print(
-            f"[market_outlook] no setup ≥{MIN_INTERNAL_SCORE} "
+            f"[market_outlook] no setup ≥{eff_score:.0f} "
             f"(best={top[0]['symbol']}={top[0]['score']})",
             flush=True,
         )
@@ -1149,8 +1331,9 @@ async def run() -> None:
 
     print(
         f"[market_outlook] start → @{TARGET} every {INTERVAL_SEC}s "
-        f"max/day={MAX_PER_DAY} max/run={MAX_PER_RUN} min_score={MIN_INTERNAL_SCORE} "
-        f"min_gap={MIN_GAP_H}h window={_fmt_window()}",
+        f"target/day={TARGET_PER_DAY} max/day={MAX_PER_DAY} max/run={MAX_PER_RUN} "
+        f"min_score={MIN_INTERNAL_SCORE} (soft={SOFT_MIN_SCORE}) "
+        f"base_gap={MIN_GAP_H}h window={_fmt_window()}",
         flush=True,
     )
     # небольшой стартовый джиттер, чтобы не биться с ingest при рестарте

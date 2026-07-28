@@ -1199,7 +1199,7 @@ def render_candle_png(
     draw = ImageDraw.Draw(img)
     title_x = icon_x + icon_size + 8 * scale
 
-    title = f"{_pretty_name(symbol)} | {tf} | {exchange_id.capitalize()}"
+    title = f"{_pretty_name(symbol)} | {str(tf).upper()} | {exchange_id.capitalize()}"
     draw.text((title_x, 10 * scale), title, font=font_lg, fill=text_main)
     ohlc = f"O{_fmt(o)}  H{_fmt(h)}  L{_fmt(l)}  C{_fmt(c)}  "
     draw.text((title_x, 30 * scale), ohlc, font=font_sm, fill=text_muted)
