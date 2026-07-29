@@ -5,7 +5,8 @@ Telegram-бот NOWICKI: меню, Premium, публикация сигнало�
   - ТВХ (открытия) → TELEGRAM_PREMIUM_CHANNEL_IDS (CSV), fallback TELEGRAM_CHAT_ID
   - Закрытия / результаты → TELEGRAM_PUBLIC_CHANNEL_ID
   - Trend/phase/daily → не публикуем (канал ТВХ остаётся чистым copy-trading)
-  - Автопересылка 1 сигнал/день в TELEGRAM_NEWS_TARGET_CHANNEL (если AUTO_FORWARD_TO_NEWS=1)
+  - Автопересылка 1 сигнал/день из закрытого ТВХ → TELEGRAM_NEWS_TARGET_CHANNEL
+    (forwardMessage, если AUTO_FORWARD_TO_NEWS=1)
 
 Env:
   TELEGRAM_BOT_TOKEN
@@ -1322,65 +1323,91 @@ async def send_daily_summary(stats: dict):
     await publish_signal_closed(text, _results_cta())
 
 
-async def forward_last_signal_to_news() -> bool:
-    """
-    Копирует последнее ТВХ-сообщение из премиум канала в news канал.
+_SETTING_FORWARD_DAY = "news_forward_day"  # YYYY-MM-DD (UTC) — переживает рестарт
 
-    Важно: используем copyMessage (не forwardMessage) — иначе Telegram
-    ставит «Переслано из…» и НЕ показывает кнопку «Комментарии» у поста,
-    даже если к каналу привязан discussion-чат.
-    Ограничение: 1 раз в день (UTC).
+
+def _forward_day_done(today: str) -> bool:
+    global _last_forward_date
+    if _last_forward_date == today:
+        return True
+    try:
+        import database as db
+
+        saved = (db.get_setting(_SETTING_FORWARD_DAY, "") or "").strip()
+        if saved == today:
+            _last_forward_date = today
+            return True
+    except Exception as e:
+        print(f"[telegram_bot] forward day read fail: {e}", flush=True)
+    return False
+
+
+def _mark_forward_day(today: str) -> None:
+    global _last_forward_date
+    _last_forward_date = today
+    try:
+        import database as db
+
+        db.set_setting(_SETTING_FORWARD_DAY, today)
+    except Exception as e:
+        print(f"[telegram_bot] forward day save fail: {e}", flush=True)
+
+
+async def forward_last_signal_to_news() -> bool:
+    """Пересылает последнее ТВХ из закрытого канала в @nowicki_news.
+
+    Именно forwardMessage — в news видно «Переслано из…» закрытого канала.
+    Лимит: 1 раз в сутки (UTC), флаг в БД (не сбрасывается рестартом).
     """
-    global _last_premium_message, _last_forward_date
-    
-    # Проверяем env флаг
+    global _last_premium_message
+
     if os.getenv("AUTO_FORWARD_TO_NEWS", "1").strip().lower() in ("0", "false", "no", "off"):
         print("[telegram_bot] AUTO_FORWARD_TO_NEWS отключён")
         return False
-    
-    # Проверяем, была ли уже пересылка сегодня
+
     from datetime import datetime, timezone
+
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    
-    if _last_forward_date == today:
+    if _forward_day_done(today):
         print(f"[telegram_bot] пересылка в news уже была сегодня ({today})")
         return False
-    
+
     if not _last_premium_message:
         print("[telegram_bot] нет сохранённого message_id для пересылки")
         return False
-    
+
     chat_id, msg_id = _last_premium_message
     news_channel = (
         os.getenv("TELEGRAM_NEWS_TARGET_CHANNEL")
         or os.getenv("MARKET_OUTLOOK_CHANNEL")
         or ""
     ).strip()
-    
+
     if not news_channel:
         print("[telegram_bot] TELEGRAM_NEWS_TARGET_CHANNEL не задан")
         return False
-    
-    # Приводим к правильному формату (@channel или -100...)
+
     if not news_channel.startswith("@") and not news_channel.startswith("-"):
         news_channel = f"@{news_channel.lstrip('@')}"
-    
-    print(f"[telegram_bot] копируем сообщение {msg_id} из {chat_id} → {news_channel} (copyMessage)")
-    
-    payload = {
-        "chat_id": news_channel,
-        "from_chat_id": chat_id,
-        "message_id": msg_id,
-    }
-    
-    # Только copyMessage — нативная публикация канала → есть «Комментарии»
-    data = await _api("copyMessage", payload)
-    
+
+    print(
+        f"[telegram_bot] пересылаем msg {msg_id} из {chat_id} → {news_channel} (forwardMessage)",
+        flush=True,
+    )
+    data = await _api(
+        "forwardMessage",
+        {
+            "chat_id": news_channel,
+            "from_chat_id": chat_id,
+            "message_id": msg_id,
+        },
+    )
+
     if data and data.get("ok"):
-        print(f"[telegram_bot] ✅ сообщение скопировано в {news_channel} (без 'Forwarded')")
+        print(f"[telegram_bot] ✅ переслано в {news_channel} из закрытого канала", flush=True)
         _last_premium_message = None
-        _last_forward_date = today
+        _mark_forward_day(today)
         return True
 
-    print(f"[telegram_bot] ❌ copyMessage fail: {data}")
+    print(f"[telegram_bot] ❌ forwardMessage fail: {data}", flush=True)
     return False
