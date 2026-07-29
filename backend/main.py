@@ -2376,72 +2376,70 @@ from pathlib import Path as _Path  # noqa: E402
 
 def _find_frontend_dist_dir() -> _Path | None:
     # Candidate locations (local dev + Railway container layouts).
+    _here = _Path(__file__).resolve().parent
     candidates = [
-        _Path(__file__).resolve().parent / "dist",  # backend/dist (same dir as main.py)
-        _Path(__file__).resolve().parent.parent / "frontend" / "dist",
-        _Path.cwd() / "frontend" / "dist",
+        _here / "dist",
+        _here.parent / "frontend" / "dist",
         _Path.cwd() / "dist",
-        _Path("/data") / "frontend" / "dist",
-        _Path("/app") / "frontend" / "dist",
+        _Path.cwd() / "frontend" / "dist",
     ]
-    print(f"[frontend] cwd={_Path.cwd()}, __file__={__file__}", flush=True)
     for c in candidates:
         try:
-            print(f"[frontend] checking {c} exists={c.exists()}", flush=True)
-            if c.exists() and (c / "index.html").exists():
-                return c
-        except Exception as e:
-            print(f"[frontend] error checking {c}: {e}", flush=True)
+            if (c / "index.html").is_file():
+                return c.resolve()
+        except Exception:
             continue
     return None
 
 
 _FRONTEND_DIST_DIR = _find_frontend_dist_dir()
-try:
-    print(f"[frontend] dist_dir={_FRONTEND_DIST_DIR}", flush=True)
-except Exception:
-    pass
+print(f"[frontend] dist_dir={_FRONTEND_DIST_DIR} cwd={_Path.cwd()}", flush=True)
+
+# Vite emits content-hashed asset names, so they can be cached forever.
+# index.html must never be cached or clients pin themselves to a stale build.
+_IMMUTABLE_CACHE = {"Cache-Control": "public, max-age=31536000, immutable"}
+_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
+
+# Paths owned by the API — the SPA fallback must never answer for them.
+_RESERVED_PREFIXES = ("api/", "docs", "redoc", "openapi.json", "health", "metrics")
 
 
 if _FRONTEND_DIST_DIR:
-    # Fast paths for assets (Vite uses absolute /assets/...)
-    _assets_dir = _FRONTEND_DIST_DIR / "assets"
-    if _assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=str(_assets_dir), html=False), name="frontend-assets")
+    for _sub, _name in (("assets", "frontend-assets"), ("email", "frontend-email")):
+        _dir = _FRONTEND_DIST_DIR / _sub
+        if _dir.is_dir():
+            app.mount(f"/{_sub}", StaticFiles(directory=str(_dir), html=False), name=_name)
 
-    _email_dir = _FRONTEND_DIST_DIR / "email"
-    if _email_dir.exists():
-        app.mount("/email", StaticFiles(directory=str(_email_dir), html=False), name="frontend-email")
+
+def _index_response() -> FileResponse:
+    if not _FRONTEND_DIST_DIR:
+        raise HTTPException(status_code=503, detail="frontend build missing in container")
+    return FileResponse(str(_FRONTEND_DIST_DIR / "index.html"), headers=_NO_CACHE)
 
 
 @app.get("/", include_in_schema=False)
+@app.head("/", include_in_schema=False)
 def _spa_root():
-    if not _FRONTEND_DIST_DIR:
-        raise HTTPException(status_code=404, detail="frontend dist missing in container")
-    index_fp = _FRONTEND_DIST_DIR / "index.html"
-    if index_fp.exists():
-        return FileResponse(str(index_fp))
-    raise HTTPException(status_code=404, detail="frontend index.html not found")
+    return _index_response()
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
+@app.head("/{full_path:path}", include_in_schema=False)
 def _spa_catchall(full_path: str):
-    # Reserved endpoints — never let SPA fallback hijack them.
-    if full_path.startswith("api/") or full_path == "api":
-        raise HTTPException(status_code=404, detail="API route not found")
-    if full_path in {"health", "docs", "openapi.json", "redoc"}:
+    if full_path.startswith(_RESERVED_PREFIXES) or full_path == "api":
         raise HTTPException(status_code=404, detail="Route not found")
 
     if not _FRONTEND_DIST_DIR:
-        raise HTTPException(status_code=404, detail="frontend dist missing in container")
+        raise HTTPException(status_code=503, detail="frontend build missing in container")
 
-    # If requested a real static file in dist — serve it.
-    fp = _FRONTEND_DIST_DIR / full_path
-    if fp.exists() and fp.is_file():
-        return FileResponse(str(fp))
+    # Serve a real file from dist, but never let "../" escape the build dir.
+    try:
+        fp = (_FRONTEND_DIST_DIR / full_path).resolve()
+        if fp.is_file() and fp.is_relative_to(_FRONTEND_DIST_DIR):
+            cache = _NO_CACHE if fp.suffix == ".html" else _IMMUTABLE_CACHE
+            return FileResponse(str(fp), headers=cache)
+    except (OSError, ValueError):
+        pass
 
-    # Otherwise serve SPA entrypoint (client-side router).
-    index_fp = _FRONTEND_DIST_DIR / "index.html"
-    if index_fp.exists():
-        return FileResponse(str(index_fp))
-    raise HTTPException(status_code=404, detail="frontend index.html not found")
+    # Unknown path → SPA entrypoint so the client-side router can handle it.
+    return _index_response()
