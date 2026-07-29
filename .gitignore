@@ -14,7 +14,7 @@ env/
 
 # Node / frontend
 node_modules/
-dist/
+/frontend/dist/
 *.local
 
 # Логи и временное
