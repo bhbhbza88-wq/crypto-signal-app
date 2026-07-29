@@ -2363,46 +2363,81 @@ def run_multi_backtest(req: MultiBacktestRequest, user=Depends(require_user)):
 
 
 # ── Frontend static (React/Vite) ─────────────────────────────────────────────
-# Serve `frontend/dist` on this service so https://.../ shows the site.
+# Serve the built frontend on this service so https://.../ shows the site.
 #
-# NOTE: API routes above must stay dominant; we add SPA catch-all at the end.
+# Important: in Railway this service may not include `frontend/dist`.
+# We therefore:
+#   1) try multiple likely dist locations
+#   2) register SPA routes anyway, but return 404 with clear message if missing
 from fastapi.responses import FileResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pathlib import Path as _Path  # noqa: E402
 
-_DIST_DIR = _Path(__file__).resolve().parent.parent / "frontend" / "dist"
-if _DIST_DIR.exists():
-    # Fast paths for common asset folders
-    _assets_dir = _DIST_DIR / "assets"
+
+def _find_frontend_dist_dir() -> _Path | None:
+    # Candidate locations (local dev + Railway container layouts).
+    candidates = [
+        _Path(__file__).resolve().parent.parent / "frontend" / "dist",
+        _Path.cwd() / "frontend" / "dist",
+        _Path.cwd() / "dist",
+        _Path("/data") / "frontend" / "dist",
+        _Path("/app") / "frontend" / "dist",
+    ]
+    for c in candidates:
+        try:
+            if c.exists() and (c / "index.html").exists():
+                return c
+        except Exception:
+            continue
+    return None
+
+
+_FRONTEND_DIST_DIR = _find_frontend_dist_dir()
+try:
+    print(f"[frontend] dist_dir={_FRONTEND_DIST_DIR}", flush=True)
+except Exception:
+    pass
+
+
+if _FRONTEND_DIST_DIR:
+    # Fast paths for assets (Vite uses absolute /assets/...)
+    _assets_dir = _FRONTEND_DIST_DIR / "assets"
     if _assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(_assets_dir), html=False), name="frontend-assets")
 
-    _email_dir = _DIST_DIR / "email"
+    _email_dir = _FRONTEND_DIST_DIR / "email"
     if _email_dir.exists():
         app.mount("/email", StaticFiles(directory=str(_email_dir), html=False), name="frontend-email")
 
-    @app.get("/", include_in_schema=False)
-    def _spa_root():
-        index_fp = _DIST_DIR / "index.html"
-        if index_fp.exists():
-            return FileResponse(str(index_fp))
-        raise HTTPException(status_code=404, detail="index.html not found")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
-    def _spa_catchall(full_path: str):
-        # Reserved endpoints — never let SPA fallback hijack them.
-        if full_path.startswith("api/") or full_path.startswith("api"):
-            raise HTTPException(status_code=404, detail="API route not found")
-        if full_path in {"health", "docs", "openapi.json", "redoc"}:
-            raise HTTPException(status_code=404, detail="Route not found")
+@app.get("/", include_in_schema=False)
+def _spa_root():
+    if not _FRONTEND_DIST_DIR:
+        raise HTTPException(status_code=404, detail="frontend dist missing in container")
+    index_fp = _FRONTEND_DIST_DIR / "index.html"
+    if index_fp.exists():
+        return FileResponse(str(index_fp))
+    raise HTTPException(status_code=404, detail="frontend index.html not found")
 
-        # If requested a real static file in dist — serve it.
-        fp = _DIST_DIR / full_path
-        if fp.exists() and fp.is_file():
-            return FileResponse(str(fp))
 
-        # Otherwise serve SPA entrypoint (client-side router).
-        index_fp = _DIST_DIR / "index.html"
-        if index_fp.exists():
-            return FileResponse(str(index_fp))
-        raise HTTPException(status_code=404, detail="index.html not found")
+@app.get("/{full_path:path}", include_in_schema=False)
+def _spa_catchall(full_path: str):
+    # Reserved endpoints — never let SPA fallback hijack them.
+    if full_path.startswith("api/") or full_path == "api":
+        raise HTTPException(status_code=404, detail="API route not found")
+    if full_path in {"health", "docs", "openapi.json", "redoc"}:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    if not _FRONTEND_DIST_DIR:
+        raise HTTPException(status_code=404, detail="frontend dist missing in container")
+
+    # If requested a real static file in dist — serve it.
+    fp = _FRONTEND_DIST_DIR / full_path
+    if fp.exists() and fp.is_file():
+        return FileResponse(str(fp))
+
+    # Otherwise serve SPA entrypoint (client-side router).
+    index_fp = _FRONTEND_DIST_DIR / "index.html"
+    if index_fp.exists():
+        return FileResponse(str(index_fp))
+    raise HTTPException(status_code=404, detail="frontend index.html not found")
