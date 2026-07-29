@@ -2377,17 +2377,21 @@ from pathlib import Path as _Path  # noqa: E402
 def _find_frontend_dist_dir() -> _Path | None:
     # Candidate locations (local dev + Railway container layouts).
     candidates = [
+        _Path(__file__).resolve().parent / "dist",  # backend/dist (same dir as main.py)
         _Path(__file__).resolve().parent.parent / "frontend" / "dist",
         _Path.cwd() / "frontend" / "dist",
         _Path.cwd() / "dist",
         _Path("/data") / "frontend" / "dist",
         _Path("/app") / "frontend" / "dist",
     ]
+    print(f"[frontend] cwd={_Path.cwd()}, __file__={__file__}", flush=True)
     for c in candidates:
         try:
+            print(f"[frontend] checking {c} exists={c.exists()}", flush=True)
             if c.exists() and (c / "index.html").exists():
                 return c
-        except Exception:
+        except Exception as e:
+            print(f"[frontend] error checking {c}: {e}", flush=True)
             continue
     return None
 
