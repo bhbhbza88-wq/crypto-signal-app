@@ -91,14 +91,21 @@ OUTLOOK_SYSTEM_ANALYSIS = """
 
 ЖЁСТКИЕ ПРАВИЛА:
 1. Голос первого лица: «смотрю», «жду», «работаю», «фиксирую». Без канцелярита и AI-штампов
-   («важно отметить», «следует», «таким образом», «на основании анализа»).
-2. Только price action / SMC. НИКОГДА: ema, rsi, adx, индикаторы, штамп «ключевое условие».
+   («важно отметить», «следует», «таким образом», «на основании анализа»,
+   «не повод для паники», «не теряю оптимизма», «Биток просел», «всё чётко», 
+   «выглядит интересно», «интересная картина», «неплохой расклад»).
+2. Только price action / SMC. НИКОГДА: ema, rsi, adx, индикаторы, штамп «ключевое условие»,
+   шаблон «Цена находится между…».
    Можно: зона спроса/предложения (OB), ликвидность (сняли/собрали/свип), заброс, реакция,
    слом структуры (BOS/CHoCH), POI, пул ликвидности, инвалидация.
 3. Цены — мягкими диапазонами, не одной точкой: «в зоне 64100–64400».
 4. ЛОГИКА ЦЕН (обязательно сверяй с price_now из фактов):
    - long: цель ВЫШЕ текущей цены; инвалидация НИЖЕ.
    - short: цель НИЖЕ текущей; инвалидация ВЫШЕ.
+   - Цель и инвалидация — РАЗНЫЕ уровни (не одна и та же цифра).
+   - В body ОБЯЗАТЕЛЬНО одна явная отмена + ПОСЛЕДСТВИЕ: «инвалидация X — закрываю позу / отменяю сценарий / выхожу».
+     НЕ просто «инвалидация X», а что КОНКРЕТНО делаешь при сломе.
+   - Не пиши «пробой выше X → открываю шорт» (для шорта пробой вверх = отмена).
    - Не пиши «жду закрепление выше/ниже X», если price_now УЖЕ там — тогда говори
      «держимся / уже выше(ниже) / смотрю продолжение к …».
 5. Старт фразы — ВАРЬИРУЙ (не копируй один каркас):
@@ -111,11 +118,11 @@ OUTLOOK_SYSTEM_ANALYSIS = """
 
 Примеры тона (НЕ копируй):
 • «По BTC на Азии зашли в предложение около 64.1–64.4k. Жду реакцию; если удержит —
-  первая цель пул 63.2–63.5k, часть сниму на импульсе.»
+  первая цель пул 63.2–63.5k, часть сниму на импульсе. Ниже 61.8k — закрываю, сценарий слом.»
 • «Под Европу по SOL свипнули снизу — реакция есть. Смотрю выход к 74.5–75.0;
-  ниже вчерашнего минимума идею закрываю.»
+  ниже вчерашнего минимума закрываю идею.»
 • «AAVE уже ниже 220, ждать пробой смысла нет. Работаю продолжение шорта к 209–211,
-  стоп выше локального хая.»
+  стоп выше локального хая — там отменяю.»
 
 Верни JSON:
 {
@@ -124,6 +131,7 @@ OUTLOOK_SYSTEM_ANALYSIS = """
   "score_1_10": 7,
   "bias": "long",
   "target": 63200,
+  "invalidation": 61800,
   "post_subtype": "analysis"
 }
 """.strip()
@@ -242,6 +250,213 @@ def _too_similar(new_body: str, prev_body: str | None, *, ratio_hi: float = 0.82
     return difflib.SequenceMatcher(None, a, b).ratio() >= ratio_hi
 
 
+def _too_similar_any_recent(
+    new_body: str,
+    *,
+    skip_symbol: str | None = None,
+    ratio_hi: float = 0.82,
+) -> bool:
+    """Near-duplicate vs any recent outlook body (cross-symbol anti-dupe)."""
+    a = " ".join((new_body or "").lower().split())
+    if not a:
+        return False
+    for sym, meta in _recent_posts().items():
+        if skip_symbol and str(sym) == str(skip_symbol):
+            # same-symbol prev already checked via _too_similar(prev_body)
+            continue
+        if not isinstance(meta, dict):
+            continue
+        prev = meta.get("body")
+        if not prev:
+            continue
+        b = " ".join(str(prev).lower().split())
+        if not b:
+            continue
+        if difflib.SequenceMatcher(None, a, b).ratio() >= ratio_hi:
+            return True
+    return False
+
+
+_AI_SMELL_PHRASES = (
+    "не повод для паники",
+    "не теряю оптимизма",
+    "биток просел",
+    "цена находится между",
+    "это говорит о",
+    "на основании анализа",
+    "следует отметить",
+    "таким образом",
+    "важно отметить",
+    "всё чётко",
+    "все четко",
+    "выглядит интересно",
+    "интересная картина",
+    "неплохой расклад",
+    "интересный расклад",
+)
+
+
+def _target_side_ok(
+    bias: str,
+    close: float,
+    target: float | None,
+    *,
+    eps: float = 0.001,
+) -> bool:
+    """long → target > close; short → target < close."""
+    if target is None:
+        return True
+    try:
+        c = float(close)
+        t = float(target)
+    except (TypeError, ValueError):
+        return True
+    if c <= 0 or t <= 0:
+        return True
+    b = (bias or "long").lower()
+    if b == "long":
+        return t > c * (1.0 + eps)
+    if b == "short":
+        return t < c * (1.0 - eps)
+    return True
+
+
+def _invalidation_side_ok(
+    bias: str,
+    close: float,
+    invalidation: float | None,
+    target: float | None = None,
+    *,
+    eps: float = 0.001,
+) -> bool:
+    """long → inv < close; short → inv > close; inv != target."""
+    if invalidation is None:
+        return True
+    try:
+        c = float(close)
+        inv = float(invalidation)
+    except (TypeError, ValueError):
+        return True
+    if c <= 0 or inv <= 0:
+        return True
+    b = (bias or "long").lower()
+    if b == "long" and inv >= c * (1.0 - eps):
+        return False
+    if b == "short" and inv <= c * (1.0 + eps):
+        return False
+    if target is not None:
+        try:
+            t = float(target)
+            if t > 0 and abs(inv - t) / max(c, t, inv) < 0.002:
+                return False
+        except (TypeError, ValueError):
+            pass
+    return True
+
+
+def _body_logic_ok(body: str, *, close: float, bias: str) -> bool:
+    """Reject known bad patterns from post_review (BCH upside-break→short, AI pep-talk)."""
+    text = (body or "").lower()
+    if not text:
+        return False
+    for phrase in _AI_SMELL_PHRASES:
+        if phrase in text:
+            return False
+
+    try:
+        c = float(close)
+    except (TypeError, ValueError):
+        return True
+    if c <= 0:
+        return True
+
+    b = (bias or "long").lower()
+    # «если пробьёт/пробьем X … открываю/работаю шорт» where X > close → upside break opens short
+    if b == "short":
+        for m in re.finditer(
+            r"(пробь[её]т|пробьём|пробьем|пробой)\s+(?:выше\s+)?([\d\s]+(?:\.\d+)?).{0,40}?"
+            r"(открываю\s+шорт|работаю\s+шорт|шорт\s+с\s+цель)",
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        ):
+            try:
+                lvl = float(m.group(2).replace(" ", ""))
+            except ValueError:
+                continue
+            if lvl > c * 1.001:
+                return False
+    return True
+
+
+def _post_passes_gates(
+    ai: dict,
+    *,
+    row: dict,
+    prev_body: str | None,
+    pool: list[float],
+) -> bool:
+    """All pre-publish sanity checks for an AI outlook body."""
+    body = ai.get("body") or ""
+    close_now = float(row.get("close") or 0)
+    bias_chk = (ai.get("bias") or "long").lower()
+    target = ai.get("target")
+    inv = ai.get("invalidation")
+    sym = row.get("symbol")
+    if not _body_prices_sane(body, pool):
+        return False
+    if not _levels_have_numbers(body):
+        return False
+    if _too_similar(body, prev_body):
+        return False
+    if _too_similar_any_recent(body, skip_symbol=str(sym) if sym else None):
+        return False
+    if not _scenario_levels_sane(body, close=close_now, bias=bias_chk):
+        return False
+    if not _target_side_ok(bias_chk, close_now, target if isinstance(target, (int, float)) else None):
+        return False
+    if not _invalidation_side_ok(
+        bias_chk,
+        close_now,
+        inv if isinstance(inv, (int, float)) else None,
+        target if isinstance(target, (int, float)) else None,
+    ):
+        return False
+    if not _body_logic_ok(body, close=close_now, bias=bias_chk):
+        return False
+    # Кросс-проверка VIP/News противоречий: если за последние 24ч по той же монете
+    # есть пост с противоположным bias — вероятно конфликт идей.
+    if not _check_vip_news_conflict(sym, bias_chk):
+        print(
+            f"[market_outlook] WARNING: {sym} {bias_chk} conflicts with recent opposite bias post",
+            flush=True,
+        )
+        # Не блокируем жёстко (может быть разворот), но предупреждаем.
+    return True
+
+
+def _check_vip_news_conflict(symbol: str | None, bias: str) -> bool:
+    """
+    Проверка: если за последние 24ч по той же монете был пост с противоположным bias
+    → возможно конфликт между VIP LONG и news SHORT (или наоборот).
+    Возвращает False если конфликт есть (противоположный bias свежий).
+    """
+    if not symbol:
+        return True
+    recent = _recent_posts()
+    prev = recent.get(str(symbol))
+    if not prev:
+        return True
+    age_h = (time.time() - float(prev.get("ts") or 0)) / 3600.0
+    if age_h > 24.0:
+        return True
+    prev_bias = (prev.get("bias") or "long").strip().lower()
+    curr_bias = (bias or "long").strip().lower()
+    # Противоположные bias: long vs short или наоборот
+    if (prev_bias == "long" and curr_bias == "short") or (prev_bias == "short" and curr_bias == "long"):
+        return False
+    return True
+
+
 def _normalize_outlook_body(body: str) -> str:
     """
     Push wording toward Bukvar SMC style:
@@ -287,6 +502,11 @@ def _normalize_outlook_body(body: str) -> str:
         (r"от поддержки\b", "от зоны спроса"),
         (r"к сопротивлению\b", "к зоне предложения"),
         (r"от сопротивления\b", "от зоны предложения"),
+        (r"не\s+повод\s+для\s+паники[!.,]?", ""),
+        (r"не\s+теряю\s+оптимизма[:\s—–,-]*", ""),
+        (r"Биток\s+просел[,!]?", "BTC просел"),
+        (r"Цена\s+находится\s+между", "Цена между"),
+        (r"это\s+зона\s+консолидации", "боковик"),
     )
     for pat, repl in replacements:
         text = re.sub(pat, repl, text, flags=re.IGNORECASE)
@@ -500,6 +720,7 @@ def _recent_posts() -> dict[str, dict]:
                     "message_id": None,
                     "root_message_id": None,
                     "target": None,
+                    "invalidation": None,
                 }
             elif isinstance(v, dict) and "ts" in v:
                 out[str(k)] = {
@@ -512,6 +733,7 @@ def _recent_posts() -> dict[str, dict]:
                     "message_id": v.get("message_id"),
                     "root_message_id": v.get("root_message_id") or v.get("message_id"),
                     "target": v.get("target"),
+                    "invalidation": v.get("invalidation"),
                 }
         return out
     except (TypeError, ValueError, json.JSONDecodeError):
@@ -529,6 +751,7 @@ def _remember_post(
     message_id: int | None = None,
     root_message_id: int | None = None,
     target: float | None = None,
+    invalidation: float | None = None,
 ) -> None:
     m = _recent_posts()
     now = time.time()
@@ -551,6 +774,7 @@ def _remember_post(
         "message_id": int(message_id) if message_id else prev.get("message_id"),
         "root_message_id": root_id,
         "target": target if target is not None else prev.get("target"),
+        "invalidation": invalidation if invalidation is not None else prev.get("invalidation"),
     }
     db.set_setting(_SETTING_RECENT, json.dumps(m))
 
@@ -1097,13 +1321,14 @@ def _facts_block(
         f"price_now: {_fmt_price(close)}\n"
         f"chg_24h_pct: {row['chg_24h']}\n"
         f"target: {_fmt_price(target)} (ОДНА главная цена — куда жду; должна быть по сторону bias)\n"
-        f"invalidation: {_fmt_price(inv)} (стоп/отмена сценария)\n"
+        f"invalidation: {_fmt_price(inv)} (стоп/отмена; ДРУГОЙ уровень, не равен target)\n"
         f"internal_score_0_100: {row['score']}\n"
         f"btc_phase: {row.get('btc_phase')}\n"
         f"mtf_confluence_1d: {'yes (можно естественно вплести «на дневке»)' if mtf_confirmed else 'no'}\n"
         "СТИЛЬ: Price action. Без ema/индикаторов. Без штампа «Ключевое условие».\n"
         "Варьируй старт. Не добавляй отдельную строку «Ключевой уровень — …».\n"
-        "В JSON поле target — число главной цели.\n"
+        "В JSON: target и invalidation — числа; в body явно напиши отмену.\n"
+        "Запрещено: «не повод для паники», «не теряю оптимизма», «Цена находится между».\n"
     )
     if prev:
         base += (
@@ -1153,7 +1378,7 @@ async def _ai_write_post(
             "Живой пост трейдера, price action. "
             f"{variation} "
             "ОДНА главная цель по сторону bias. Не шаблон. Не индикаторы. "
-            "Верни target числом в JSON."
+            "Верни target и invalidation числами в JSON. В body явно укажи отмену."
             f"{mtf_note}{hint_suffix}\n\n"
             + _facts_block(row, key_level=kl, bias=bias_n, post_type=post_type, prev=prev, mtf_confirmed=mtf_confirmed)
         )
@@ -1197,6 +1422,24 @@ async def _ai_write_post(
     if bias_out == "neutral":
         bias_out = bias_n
     target_out = _extract_target_from_verdict(verdict, row, bias_out)
+    inv_out = None
+    for key in ("invalidation", "inval", "stop"):
+        try:
+            v = verdict.get(key)
+            if v is not None and float(v) > 0:
+                inv_out = float(v)
+                break
+        except (TypeError, ValueError):
+            pass
+    if inv_out is None:
+        try:
+            close = float(row.get("close") or 0)
+            if bias_out == "short":
+                inv_out = float(row.get("resistance") or close * 1.03)
+            else:
+                inv_out = float(row.get("support") or row.get("invalidation") or close * 0.97)
+        except (TypeError, ValueError):
+            inv_out = None
     return {
         "ticker": ticker,
         "body": body,
@@ -1204,6 +1447,7 @@ async def _ai_write_post(
         "bias": bias_out,
         "key_level": kl,
         "target": target_out,
+        "invalidation": inv_out,
         "post_type": post_type,
         "post_subtype": (verdict.get("post_subtype") or "analysis").strip().lower(),
     }
@@ -1219,12 +1463,13 @@ def _pick_emoji_for_bias(bias: str) -> str:
     return "⚪️"
 
 
-def _format_post(row: dict, ai: dict, chart_tag: str = "", *, post_subtype: str | None = None) -> str:
+def _format_post(row: dict, ai: dict, chart_tag: str = "", *, post_subtype: str | None = None, prev_post: dict | None = None) -> str:
     """
     Bukvar format:
     - analysis/update: emoji #TICKER\\n\\nbody
     - chart_only: emoji #TICKER (no body, chart speaks)
     - greet/promo: text only (no ticker, handled separately)
+    - update: добавляет "Обновление: " если повторный post_type=update
     """
     del chart_tag
     coin = row["symbol"].replace("/USDT", "")
@@ -1233,8 +1478,22 @@ def _format_post(row: dict, ai: dict, chart_tag: str = "", *, post_subtype: str 
     subtype = post_subtype or ai.get("post_subtype") or "analysis"
     bias = (ai.get("bias") or "long").strip().lower()
     
-    # Clean formal phrases
-    for bad in ("На основании анализа", "Следует отметить", "В заключение", "Данный актив"):
+    # Clean formal / AI-smell phrases
+    for bad in (
+        "На основании анализа",
+        "Следует отметить",
+        "В заключение",
+        "Данный актив",
+        "не повод для паники",
+        "Не повод для паники",
+        "не теряю оптимизма",
+        "Не теряю оптимизма",
+        "Цена находится между",
+        "всё чётко",
+        "все четко",
+        "выглядит интересно",
+        "интересная картина",
+    ):
         body = body.replace(bad, "")
     
     # Emoji before ticker (Bukvar style): long → 🪙/🧬, short → 🔻, neutral → ⚪️
@@ -1247,6 +1506,12 @@ def _format_post(row: dict, ai: dict, chart_tag: str = "", *, post_subtype: str 
     # Full analysis/update: emoji #TICKER + body
     if not body:
         return f"{emoji} #{ticker}"
+    
+    # Если update и есть предыдущий пост (не первый analysis) — добавляем маркер обновления
+    if subtype == "update" and prev_post and prev_post.get("post_type") != "update":
+        # Первое обновление к analysis → пометка "Обновление:"
+        body = f"Обновление: {body}"
+    
     text = f"{emoji} #{ticker}\n\n{body}"
     return text[:1020]
 
@@ -1298,14 +1563,7 @@ async def _publish_row(
 
     prev_body = (prev or {}).get("body")
     pool = _facts_price_pool(row, float(ai.get("key_level") or key_level))
-    close_now = float(row.get("close") or 0)
-    bias_chk = (ai.get("bias") or bias_hint or "long").lower()
-    needs_retry = (
-        not _body_prices_sane(ai["body"], pool)
-        or not _levels_have_numbers(ai["body"])
-        or _too_similar(ai["body"], prev_body)
-        or not _scenario_levels_sane(ai["body"], close=close_now, bias=bias_chk)
-    )
+    needs_retry = not _post_passes_gates(ai, row=row, prev_body=prev_body, pool=pool)
     if needs_retry:
         print(
             f"[market_outlook] retrying AI text for {row['symbol']} "
@@ -1322,19 +1580,15 @@ async def _publish_row(
             extra_hint=(
                 "Важно: используй только числа из фактов ниже, ни одной новой цифры. "
                 "Цели строго по сторону bias относительно price_now. "
+                "invalidation строго по другую сторону и ≠ target. "
                 "Не пиши «жду закрепление», если key_level_vs_price = already_above/already_below. "
+                "Запрещено: «не повод для паники», «не теряю оптимизма», «Цена находится между». "
+                "Для short: пробой ВЫШЕ уровня = отмена, не вход в шорт. "
                 "Сформулируй иначе, без штампа «Ключевое условие», не повторяй прошлый текст."
             ),
         )
         retry_pool = _facts_price_pool(row, float((retry or {}).get("key_level") or key_level)) if retry else []
-        retry_bias = ((retry or {}).get("bias") or bias_hint or "long").lower()
-        if (
-            retry
-            and _body_prices_sane(retry["body"], retry_pool)
-            and _levels_have_numbers(retry["body"])
-            and not _too_similar(retry["body"], prev_body)
-            and _scenario_levels_sane(retry["body"], close=close_now, bias=retry_bias)
-        ):
+        if retry and _post_passes_gates(retry, row=row, prev_body=prev_body, pool=retry_pool):
             ai = retry
         else:
             print(
@@ -1374,7 +1628,7 @@ async def _publish_row(
             )
         except Exception as e:
             print(f"[market_outlook] admin alert fail: {e}", flush=True)
-    text = _format_post(row, ai, chart_tag=chart_tag, post_subtype=ai.get("post_subtype"))
+    text = _format_post(row, ai, chart_tag=chart_tag, post_subtype=ai.get("post_subtype"), prev_post=prev)
     reply_to = None
     if post_type == "update" and prev:
         reply_to = prev.get("root_message_id") or prev.get("message_id")
@@ -1421,6 +1675,12 @@ async def _publish_row(
         _post_review.save_chart_png(row["symbol"], png)
     except Exception as e:
         print(f"[market_outlook] chart save skip: {e}", flush=True)
+    inv_v = None
+    try:
+        if ai.get("invalidation") is not None:
+            inv_v = float(ai["invalidation"]) or None
+    except (TypeError, ValueError):
+        inv_v = None
     _remember_post(
         row["symbol"],
         bias=bias,
@@ -1431,6 +1691,7 @@ async def _publish_row(
         message_id=int(msg_id),
         root_message_id=int(root_id) if root_id else None,
         target=target_v,
+        invalidation=inv_v,
     )
     if count_toward_cap:
         _bump_posts_today(1)
@@ -1643,11 +1904,21 @@ async def maybe_rewrite_once_on_boot() -> None:
 
 
 REWRITE_SYSTEM = """
-Ты редактор крипто-канала. Перепиши ГОТОВЫЙ пост так, чтобы он звучал живо и профессионально.
+Ты редактор крипто-канала. Перепиши ГОТОВЫЙ пост так, чтобы он звучал живо и профессионально (SMC / price action).
 Сохрани: тикер, bias, уровни/цели/смысл сценария. Не меняй торговую идею на противоположную.
-Убери: штамп «Ключевое условие», висящее «, и на дневке.», канцелярит, AI-штампы.
-Если по close цена УЖЕ за уровнем — поправь формулировку («уже ниже/выше… смотрю продолжение»), не пиши «жду закрепление».
-Верни JSON: {"body": "...", "ticker": "BTC"}
+
+ОБЯЗАТЕЛЬНО поправь логику цен:
+- long: цель ВЫШЕ close; инвалидация НИЖЕ.
+- short: цель НИЖЕ close; инвалидация ВЫШЕ.
+- Цель и инвалидация — разные уровни.
+- Для short: пробой ВЫШЕ уровня = отмена, НЕ «открываю шорт».
+- В body одна явная отмена («инвалидация / стоп / отмена — выше|ниже X»).
+
+Убери: штамп «Ключевое условие», висящее «, и на дневке.», канцелярит, AI-штампы,
+«не повод для паники», «не теряю оптимизма», «Цена находится между», EMA/индикаторы.
+Если по close цена УЖЕ за уровнем — «уже ниже/выше… смотрю продолжение», не «жду закрепление».
+
+Верни JSON: {"body": "...", "ticker": "BTC", "invalidation": 123.0}
 """.strip()
 
 
@@ -1660,6 +1931,7 @@ async def _rewrite_one_body(meta: dict, symbol: str) -> str | None:
     close = meta.get("close")
     key_level = meta.get("key_level")
     target = meta.get("target")
+    inv = meta.get("invalidation")
     relation = _key_level_relation(close or 0, key_level or 0, bias)
     user = (
         f"symbol: {symbol}\n"
@@ -1668,6 +1940,7 @@ async def _rewrite_one_body(meta: dict, symbol: str) -> str | None:
         f"close_at_publish: {close}\n"
         f"key_level: {key_level}\n"
         f"target: {target}\n"
+        f"invalidation: {inv}\n"
         f"key_level_vs_price: {relation}\n"
         f"original_body:\n{body}\n"
     )
@@ -1675,7 +1948,7 @@ async def _rewrite_one_body(meta: dict, symbol: str) -> str | None:
         out = await ai_client.fast_json_completion(
             system=REWRITE_SYSTEM,
             user_text=user,
-            max_tokens=320,
+            max_tokens=360,
             temperature=0.55,
         )
     except Exception as e:
@@ -1686,6 +1959,19 @@ async def _rewrite_one_body(meta: dict, symbol: str) -> str | None:
     new_body = _normalize_outlook_body((out.get("body") or "").strip())
     if len(new_body) < 60:
         return None
+    # Soft reject obvious leftover AI smell / inverted short break
+    try:
+        c = float(close or 0)
+    except (TypeError, ValueError):
+        c = 0.0
+    if c > 0 and not _body_logic_ok(new_body, close=c, bias=str(bias)):
+        # one more pass via normalize already done — drop smell phrases hard
+        for bad in _AI_SMELL_PHRASES:
+            new_body = re.sub(re.escape(bad), "", new_body, flags=re.IGNORECASE)
+        new_body = _normalize_outlook_body(new_body)
+        if len(new_body) < 60 or not _body_logic_ok(new_body, close=c, bias=str(bias)):
+            print(f"[market_outlook] rewrite logic reject {symbol}", flush=True)
+            return None
     return new_body
 
 

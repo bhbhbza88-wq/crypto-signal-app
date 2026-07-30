@@ -1,0 +1,442 @@
+{
+  "created_at": "2026-07-29T20:05:17.656152+00:00",
+  "total": 21,
+  "news": 15,
+  "vip": 6,
+  "correct": 18,
+  "incorrect": 3,
+  "unknown": 0,
+  "results": [
+    {
+      "index": 0,
+      "channel_kind": "news",
+      "msg_id": 105,
+      "date": "2026-07-29T18:17:14+00:00",
+      "caption_preview": "🔻 #ETH\n\nПо $ETH пробили 1977.79, цель 1884.57. Поход к цели на 4ч.",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_105.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "ETH",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График соответствует тексту. Направление движения, уровни и таймфрейм совпадают.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 1,
+      "channel_kind": "news",
+      "msg_id": 104,
+      "date": "2026-07-29T16:02:33+00:00",
+      "caption_preview": "🔻 #ADA\n\nНаблюдаем реакцию $ADA от зоны предложения в районе $0.1669. Ожидаю продолжение нисходящего движения к цели $0.1582. Пробой уровня $0.1690 отменит данный сценарий.",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_104.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 8,
+        "channel_kind": "news",
+        "symbol_guess": "ADA",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График корректно отображает нисходящий сценарий для ADA, уровни и зоны соответствуют тексту. Единственное, на графике не указан таймфрейм, но это не критично.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 2,
+      "channel_kind": "news",
+      "msg_id": 103,
+      "date": "2026-07-29T13:20:22+00:00",
+      "caption_preview": "🔻 #UNI\n\nЦена $UNI уже под уровнем 3.945. Ожидаю продолжения снижения к 3.69. Структура на 4-часовом таймфрейме сломлена вниз и подтверждена на дневке.",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_103.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "UNI",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График полностью соответствует тексту поста. Указаны правильная монета, таймфрейм и направление движения цены.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 3,
+      "channel_kind": "news",
+      "msg_id": 102,
+      "date": "2026-07-29T11:14:05+00:00",
+      "caption_preview": "⚪️ #SHIB\n\nЦена $SHIB торгуется ниже уровня 0.00000508, и попытки отскока к этой зоне не увенчались успехом. Сохраняю медвежий настрой, ожидая дальнейшего снижения к 0.00000454. Тай",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_102.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "SHIB",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График полностью соответствует тексту поста. Монета, таймфрейм, уровни и направление движения совпадают.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 4,
+      "channel_kind": "news",
+      "msg_id": 101,
+      "date": "2026-07-29T09:21:54+00:00",
+      "caption_preview": "🔻 #ETH\n\nна дневке $ETH находится в зоне предложения. Цена уже ниже уровня 1977.79, что подтверждает медвежий настрой. Ожидаю продолжение снижения к цели 1856.65. Инвалидация позици",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_101.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "ETH",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График полностью соответствует тексту. Направление, уровни и монета совпадают.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 5,
+      "channel_kind": "news",
+      "msg_id": 100,
+      "date": "2026-07-29T08:29:58+00:00",
+      "caption_preview": "🎯 UAI/USDT\n────────────\n🟢 LONG\nUAI/USDT\nBinance · Bitget · BingX · Bitunix Futures\n────────────\n💰 Вход   0.345\n🎯 TP1    0.36\n🎯 TP2    0.37\n🎯 TP3    0.38\n🛡 Стоп   0.33\n\nnowicki.trad",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_100.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "UAI",
+        "bias_text": "long",
+        "bias_chart": "long",
+        "issues": [],
+        "verdict": "Карточка позиции соответствует тексту. Символ, сторона, цена входа и стоп-лосс (хоть и не полностью совпадает, но в допустимых пределах) совпадают.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 6,
+      "channel_kind": "news",
+      "msg_id": 99,
+      "date": "2026-07-29T06:54:15+00:00",
+      "caption_preview": "🔻 #UNI\n\nUNI в предложении около 3.945, уже ниже. Работаю продолжение шорта к 3.69. Слом структуры на 4ч внизу, и на дневке подтверждается. Инвалидация — выше 3.945.",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_99.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "UNI",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График полностью соответствует тексту: монета, таймфрейм, направление движения и ключевые уровни совпадают.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 7,
+      "channel_kind": "news",
+      "msg_id": 98,
+      "date": "2026-07-29T02:27:33+00:00",
+      "caption_preview": "🎯 ETH/USDT\n────────────\n🟢 LONG\nETH/USDT\nBybit · Binance · Bitget · BingX · Bitunix Futures\n────────────\n💰 Вход   1 884.00\n🎯 TP1    1 932.68\n🎯 TP2    1 937.86\n🎯 TP3    2 030.04\n🛡 Ст",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_98.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "ETHUSDT",
+        "bias_text": "long",
+        "bias_chart": "long",
+        "issues": [],
+        "verdict": "Карточка позиции соответствует тексту поста. Символ, направление и цена входа совпадают. Отсутствие TP на карточке не является ошибкой.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 8,
+      "channel_kind": "news",
+      "msg_id": 97,
+      "date": "2026-07-28T18:57:14+00:00",
+      "caption_preview": "⚪️ #STX\n\nНа $STX наблюдаем реакцию от ключевой зоны сопротивления. Ожидаю нисходящее движение к уровню 0.1311. Пробой и закрепление цены ниже 0.1425 подтвердит медвежий сценарий.",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_97.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "STX",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График полностью соответствует тексту. Направление движения, уровни и монета совпадают.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 9,
+      "channel_kind": "news",
+      "msg_id": 96,
+      "date": "2026-07-28T17:26:25+00:00",
+      "caption_preview": "⚪️ #UNI\n\nПо $UNI всё чётко: забрали ликвидность, отскочили от зоны продаж. Теперь смотрю на 3.676. Если цена закрепится ниже 3.939, это подтвердит мой сценарий.",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_96.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "UNI",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График полностью соответствует тексту. Направление движения, уровни и зоны продаж/ликвидности отображены корректно.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 10,
+      "channel_kind": "news",
+      "msg_id": 95,
+      "date": "2026-07-28T15:47:57+00:00",
+      "caption_preview": "⚪️ #BCH\n\nНа 4-часовом и дневном графиках $BCH сформировалась зона сопротивления, откуда ожидается снижение. Цель — тестирование уровня 209.3. Отмена сценария — пробой и закрепление",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_95.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "BCH",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График полностью соответствует тексту. Уровни и зоны обозначены корректно, направление движения совпадает.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 11,
+      "channel_kind": "news",
+      "msg_id": 94,
+      "date": "2026-07-28T14:14:15+00:00",
+      "caption_preview": "⚪️ #VET\n\nна дневке $VET наблюдаем реакцию цены в зоне продавцов. Ожидаю коррекцию к уровню $0.00464. При подходе к этой отметке буду искать точки для открытия short-позиции с целью",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_94.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "VET",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График полностью соответствует тексту. Указаны все необходимые уровни и направление движения цены.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 12,
+      "channel_kind": "news",
+      "msg_id": 93,
+      "date": "2026-07-28T13:29:30+00:00",
+      "caption_preview": "🔻 #SOL\n\nНа 4-часовом и дневном таймфреймах $SOL встретил сопротивление. Ожидаю коррекцию к уровню $77. Шорт будет актуален после подтверждения пробоя поддержки на $73. Основная цел",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_93.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 8,
+        "channel_kind": "news",
+        "symbol_guess": "SOL",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График соответствует тексту. Уровни и направление движения совпадают. Единственное, на графике указан уровень 77 1D, что может быть сопротивлением, но в тексте 77 - это уровень отмены медвежьего сценария, а не сопротивление, которое уже встречено.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 13,
+      "channel_kind": "news",
+      "msg_id": 92,
+      "date": "2026-07-28T12:39:49+00:00",
+      "caption_preview": "#STX\n\n$STX торгуется ниже ema50 на Bybit Futures. Цена 0.1358, объемы средние.\n\nЖду продолжения снижения к поддержке 0.1311. Ключевой уровень — 0.1425, он же сопротивление.",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_92.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "news",
+        "symbol_guess": "STX",
+        "bias_text": "short",
+        "bias_chart": "short",
+        "issues": [],
+        "verdict": "График полностью соответствует тексту поста. Символ, таймфрейм, текущая цена, уровни поддержки и сопротивления, а также общее направление движения цены совпадают.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 14,
+      "channel_kind": "news",
+      "msg_id": 91,
+      "date": "2026-07-28T12:27:06+00:00",
+      "caption_preview": "🧬 #BTC\n\nНаблюдаем за $BTC. После коррекции, Торгуемся вблизи уровня 64.0. Учитывая структуру рынка, ожидаю возобновления восходящего движения. Ближайшая цель для роста — 65 722.80.",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\news_91.png",
+      "review": {
+        "ok": true,
+        "chart_correct": false,
+        "score_1_10": 4,
+        "channel_kind": "news",
+        "symbol_guess": "BTC",
+        "bias_text": "long",
+        "bias_chart": "long",
+        "issues": [
+          "Направление стрелки/path не полностью совпадает с bias в тексте. Текст предполагает рост сразу, график показывает сначала падение, потом рост.",
+          "Цены/уровни из текста противоречат графику. Уровень отмены восходящего сценария (64158.15) на графике обозначен как уровень поддержки, от которого ожидается рост, а не отмена.",
+          "Цели роста из текста (65722.80, 66019.95) отсутствуют на графике. Вместо них указана зона предложения 64714.30-65019.98, которая ниже первой цели из текста.",
+          "На графике присутствует зона спроса 62484.22-63276.93, которая не упоминается в тексте, но является ключевой для предполагаемого отскока."
+        ],
+        "verdict": "График имеет существенные расхождения с текстовым описанием. Текст предполагает немедленный рост, тогда как график показывает сначала снижение, а затем рост. Уровни целей и отмены также не совпадают.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 15,
+      "channel_kind": "vip",
+      "msg_id": 127,
+      "date": "2026-07-29T19:05:22+00:00",
+      "caption_preview": "🎯 ZRO/USDT\n────────────\n🟢 LONG\nZRO/USDT\nBybit · Binance · Bitget · BingX · Bitunix Futures\n────────────\n💰 Вход   0.75\n🎯 TP1    0.9653\n🎯 TP2    1.1806\n🎯 TP3    1.3959\n🛡 Стоп   0.696",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\vip_127.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "vip",
+        "symbol_guess": "ZRO",
+        "bias_text": "long",
+        "bias_chart": "long",
+        "issues": [],
+        "verdict": "Карточка позиции соответствует тексту поста. Символ, направление и цена входа совпадают. Отсутствие TP на карточке не является ошибкой.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 16,
+      "channel_kind": "vip",
+      "msg_id": 126,
+      "date": "2026-07-29T17:31:34+00:00",
+      "caption_preview": "🎯 HOLO/USDT\n────────────\n🟢 LONG\nHOLO/USDT\nBybit · Binance · Bitget · BingX · Bitunix Futures\n────────────\n💰 Вход   0.0752\n🎯 TP1    0.0983\n🎯 TP2    0.1214\n🎯 TP3    0.1445\n🛡 Стоп   0",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\vip_126.png",
+      "review": {
+        "ok": true,
+        "chart_correct": false,
+        "score_1_10": 6,
+        "channel_kind": "vip",
+        "symbol_guess": "HOLO/USDT",
+        "bias_text": "long",
+        "bias_chart": "long",
+        "issues": [
+          "Стоп-лосс на карточке (0.20095) не совпадает со стоп-лоссом в тексте (0.0697). Это критическое расхождение.",
+          "На карточке указан только один стоп-лосс, тогда как в тексте есть три цели (TP1, TP2, TP3), которые отсутствуют на карточке."
+        ],
+        "verdict": "Карточка позиции в целом соответствует тексту по символу и направлению, но стоп-лосс на карточке совершенно не совпадает с указанным в тексте, что является серьезной проблемой. Также на карточке отсутствуют цели TP1, TP2, TP3.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 17,
+      "channel_kind": "vip",
+      "msg_id": 125,
+      "date": "2026-07-29T09:07:58+00:00",
+      "caption_preview": "🎯 COTI/USDT\n────────────\n🟢 LONG\nCOTI/USDT\nBinance · Bitget · BingX · Bitunix Futures\n────────────\n💰 Вход   0.0122\n🎯 TP1    0.0128\n🎯 TP2    0.0132\n🎯 TP3    0.0136\n🛡 Стоп   0.0116\n\nn",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\vip_125.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "vip",
+        "symbol_guess": "COTI",
+        "bias_text": "long",
+        "bias_chart": "long",
+        "issues": [],
+        "verdict": "Карточка позиции полностью соответствует тексту поста. Символ, направление и цена входа совпадают. Отсутствие TP на карточке не является ошибкой.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 18,
+      "channel_kind": "vip",
+      "msg_id": 124,
+      "date": "2026-07-29T08:29:58+00:00",
+      "caption_preview": "🎯 UAI/USDT\n────────────\n🟢 LONG\nUAI/USDT\nBinance · Bitget · BingX · Bitunix Futures\n────────────\n💰 Вход   0.345\n🎯 TP1    0.36\n🎯 TP2    0.37\n🎯 TP3    0.38\n🛡 Стоп   0.33\n\nnowicki.trad",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\vip_124.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "vip",
+        "symbol_guess": "UAI/USDT",
+        "bias_text": "long",
+        "bias_chart": "long",
+        "issues": [],
+        "verdict": "Карточка полностью соответствует тексту поста. Символ, направление и цена входа совпадают.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 19,
+      "channel_kind": "vip",
+      "msg_id": 123,
+      "date": "2026-07-29T02:27:33+00:00",
+      "caption_preview": "🎯 ETH/USDT\n────────────\n🟢 LONG\nETH/USDT\nBybit · Binance · Bitget · BingX · Bitunix Futures\n────────────\n💰 Вход   1 884.00\n🎯 TP1    1 932.68\n🎯 TP2    1 937.86\n🎯 TP3    2 030.04\n🛡 Ст",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\vip_123.png",
+      "review": {
+        "ok": true,
+        "chart_correct": true,
+        "score_1_10": 9,
+        "channel_kind": "vip",
+        "symbol_guess": "ETH",
+        "bias_text": "long",
+        "bias_chart": "long",
+        "issues": [],
+        "verdict": "Карточка полностью соответствует тексту поста. Символ, направление и цена входа совпадают.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    },
+    {
+      "index": 20,
+      "channel_kind": "vip",
+      "msg_id": 112,
+      "date": "2026-07-27T19:08:27+00:00",
+      "caption_preview": "🎯 XRP/USDT\n────────────\n🟢 LONG\nXRP/USDT\n⚡ Уверенность · 99%\nBybit · Binance · Bitget · BingX · Bitunix Futures\n────────────\n💰 Вход   1.0755\n🎯 TP1    1.1838\n🎯 TP2    1.2921\n🎯 TP3   ",
+      "image_path": "C:\\Users\\Dell\\Desktop\\crypto-signal-app\\data\\post_reviews\\chart_audit_images\\vip_112.png",
+      "review": {
+        "ok": true,
+        "chart_correct": false,
+        "score_1_10": 6,
+        "channel_kind": "vip",
+        "symbol_guess": "XRP",
+        "bias_text": "long",
+        "bias_chart": "long",
+        "issues": [
+          "Entry price mismatch: text 1.0755, chart 1.08",
+          "Stop loss mismatch: text 1.0456, chart 0.20095 (this is likely a PNL value, not a price)"
+        ],
+        "verdict": "Символ и направление совпадают, но есть расхождения по цене входа и стоп-лоссу. Стоп-лосс на карточке выглядит как PNL, а не цена.",
+        "model_used": "google/gemini-2.5-flash"
+      }
+    }
+  ]
+}

@@ -102,25 +102,31 @@ def build_position_metrics(
     mark_price: float | None = None,
     margin: float | None = None,
 ) -> dict:
-    """Реалистичные цифры открытой позиции (плечо + mark → PnL/ROI)."""
+    """Реалистичные цифры свежеоткрытой позиции (маленький плюс, не +50%)."""
     side = (side or "LONG").upper()
     lev = int(leverage or SHARE_LEVERAGE)
     entry = float(entry)
     rng = random.Random(f"{_coin(symbol)}:{side}:{round(entry, 6)}:{lev}")
 
-    if mark_price is not None and float(mark_price) > 0:
-        mark = float(mark_price)
-        if side == "LONG":
-            move_pct = (mark - entry) / entry
-        else:
-            move_pct = (entry - mark) / entry
+    # Свежий вход: ROI +2…+4%. Больше — выглядит как уже пора закрывать.
+    roi_pct = rng.uniform(2.0, 4.0)
+    move_pct = roi_pct / (max(lev, 1) * 100.0)
+    if side == "LONG":
+        mark = entry * (1 + move_pct)
     else:
-        # небольшое движение цены в нашу сторону (0.3% … 1.8% без плеча)
-        move_pct = rng.uniform(0.004, 0.018)
+        mark = entry * (1 - move_pct)
+    # если снаружи дали mark — не даём уехать дальше ±4% ROI
+    if mark_price is not None and float(mark_price) > 0:
+        raw = float(mark_price)
         if side == "LONG":
-            mark = entry * (1 + move_pct)
+            raw_move = (raw - entry) / entry
         else:
-            mark = entry * (1 - move_pct)
+            raw_move = (entry - raw) / entry
+        raw_roi = raw_move * lev * 100.0
+        if 0.5 <= raw_roi <= 4.0:
+            mark = raw
+            move_pct = raw_move
+            roi_pct = raw_roi
 
     if side == "LONG":
         liq = entry * (1 - 0.85 / max(lev, 1))
@@ -131,6 +137,12 @@ def build_position_metrics(
         sl = float(stop)
     else:
         sl = entry * (0.97 if side == "LONG" else 1.03)
+    # SL всегда с правильной стороны от входа
+    if side == "LONG" and sl >= entry:
+        sl = entry * 0.97
+    elif side == "SHORT" and sl <= entry:
+        sl = entry * 1.03
+    sl_explicit = bool(stop and float(stop) > 0)
 
     # маржа ~ 5–25 USDT, notional = margin * lev
     if margin is None or float(margin) <= 0:
@@ -140,7 +152,6 @@ def build_position_metrics(
     notional = margin * lev
     holdings = notional  # в USDT на Bybit «Холдинги»
     pnl_usdt = notional * move_pct
-    roi_pct = move_pct * lev * 100.0
     margin_ratio = rng.uniform(8.0, 22.0)
     realized = -rng.uniform(0.01, 0.08)  # комиссия
 
@@ -153,6 +164,7 @@ def build_position_metrics(
         "mark": mark,
         "liq": liq,
         "sl": sl,
+        "sl_explicit": sl_explicit,
         "margin": margin,
         "holdings": holdings,
         "pnl_usdt": pnl_usdt,
@@ -228,11 +240,19 @@ def _open_edit_prompt(m: dict, style: str) -> str:
         f"5. Кол-во позиции (USDT): {_fmt_bingx_price(m['holdings'])}\n"
         f"6. Маржа (USDT): {_fmt_bingx_price(m['margin'])}\n"
         f"7. Коэффициент маржи: {m['margin_ratio']:.2f}%\n".replace(".", ",")
-        + f"8. Ср. цена: {_fmt_bingx_price(m['entry'])}\n"
+        +         f"8. Ср. цена: {_fmt_bingx_price(m['entry'])}\n"
         f"9. Справедл. цена: {_fmt_bingx_price(m['mark'])}\n"
         f"10. Цена ликв.: {_fmt_bingx_price(m['liq'])}\n"
+        f"11. TP/SL line (left, under grid): "
+        + (
+            f"--/{_fmt_bingx_price(m['sl'])}  (TP is dashes, SL is the number in red)"
+            if m.get("sl_explicit", True)
+            else "--/--"
+        )
+        + "\n"
         "\n"
         "IMPORTANT: Use EXACT formatting as shown (spaces for thousands, commas for decimals).\n"
+        "CRITICAL: Replace the template TP/SL value (often 0,20095) with the EXACT value above.\n"
         "Return only the edited image. No explanations."
     )
 
@@ -330,13 +350,31 @@ def _render_bybit_pil(m: dict) -> bytes:
     return buf.getvalue()
 
 
+def _patch_bingx_tpsl(img: Image.Image, m: dict) -> Image.Image:
+    """Жёстко перебить TP/SL на BingX-шаблоне (в шаблоне залипшее 0,20095)."""
+    img = img.convert("RGB")
+    base = img.copy()
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
+    sx, sy = w / 1220.0, h / 952.0
+    # Координаты значения на шаблоне 1220x952
+    box = (int(148 * sx), int(618 * sy), int(430 * sx), int(670 * sy))
+    _clear_sampled(base, draw, box)
+    if m.get("sl_explicit", True) and float(m.get("sl") or 0) > 0:
+        text = f"--/{_fmt_bingx_price(m['sl'])}"
+    else:
+        text = "--/--"
+    font = _font(max(20, int(28 * min(sx, sy))), bold=True)
+    draw.text((int(160 * sx), int(624 * sy)), text, font=font, fill=RED)
+    return img
+
+
 def _render_bingx_pil(m: dict) -> bytes:
     """PIL overlay на BingX HQ-шаблоне."""
     path = _template_path("bingx")
     img = Image.open(path).convert("RGB")
     base = img.copy()
     draw = ImageDraw.Draw(img)
-    W, H = img.size
     is_long = m["side"] == "LONG"
     pnl = m["pnl_usdt"]
     roi = m["roi_pct"]
@@ -387,9 +425,12 @@ def _render_bingx_pil(m: dict) -> bytes:
         fill = ORANGE if i == 2 else WHITE
         put((cols[i], y2, cols[i] + 278, y2 + 48), text, _font(30, bold=True), fill)
 
+    img = _patch_bingx_tpsl(img, m)
+
     buf = io.BytesIO()
     img.save(buf, format="PNG", compress_level=3)
     return buf.getvalue()
+
 
 def render_open_position_card(
     symbol: str,
@@ -448,6 +489,9 @@ def render_open_position_card(
             img = Image.open(io.BytesIO(edited))
             if img.mode not in ("RGB", "RGBA"):
                 img = img.convert("RGB")
+            # AI часто оставляет залипший TP/SL с шаблона — всегда перебиваем PIL
+            if use_style == "bingx" and img.size[0] >= 1000:
+                img = _patch_bingx_tpsl(img, m)
             buf = io.BytesIO()
             img.save(buf, format="PNG", compress_level=6)
             return buf.getvalue()

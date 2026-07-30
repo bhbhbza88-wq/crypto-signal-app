@@ -856,7 +856,7 @@ def render_candle_png(
     W = max(1100, CHART_WIDTH) * scale
     H = max(620, CHART_HEIGHT) * scale
     # больше места справа/снизу под крупнее подписи цен и дат
-    pad_l, pad_r, pad_t, pad_b = 20 * scale, 110 * scale, 58 * scale, 42 * scale
+    pad_l, pad_r, pad_t, pad_b = 22 * scale, 168 * scale, 70 * scale, 50 * scale
     # Bukvar charts are clean ? no volume strip (more room for zones + path).
     vol_h = 0
     plot_h = H - pad_t - pad_b - vol_h - 8 * scale
@@ -990,12 +990,14 @@ def render_candle_png(
     img = Image.new("RGBA", (W, H), (*bg, 255))
     draw = ImageDraw.Draw(img)
     # Крупнее + bold: на телефоне и после сжатия TG читается
-    font_xs = _font(18 * scale, bold=True)
-    font_sm = _font(17 * scale)
-    font_lg = _font(22 * scale, bold=True)
-    font_price = _font(17 * scale, bold=True)
-    font_wm = _font(30 * scale)
-    font_zone = _font(16 * scale, bold=True)
+    font_xs = _font(30 * scale, bold=True)       # оси / даты (~30px после downscale)
+    font_sm = _font(24 * scale, bold=True)       # OHLC
+    font_lg = _font(34 * scale, bold=True)       # заголовок
+    font_price = _font(30 * scale, bold=True)    # бейдж цены
+    font_wm = _font(36 * scale)
+    font_zone = _font(28 * scale, bold=True)     # зоны supply/demand + цены
+    # ярче подписи — серый после JPEG Telegram бледнел
+    text_muted = (220, 226, 236)
 
     n_grid = 7
     for g in range(n_grid):
@@ -1005,11 +1007,11 @@ def render_candle_png(
             draw, pad_l, plot_right, yy, (*grid, 160), dash=6 * scale, gap=5 * scale, width=scale
         )
         draw.text(
-            (plot_right + 8 * scale, yy - 9 * scale),
+            (plot_right + 8 * scale, yy - 12 * scale),
             _fmt(y_max - (y_max - y_min) * frac),
             font=font_xs,
             fill=text_muted,
-            stroke_width=max(1, scale // 2),
+            stroke_width=max(2, scale),
             stroke_fill=(8, 10, 14, 255),
         )
 
@@ -1095,7 +1097,7 @@ def render_candle_png(
     lbl_supply = "\u041f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0435"  # "Predlozhenie"
     lbl_demand = "\u0421\u043f\u0440\u043e\u0441"  # "Spros"
     zone_label_ru = {"supply": lbl_supply, "demand": lbl_demand}
-    zone_label_col = {"supply": (255, 175, 175), "demand": (160, 235, 210)}
+    zone_label_col = {"supply": (255, 205, 205), "demand": (185, 250, 225)}
 
     # Single orange key level (the one referenced in the post text).
     mtf_confirmed = bool(lv.get("mtf_confirmed"))
@@ -1159,16 +1161,16 @@ def render_candle_png(
         tw = int(draw.textlength(label, font=font_zone))
         lx = min(x0 + 6 * scale, plot_right - tw - 6 * scale)
         lx = max(lx, pad_l + 4 * scale)
-        text_h = 18 * scale
+        text_h = 34 * scale
         if (y_bot - y_top) >= text_h + 6 * scale:
-            ly = y_top + 3 * scale
+            ly = y_top + 4 * scale
         else:
             ly = max(pad_t, y_top - text_h - 2 * scale)
         # почти непрозрачный фон — иначе серый текст на зоне пропадает в TG
         draw.rectangle(
-            [lx - 4 * scale, ly - 3 * scale, lx + tw + 4 * scale, ly + 15 * scale],
-            fill=(6, 8, 12, 235),
-            outline=(55, 60, 72, 255),
+            [lx - 6 * scale, ly - 5 * scale, lx + tw + 8 * scale, ly + text_h],
+            fill=(4, 6, 10, 245),
+            outline=(70, 76, 90, 255),
             width=max(1, scale // 2),
         )
         draw.text(
@@ -1176,23 +1178,23 @@ def render_candle_png(
             label,
             font=font_zone,
             fill=zone_label_col.get(kind, text_muted),
-            stroke_width=max(1, scale // 2),
+            stroke_width=max(2, scale),
             stroke_fill=(0, 0, 0, 255),
         )
 
     last_o = float(last["open"])
     py = yx(last_c)
     badge = _fmt(last_c)
-    bw = int(draw.textlength(badge, font=font_price)) + 16 * scale
-    bh = 26 * scale
+    bw = int(draw.textlength(badge, font=font_price)) + 24 * scale
+    bh = 42 * scale
     badge_color = green if last_c >= last_o else red
     text_on_badge = (255, 255, 255)
     draw.rounded_rectangle(
         [plot_right + 4 * scale, py - bh // 2, plot_right + 4 * scale + bw, py + bh // 2],
-        radius=4 * scale,
+        radius=6 * scale,
         fill=(*badge_color, 255),
     )
-    draw.text((plot_right + 12 * scale, py - 9 * scale), badge, font=font_price, fill=text_on_badge)
+    draw.text((plot_right + 14 * scale, py - 14 * scale), badge, font=font_price, fill=text_on_badge)
     x0 = hist_right
     dash_end = hist_right + int((plot_right - hist_right) * 0.18)
     while x0 < dash_end:
@@ -1204,18 +1206,18 @@ def render_candle_png(
     chg_pct = (chg / o * 100) if o else 0
     chg_color = green if chg >= 0 else red
 
-    icon_size = 20 * scale
-    icon_x, icon_y = pad_l, 8 * scale
+    icon_size = 26 * scale
+    icon_x, icon_y = pad_l, 10 * scale
     _draw_coin_icon(img, symbol, x=icon_x, y=icon_y, size=icon_size)
     draw = ImageDraw.Draw(img)
-    title_x = icon_x + icon_size + 8 * scale
+    title_x = icon_x + icon_size + 10 * scale
 
     title = f"{_pretty_name(symbol)} | {str(tf).upper()} | {exchange_id.capitalize()}"
     draw.text((title_x, 10 * scale), title, font=font_lg, fill=text_main)
     ohlc = f"O{_fmt(o)}  H{_fmt(h)}  L{_fmt(l)}  C{_fmt(c)}  "
-    draw.text((title_x, 30 * scale), ohlc, font=font_sm, fill=text_muted)
+    draw.text((title_x, 42 * scale), ohlc, font=font_sm, fill=text_muted)
     chg_s = f"{chg:+.2f} ({chg_pct:+.2f}%)" if c >= 1 else f"{chg:+.6f} ({chg_pct:+.2f}%)"
-    draw.text((title_x + draw.textlength(ohlc, font=font_sm), 30 * scale), chg_s, font=font_sm, fill=chg_color)
+    draw.text((title_x + draw.textlength(ohlc, font=font_sm), 42 * scale), chg_s, font=font_sm, fill=chg_color)
 
     if WATERMARK:
         tw = draw.textlength(WATERMARK, font=font_wm)

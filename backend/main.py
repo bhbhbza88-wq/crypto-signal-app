@@ -56,6 +56,8 @@ from signal_ingest import normalize_symbol, open_signal
 import telegram_ingest
 import news_relay
 import market_outlook
+import market_digest
+import weekly_stats
 import post_review
 import chat_engage
 import ai_client
@@ -99,6 +101,10 @@ async def lifespan(app: FastAPI):
         bg_tasks.append(
             asyncio.create_task(market_outlook.maybe_rewrite_once_on_boot(), name="outlook_rewrite_once")
         )
+    if market_digest.is_configured():
+        bg_tasks.append(asyncio.create_task(market_digest.run(), name="market_digest"))
+    if weekly_stats.is_configured():
+        bg_tasks.append(asyncio.create_task(weekly_stats.run(), name="weekly_stats"))
     if post_review.is_configured():
         bg_tasks.append(asyncio.create_task(post_review.run(), name="post_review"))
     # Отдельный клиент только если TELEGRAM_CHAT_SESSION ≠ ingest.
@@ -2294,6 +2300,24 @@ def get_channels_ranking(admin=Depends(require_admin)):
     """Все уже проанализированные каналы бок о бок — для сравнения, а не
     только последний прогнанный. Сортировка по итоговому PnL% (в db-функции)."""
     return db.list_channel_stats()
+
+
+@app.post("/api/digest/trigger")
+async def trigger_digest(request: Request):
+    """Admin endpoint: trigger digest post now."""
+    data = await request.json()
+    time_of_day = data.get("time_of_day", "morning")
+    if time_of_day not in ("morning", "evening"):
+        raise HTTPException(status_code=400, detail="time_of_day must be morning or evening")
+    success = await market_digest.post_digest_now(time_of_day)
+    return {"ok": success, "time_of_day": time_of_day}
+
+
+@app.post("/api/stats/trigger")
+async def trigger_stats(request: Request):
+    """Admin endpoint: trigger weekly stats post now."""
+    success = await weekly_stats.post_stats_now()
+    return {"ok": success}
 
 
 @app.post("/api/backtest/multi")

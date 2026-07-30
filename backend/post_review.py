@@ -222,6 +222,17 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
     m_smell = re.search(r'"ai_smell_score"\s*:\s*(\d+)', text)
     if m_smell:
         partial["ai_smell_score"] = int(m_smell.group(1))
+    for key in ("systemic_problems", "prompt_improvements", "recommendations"):
+        m_arr = re.search(rf'"{key}"\s*:\s*\[(.*?)\]', text, flags=re.DOTALL)
+        if not m_arr:
+            m_arr = re.search(rf'"{key}"\s*:\s*\[(.*)$', text, flags=re.DOTALL)
+        if m_arr:
+            items = [
+                sm.group(1).replace('\\"', '"')
+                for sm in re.finditer(r'"((?:\\.|[^"\\])*)"', m_arr.group(1))
+            ]
+            if items:
+                partial[key] = items
     return partial
 
 

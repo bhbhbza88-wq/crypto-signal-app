@@ -378,7 +378,18 @@ async def edit_news_caption(message_id: int, text: str) -> bool:
         return False
     caption = text if len(text) <= 1024 else (text[:1000].rstrip() + "…")
     # Photo posts → editMessageCaption; plain text → editMessageText
+    # Prefer no parse_mode first — outlook bodies are plain text, not HTML.
     data = await _api(
+        "editMessageCaption",
+        {
+            "chat_id": cid,
+            "message_id": int(message_id),
+            "caption": caption,
+        },
+    )
+    if data and data.get("ok"):
+        return True
+    data_html = await _api(
         "editMessageCaption",
         {
             "chat_id": cid,
@@ -387,10 +398,21 @@ async def edit_news_caption(message_id: int, text: str) -> bool:
             "parse_mode": "HTML",
         },
     )
-    if data and data.get("ok"):
+    if data_html and data_html.get("ok"):
         return True
     # fallback: maybe it was a text-only post
     data2 = await _api(
+        "editMessageText",
+        {
+            "chat_id": cid,
+            "message_id": int(message_id),
+            "text": text,
+            "disable_web_page_preview": True,
+        },
+    )
+    if data2 and data2.get("ok"):
+        return True
+    data2_html = await _api(
         "editMessageText",
         {
             "chat_id": cid,
@@ -400,11 +422,11 @@ async def edit_news_caption(message_id: int, text: str) -> bool:
             "disable_web_page_preview": True,
         },
     )
-    if data2 and data2.get("ok"):
+    if data2_html and data2_html.get("ok"):
         return True
     print(
         f"[telegram_bot] edit_news_caption fail msg={message_id}: "
-        f"cap={data} text={data2}",
+        f"cap={data} cap_html={data_html} text={data2} text_html={data2_html}",
         flush=True,
     )
     return False
@@ -1039,6 +1061,26 @@ async def handle_update(update: dict):
         notify_id = req["telegram_id"] if req else None
         result = await grant_premium_access(email, notify_telegram_id=notify_id)
         await send_message(chat_id, result)
+    elif cmd == "/news":
+        if user_id not in _admin_ids():
+            await send_message(chat_id, "Команда только для админов.")
+            return
+        if not payload:
+            await send_message(
+                chat_id,
+                "Использование: <code>/news Текст новости (факт + влияние на рынок)</code>"
+            )
+            return
+        # Публикация важной новости в news канал
+        news_text = f"📰 {payload}"
+        try:
+            msg_id = await publish_news(news_text, photo_png=None)
+            if msg_id:
+                await send_message(chat_id, f"✅ Новость опубликована (msg_id={msg_id})")
+            else:
+                await send_message(chat_id, "❌ Ошибка публикации")
+        except Exception as e:
+            await send_message(chat_id, f"❌ Ошибка: {e}")
     else:
         await send_welcome(chat_id)
 
